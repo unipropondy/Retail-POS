@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "POS-Mobile-Ap",
-    "slug": "POS-Mobile-Ap",
+    "name": "Retail-POS",
+    "slug": "Retail-POS",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
