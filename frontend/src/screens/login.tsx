@@ -2,12 +2,11 @@
 // Author: JAVITH 28-10-2026
 // Project: Supermarket Retail POS
 // File: src/screens/login.tsx
-// Description: Compact, single-page Cashier Login and Welcome Station UI
-//              styled with a warm luxury organic theme (Ivory / Forest Spruce / Bronze)
-//              without scrolling or repetitive AI templates.
+// Description: Single-page Cashier Login and Station Terminal UI with
+//              tblmaTerminal ComputerName validation and warm luxury theme.
 // ==============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -32,21 +31,66 @@ interface CashierProfile {
   isCashier: boolean;
 }
 
+// Interface representing terminal configuration from tblmaTerminal
+interface TerminalProfile {
+  terminalCode: string;
+  terminalName: string;
+  locationCode: string;
+  computerName: string;
+  printerName?: string;
+  printerType?: string;
+}
+
 export default function LoginScreen() {
   // State for cashier user input
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [terminalId] = useState('POS-01');
 
-  // State for loading spinner and error messages
+  // Terminal configuration states
+  const [terminal, setTerminal] = useState<TerminalProfile | null>(null);
+  const [isTerminalBlocked, setIsTerminalBlocked] = useState(false);
+  const [terminalCheckLoading, setTerminalCheckLoading] = useState(true);
+
+  // General loading & error states
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // State for currently logged-in cashier (null means show login screen)
+  // Authenticated cashier profile
   const [activeUser, setActiveUser] = useState<CashierProfile | null>(null);
 
   // ----------------------------------------------------------------------------
-  // Handle Login Authentication against backend POST /api/auth/login
+  // Check Terminal Configuration on Initial Load (tblmaTerminal query)
+  // ----------------------------------------------------------------------------
+  useEffect(() => {
+    checkTerminalStatus();
+  }, []);
+
+  const checkTerminalStatus = async () => {
+    setTerminalCheckLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/terminal-info`);
+      const data = await response.json();
+
+      if (response.ok && data.success && data.configured) {
+        setTerminal(data.terminal);
+        setIsTerminalBlocked(false);
+      } else {
+        // Terminal is not configured in tblmaTerminal
+        setIsTerminalBlocked(true);
+        setErrorMessage(data.message || 'Terminal not configured. Please contact system administartor.');
+      }
+    } catch (err) {
+      // Backend not yet reachable
+      setErrorMessage('Unable to connect to backend server. Make sure "node server.js" is running.');
+    } finally {
+      setTerminalCheckLoading(false);
+    }
+  };
+
+  // ----------------------------------------------------------------------------
+  // Handle Cashier Login
   // ----------------------------------------------------------------------------
   const handleLogin = async () => {
     // 1. Ensure username is entered
@@ -79,15 +123,21 @@ export default function LoginScreen() {
 
       const data = await response.json();
 
-      // 4. Verify successful authorization
+      // 4. Check response status
       if (response.ok && data.success) {
         setActiveUser(data.user);
+        if (data.terminal) {
+          setTerminal(data.terminal);
+        }
         setPassword('');
       } else {
+        // If terminal check failed
+        if (response.status === 403 || data.terminalConfigured === false) {
+          setIsTerminalBlocked(true);
+        }
         setErrorMessage(data.message || 'Login failed. Please verify credentials.');
       }
     } catch (err: any) {
-      // 5. Handle network connection issues
       setErrorMessage(
         'Unable to connect to backend server. Please make sure "node server.js" is running.'
       );
@@ -111,7 +161,9 @@ export default function LoginScreen() {
           <View style={styles.navRight}>
             <View style={styles.statusPill}>
               <View style={styles.statusDot} />
-              <Text style={styles.statusText}>{terminalId} • STATION ACTIVE</Text>
+              <Text style={styles.statusText}>
+                {terminal?.terminalCode || 'HQPC1'} • {terminal?.locationCode || 'HQ'} • READY
+              </Text>
             </View>
             <TouchableOpacity
               style={styles.lockButton}
@@ -136,24 +188,25 @@ export default function LoginScreen() {
             {/* Welcome Heading */}
             <Text style={styles.welcomeTitle}>Welcome, {activeUser.userName}</Text>
             <Text style={styles.welcomeSubtitle}>
-              Logged in as <Text style={styles.boldText}>{activeUser.userCode}</Text> • Shift Open on {terminalId}
+              Logged in as <Text style={styles.boldText}>{activeUser.userCode}</Text> • Terminal:{' '}
+              <Text style={styles.boldText}>{terminal?.terminalCode || 'HQPC1'}</Text> ({terminal?.computerName || 'PC'})
             </Text>
 
             {/* Quick Metrics Bar */}
             <View style={styles.metricsRow}>
               <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Cash Drawer</Text>
-                <Text style={styles.metricValue}>Drawer #1 Ready</Text>
+                <Text style={styles.metricLabel}>Terminal Code</Text>
+                <Text style={styles.metricValue}>{terminal?.terminalCode || 'HQPC1'}</Text>
+              </View>
+              <View style={styles.metricDivider} />
+              <View style={styles.metricItem}>
+                <Text style={styles.metricLabel}>Location Branch</Text>
+                <Text style={styles.metricValue}>{terminal?.locationCode || 'HQ'}</Text>
               </View>
               <View style={styles.metricDivider} />
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Shift Started</Text>
                 <Text style={styles.metricValue}>Just Now</Text>
-              </View>
-              <View style={styles.metricDivider} />
-              <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>System Mode</Text>
-                <Text style={styles.metricValue}>Standard Billing</Text>
               </View>
             </View>
 
@@ -194,8 +247,14 @@ export default function LoginScreen() {
           <Text style={styles.brandSubtitle}>SUPERMARKET POS</Text>
         </View>
         <View style={styles.statusPill}>
-          <View style={styles.statusDot} />
-          <Text style={styles.statusText}>{terminalId} • READY</Text>
+          <View style={[styles.statusDot, isTerminalBlocked && styles.statusDotBlocked]} />
+          <Text style={styles.statusText}>
+            {terminalCheckLoading
+              ? 'CHECKING TERMINAL...'
+              : isTerminalBlocked
+              ? 'TERMINAL RESTRICTED'
+              : `${terminal?.terminalCode || 'HQPC1'} • ${terminal?.locationCode || 'HQ'} READY`}
+          </Text>
         </View>
       </View>
 
@@ -204,11 +263,17 @@ export default function LoginScreen() {
         <View style={styles.loginCard}>
           {/* Card Header */}
           <View style={styles.cardHeader}>
-            <View style={styles.pillLabel}>
-              <Text style={styles.pillLabelText}>TERMINAL ACCESS</Text>
+            <View style={[styles.pillLabel, isTerminalBlocked && styles.pillLabelBlocked]}>
+              <Text style={[styles.pillLabelText, isTerminalBlocked && styles.pillLabelTextBlocked]}>
+                {isTerminalBlocked ? 'SECURITY RESTRICTION' : 'TERMINAL ACCESS'}
+              </Text>
             </View>
             <Text style={styles.loginTitle}>Cashier Sign In</Text>
-            <Text style={styles.loginSubtitle}>Enter your staff credentials to open this terminal</Text>
+            <Text style={styles.loginSubtitle}>
+              {isTerminalBlocked
+                ? 'This computer is not authorized for billing'
+                : 'Enter your staff credentials to open this terminal'}
+            </Text>
           </View>
 
           {/* Error Banner */}
@@ -222,7 +287,7 @@ export default function LoginScreen() {
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Staff Code / Username</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, isTerminalBlocked && styles.inputDisabled]}
               value={username}
               onChangeText={(text) => {
                 setUsername(text);
@@ -232,6 +297,7 @@ export default function LoginScreen() {
               placeholderTextColor="#9e988f"
               autoCapitalize="characters"
               autoCorrect={false}
+              editable={!isTerminalBlocked && !loading}
             />
           </View>
 
@@ -239,7 +305,7 @@ export default function LoginScreen() {
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Security PIN / Password</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, isTerminalBlocked && styles.inputDisabled]}
               value={password}
               onChangeText={(text) => {
                 setPassword(text);
@@ -250,20 +316,26 @@ export default function LoginScreen() {
               secureTextEntry
               keyboardType="numeric"
               onSubmitEditing={handleLogin}
+              editable={!isTerminalBlocked && !loading}
             />
           </View>
 
           {/* Primary Action Button (Deep Forest Spruce color from theme) */}
           <TouchableOpacity
-            style={[styles.primaryButton, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
+            style={[
+              styles.primaryButton,
+              (loading || isTerminalBlocked) && styles.buttonDisabled,
+            ]}
+            onPress={isTerminalBlocked ? checkTerminalStatus : handleLogin}
             disabled={loading}
             activeOpacity={0.85}
           >
             {loading ? (
               <ActivityIndicator color="#ffffff" size="small" />
             ) : (
-              <Text style={styles.primaryButtonText}>Authorize & Open Terminal</Text>
+              <Text style={styles.primaryButtonText}>
+                {isTerminalBlocked ? 'Retry Terminal Check' : 'Authorize & Open Terminal'}
+              </Text>
             )}
           </TouchableOpacity>
 
@@ -342,6 +414,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#2D8A5E',
     marginRight: 7,
   },
+  statusDotBlocked: {
+    backgroundColor: '#DC2626',
+  },
   statusText: {
     fontSize: 11,
     fontWeight: '600',
@@ -404,11 +479,18 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginBottom: 10,
   },
+  pillLabelBlocked: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#FCA5A5',
+  },
   pillLabelText: {
     color: '#9E7444',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1,
+  },
+  pillLabelTextBlocked: {
+    color: '#991B1B',
   },
   loginTitle: {
     fontSize: 22,
@@ -460,6 +542,10 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     fontSize: 14,
     color: '#1A211C',
+  },
+  inputDisabled: {
+    backgroundColor: '#F3F4F6',
+    color: '#9CA3AF',
   },
 
   // Primary Submit Button (Deep Forest Spruce)
