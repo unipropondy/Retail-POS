@@ -22,7 +22,7 @@ import {
 const API_URL = 'http://localhost:5000';
 
 // Interface representing the authenticated cashier / admin from tblMausermaster
-interface CashierProfile {
+export interface CashierProfile {
   unid: string;
   userCode: string;
   userName: string;
@@ -32,7 +32,7 @@ interface CashierProfile {
 }
 
 // Interface representing terminal configuration from tblmaTerminal
-interface TerminalProfile {
+export interface TerminalProfile {
   terminalCode: string;
   terminalName: string;
   locationCode: string;
@@ -41,7 +41,11 @@ interface TerminalProfile {
   printerType?: string;
 }
 
-export default function LoginScreen() {
+interface LoginScreenProps {
+  onLoginSuccess?: (user: CashierProfile, terminal: TerminalProfile | null) => void;
+}
+
+export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   // State for cashier user input
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -126,10 +130,14 @@ export default function LoginScreen() {
       // 4. Check response status
       if (response.ok && data.success) {
         setActiveUser(data.user);
+        const resolvedTerminal = data.terminal || terminal;
         if (data.terminal) {
           setTerminal(data.terminal);
         }
         setPassword('');
+        if (onLoginSuccess) {
+          onLoginSuccess(data.user, resolvedTerminal);
+        }
       } else {
         // If terminal check failed
         if (response.status === 403 || data.terminalConfigured === false) {
