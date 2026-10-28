@@ -1,0 +1,17 @@
+{
+  "name": "retail-pos-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Supermarket Retail POS with MS SQL",
+  "main": "server.js",
+  "scripts": {
+    "test-db": "node test-db.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.7",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mssql": "^11.0.1"
+  }
+}
