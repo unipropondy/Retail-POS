@@ -1,5 +1,5 @@
 // ==============================================================================
-// Author: JAVITH 28-10-2026
+// Author: JAVITH, BAVANI 28-10-2026
 // Project: Supermarket Retail POS
 // Module: Payment Modes & Tender Configuration (tblInvPaymode)
 // File: routes/paymode.js
@@ -9,9 +9,9 @@
 //                          configuration from inventory management.
 // ==============================================================================
 
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { sql, getPool } = require('../config/db');
+const { sql, getPool } = require("../config/db");
 
 // ------------------------------------------------------------------------------
 // GET /api/paymode
@@ -19,17 +19,17 @@ const { sql, getPool } = require('../config/db');
 // Query Parameters:
 //   - activeOnly (optional, default: true): Filter only active payment methods
 // ------------------------------------------------------------------------------
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const pool = await getPool();
     if (!pool) {
       return res.status(503).json({
         success: false,
-        message: 'Database is currently unreachable. Please check network/VPN.',
+        message: "Database is currently unreachable. Please check network/VPN.",
       });
     }
 
-    const activeOnly = req.query.activeOnly !== 'false';
+    const activeOnly = req.query.activeOnly !== "false";
 
     let query = `
       SELECT 
@@ -57,10 +57,13 @@ router.get('/', async (req, res) => {
       paymodes: result.recordset,
     });
   } catch (error) {
-    console.error('❌ [PAYMODE ERROR] Failed to fetch paymodes:', error.message);
+    console.error(
+      "❌ [PAYMODE ERROR] Failed to fetch paymodes:",
+      error.message,
+    );
     return res.status(500).json({
       success: false,
-      message: 'Failed to fetch payment modes: ' + error.message,
+      message: "Failed to fetch payment modes: " + error.message,
     });
   }
 });

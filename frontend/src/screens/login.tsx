@@ -1,12 +1,12 @@
 // ==============================================================================
-// Author: JAVITH 28-10-2026
+// Author: JAVITH, BAVANI 28-10-2026
 // Project: Supermarket Retail POS
 // File: src/screens/login.tsx
 // Description: Single-page Cashier Login and Station Terminal UI with
 //              tblmaTerminal ComputerName validation and warm luxury theme.
 // ==============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   Text,
@@ -16,10 +16,10 @@ import {
   SafeAreaView,
   ActivityIndicator,
   Platform,
-} from 'react-native';
+} from "react-native";
 
 // Backend API URL - connects to our Express server
-const API_URL = 'http://localhost:5000';
+const API_URL = "http://localhost:5000";
 
 // Interface representing the authenticated cashier / admin from tblMausermaster
 export interface CashierProfile {
@@ -42,13 +42,16 @@ export interface TerminalProfile {
 }
 
 interface LoginScreenProps {
-  onLoginSuccess?: (user: CashierProfile, terminal: TerminalProfile | null) => void;
+  onLoginSuccess?: (
+    user: CashierProfile,
+    terminal: TerminalProfile | null,
+  ) => void;
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   // State for cashier user input
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   // Terminal configuration states
   const [terminal, setTerminal] = useState<TerminalProfile | null>(null);
@@ -83,11 +86,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       } else {
         // Terminal is not configured in tblmaTerminal
         setIsTerminalBlocked(true);
-        setErrorMessage(data.message || 'Terminal not configured. Please contact system administartor.');
+        setErrorMessage(
+          data.message ||
+            "Terminal not configured. Please contact system administartor.",
+        );
       }
     } catch (err) {
       // Backend not yet reachable
-      setErrorMessage('Unable to connect to backend server. Make sure "node server.js" is running.');
+      setErrorMessage(
+        'Unable to connect to backend server. Make sure "node server.js" is running.',
+      );
     } finally {
       setTerminalCheckLoading(false);
     }
@@ -99,13 +107,13 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const handleLogin = async () => {
     // 1. Ensure username is entered
     if (!username.trim()) {
-      setErrorMessage('Please enter your Staff Code or Username.');
+      setErrorMessage("Please enter your Staff Code or Username.");
       return;
     }
 
     // 2. Ensure password / PIN is entered
     if (!password.trim()) {
-      setErrorMessage('Please enter your security PIN / Password.');
+      setErrorMessage("Please enter your security PIN / Password.");
       return;
     }
 
@@ -115,9 +123,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     try {
       // 3. Make HTTP POST request to backend
       const response = await fetch(`${API_URL}/api/auth/login`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           username: username.trim(),
@@ -145,11 +153,13 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         if (response.status === 403 || data.terminalConfigured === false) {
           setIsTerminalBlocked(true);
         }
-        setErrorMessage(data.message || 'Login failed. Please verify credentials.');
+        setErrorMessage(
+          data.message || "Login failed. Please verify credentials.",
+        );
       }
     } catch (err: any) {
       setErrorMessage(
-        'Unable to connect to backend server. Please make sure "node server.js" is running.'
+        'Unable to connect to backend server. Please make sure "node server.js" is running.',
       );
     } finally {
       setLoading(false);
@@ -172,7 +182,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <View style={styles.statusPill}>
               <View style={styles.statusDot} />
               <Text style={styles.statusText}>
-                {terminal?.terminalCode || 'HQPC1'} • {terminal?.locationCode || 'HQ'} • READY
+                {terminal?.terminalCode || "HQPC1"} •{" "}
+                {terminal?.locationCode || "HQ"} • READY
               </Text>
             </View>
             <TouchableOpacity
@@ -191,27 +202,40 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {/* Cashier Group Tag */}
             <View style={styles.groupBadge}>
               <Text style={styles.groupBadgeText}>
-                {activeUser.isAdmin ? 'ADMINISTRATOR' : activeUser.userGroup || 'CASHIER'}
+                {activeUser.isAdmin
+                  ? "ADMINISTRATOR"
+                  : activeUser.userGroup || "CASHIER"}
               </Text>
             </View>
 
             {/* Welcome Heading */}
-            <Text style={styles.welcomeTitle}>Welcome, {activeUser.userName}</Text>
+            <Text style={styles.welcomeTitle}>
+              Welcome, {activeUser.userName}
+            </Text>
             <Text style={styles.welcomeSubtitle}>
-              Logged in as <Text style={styles.boldText}>{activeUser.userCode}</Text> • Terminal:{' '}
-              <Text style={styles.boldText}>{terminal?.terminalCode || 'HQPC1'}</Text> ({terminal?.computerName || 'PC'})
+              Logged in as{" "}
+              <Text style={styles.boldText}>{activeUser.userCode}</Text> •
+              Terminal:{" "}
+              <Text style={styles.boldText}>
+                {terminal?.terminalCode || "HQPC1"}
+              </Text>{" "}
+              ({terminal?.computerName || "PC"})
             </Text>
 
             {/* Quick Metrics Bar */}
             <View style={styles.metricsRow}>
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Terminal Code</Text>
-                <Text style={styles.metricValue}>{terminal?.terminalCode || 'HQPC1'}</Text>
+                <Text style={styles.metricValue}>
+                  {terminal?.terminalCode || "HQPC1"}
+                </Text>
               </View>
               <View style={styles.metricDivider} />
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Location Branch</Text>
-                <Text style={styles.metricValue}>{terminal?.locationCode || 'HQ'}</Text>
+                <Text style={styles.metricValue}>
+                  {terminal?.locationCode || "HQ"}
+                </Text>
               </View>
               <View style={styles.metricDivider} />
               <View style={styles.metricItem}>
@@ -225,19 +249,25 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <View style={styles.actionTile}>
                 <Text style={styles.actionIcon}>🛒</Text>
                 <Text style={styles.actionHeading}>New Checkout</Text>
-                <Text style={styles.actionDesc}>Ready to scan barcode items & weigh products</Text>
+                <Text style={styles.actionDesc}>
+                  Ready to scan barcode items & weigh products
+                </Text>
               </View>
 
               <View style={styles.actionTile}>
                 <Text style={styles.actionIcon}>📦</Text>
                 <Text style={styles.actionHeading}>Price & Stock Check</Text>
-                <Text style={styles.actionDesc}>Instant PLU search and stock availability</Text>
+                <Text style={styles.actionDesc}>
+                  Instant PLU search and stock availability
+                </Text>
               </View>
             </View>
 
             {/* Developer: JAVITH 28-10-2026 */}
             <View style={styles.cardFooter}>
-              <Text style={styles.creditText}>Kalaismr Supermarket • Point of Sale Station</Text>
+              <Text style={styles.creditText}>
+                Kalaismr Supermarket • Point of Sale Station
+              </Text>
             </View>
           </View>
         </View>
@@ -257,13 +287,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <Text style={styles.brandSubtitle}>SUPERMARKET POS</Text>
         </View>
         <View style={styles.statusPill}>
-          <View style={[styles.statusDot, isTerminalBlocked && styles.statusDotBlocked]} />
+          <View
+            style={[
+              styles.statusDot,
+              isTerminalBlocked && styles.statusDotBlocked,
+            ]}
+          />
           <Text style={styles.statusText}>
             {terminalCheckLoading
-              ? 'CHECKING TERMINAL...'
+              ? "CHECKING TERMINAL..."
               : isTerminalBlocked
-              ? 'TERMINAL RESTRICTED'
-              : `${terminal?.terminalCode || 'HQPC1'} • ${terminal?.locationCode || 'HQ'} READY`}
+                ? "TERMINAL RESTRICTED"
+                : `${terminal?.terminalCode || "HQPC1"} • ${terminal?.locationCode || "HQ"} READY`}
           </Text>
         </View>
       </View>
@@ -273,16 +308,26 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         <View style={styles.loginCard}>
           {/* Card Header */}
           <View style={styles.cardHeader}>
-            <View style={[styles.pillLabel, isTerminalBlocked && styles.pillLabelBlocked]}>
-              <Text style={[styles.pillLabelText, isTerminalBlocked && styles.pillLabelTextBlocked]}>
-                {isTerminalBlocked ? 'SECURITY RESTRICTION' : 'TERMINAL ACCESS'}
+            <View
+              style={[
+                styles.pillLabel,
+                isTerminalBlocked && styles.pillLabelBlocked,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.pillLabelText,
+                  isTerminalBlocked && styles.pillLabelTextBlocked,
+                ]}
+              >
+                {isTerminalBlocked ? "SECURITY RESTRICTION" : "TERMINAL ACCESS"}
               </Text>
             </View>
             <Text style={styles.loginTitle}>Cashier Sign In</Text>
             <Text style={styles.loginSubtitle}>
               {isTerminalBlocked
-                ? 'This computer is not authorized for billing'
-                : 'Enter your staff credentials to open this terminal'}
+                ? "This computer is not authorized for billing"
+                : "Enter your staff credentials to open this terminal"}
             </Text>
           </View>
 
@@ -297,7 +342,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Staff Code / Username</Text>
             <TextInput
-              style={[styles.textInput, isTerminalBlocked && styles.inputDisabled]}
+              style={[
+                styles.textInput,
+                isTerminalBlocked && styles.inputDisabled,
+              ]}
               value={username}
               onChangeText={(text) => {
                 setUsername(text);
@@ -315,7 +363,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Security PIN / Password</Text>
             <TextInput
-              style={[styles.textInput, isTerminalBlocked && styles.inputDisabled]}
+              style={[
+                styles.textInput,
+                isTerminalBlocked && styles.inputDisabled,
+              ]}
               value={password}
               onChangeText={(text) => {
                 setPassword(text);
@@ -344,14 +395,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <ActivityIndicator color="#ffffff" size="small" />
             ) : (
               <Text style={styles.primaryButtonText}>
-                {isTerminalBlocked ? 'Retry Terminal Check' : 'Authorize & Open Terminal'}
+                {isTerminalBlocked
+                  ? "Retry Terminal Check"
+                  : "Authorize & Open Terminal"}
               </Text>
             )}
           </TouchableOpacity>
 
           {/* Developer: JAVITH 28-10-2026 */}
           <View style={styles.signatureRow}>
-            <Text style={styles.signatureText}>Retail POS • MS SQL Edition</Text>
+            <Text style={styles.signatureText}>
+              Retail POS • MS SQL Edition
+            </Text>
           </View>
         </View>
       </View>
@@ -375,100 +430,100 @@ const styles = StyleSheet.create({
   // Root page wrapper - fills full screen with zero scroll
   pageContainer: {
     flex: 1,
-    height: '100%',
-    backgroundColor: '#F7F5F0',
+    height: "100%",
+    backgroundColor: "#F7F5F0",
   },
 
   // Top header bar
   topNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 28,
     paddingVertical: 14,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: '#EBE5DB',
+    borderBottomColor: "#EBE5DB",
   },
   brandTitle: {
     fontSize: 16,
-    fontWeight: '800',
-    color: '#1A211C',
+    fontWeight: "800",
+    color: "#1A211C",
     letterSpacing: 1.2,
   },
   brandSubtitle: {
     fontSize: 10,
-    fontWeight: '600',
-    color: '#B88E5E',
+    fontWeight: "600",
+    color: "#B88E5E",
     letterSpacing: 1,
   },
   navRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F3EFE8',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F3EFE8",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E2DAD0',
+    borderColor: "#E2DAD0",
   },
   statusDot: {
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: '#2D8A5E',
+    backgroundColor: "#2D8A5E",
     marginRight: 7,
   },
   statusDotBlocked: {
-    backgroundColor: '#DC2626',
+    backgroundColor: "#DC2626",
   },
   statusText: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#4A453E',
+    fontWeight: "600",
+    color: "#4A453E",
     letterSpacing: 0.5,
   },
   lockButton: {
-    backgroundColor: '#1E3129',
+    backgroundColor: "#1E3129",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
   },
   lockButtonText: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 
   // Main centered container - keeps everything visible in one single view
   centerContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingHorizontal: 20,
   },
 
   // Login Card
   loginCard: {
-    width: '100%',
+    width: "100%",
     maxWidth: 400,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderRadius: 14,
     paddingHorizontal: 28,
     paddingVertical: 30,
     borderWidth: 1,
-    borderColor: '#E6E0D6',
+    borderColor: "#E6E0D6",
     ...Platform.select({
       web: {
-        boxShadow: '0 8px 30px rgba(50, 40, 30, 0.05)',
+        boxShadow: "0 8px 30px rgba(50, 40, 30, 0.05)",
       },
       default: {
-        shadowColor: '#30251A',
+        shadowColor: "#30251A",
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.06,
         shadowRadius: 16,
@@ -478,58 +533,58 @@ const styles = StyleSheet.create({
   },
   cardHeader: {
     marginBottom: 20,
-    alignItems: 'center',
+    alignItems: "center",
   },
   pillLabel: {
-    backgroundColor: '#F4EFE6',
+    backgroundColor: "#F4EFE6",
     borderWidth: 1,
-    borderColor: '#DECFC0',
+    borderColor: "#DECFC0",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 14,
     marginBottom: 10,
   },
   pillLabelBlocked: {
-    backgroundColor: '#FEE2E2',
-    borderColor: '#FCA5A5',
+    backgroundColor: "#FEE2E2",
+    borderColor: "#FCA5A5",
   },
   pillLabelText: {
-    color: '#9E7444',
+    color: "#9E7444",
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1,
   },
   pillLabelTextBlocked: {
-    color: '#991B1B',
+    color: "#991B1B",
   },
   loginTitle: {
     fontSize: 22,
-    fontWeight: '700',
-    color: '#1A211C',
+    fontWeight: "700",
+    color: "#1A211C",
     marginBottom: 4,
-    textAlign: 'center',
+    textAlign: "center",
   },
   loginSubtitle: {
     fontSize: 12,
-    color: '#756F66',
-    textAlign: 'center',
+    color: "#756F66",
+    textAlign: "center",
   },
 
   // Error Alert Banner
   errorBox: {
-    backgroundColor: '#FDF2F2',
+    backgroundColor: "#FDF2F2",
     borderWidth: 1,
-    borderColor: '#F8B4B4',
+    borderColor: "#F8B4B4",
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 12,
     marginBottom: 16,
   },
   errorText: {
-    color: '#9B1C1C',
+    color: "#9B1C1C",
     fontSize: 12,
-    fontWeight: '500',
-    textAlign: 'center',
+    fontWeight: "500",
+    textAlign: "center",
   },
 
   // Input styling
@@ -538,37 +593,37 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#423D36',
+    fontWeight: "600",
+    color: "#423D36",
     marginBottom: 6,
     letterSpacing: 0.3,
   },
   textInput: {
-    backgroundColor: '#FAFAF7',
+    backgroundColor: "#FAFAF7",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#DDD6CB',
+    borderColor: "#DDD6CB",
     paddingHorizontal: 14,
     paddingVertical: 11,
     fontSize: 14,
-    color: '#1A211C',
+    color: "#1A211C",
   },
   inputDisabled: {
-    backgroundColor: '#F3F4F6',
-    color: '#9CA3AF',
+    backgroundColor: "#F3F4F6",
+    color: "#9CA3AF",
   },
 
   // Primary Submit Button (Deep Forest Spruce)
   primaryButton: {
-    backgroundColor: '#1E3129',
+    backgroundColor: "#1E3129",
     borderRadius: 8,
     paddingVertical: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: 6,
     ...Platform.select({
       web: {
-        cursor: 'pointer',
+        cursor: "pointer",
       },
     }),
   },
@@ -576,113 +631,113 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     letterSpacing: 0.5,
   },
 
   // Signature row
   signatureRow: {
     marginTop: 22,
-    alignItems: 'center',
+    alignItems: "center",
   },
   signatureText: {
-    color: '#A8A196',
+    color: "#A8A196",
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: "500",
     letterSpacing: 0.4,
   },
 
   // Welcome Screen Styling
   welcomeBody: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 24,
   },
   welcomeCard: {
-    width: '100%',
+    width: "100%",
     maxWidth: 580,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderRadius: 14,
     padding: 30,
     borderWidth: 1,
-    borderColor: '#E6E0D6',
+    borderColor: "#E6E0D6",
   },
   groupBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F3EFE8',
+    alignSelf: "flex-start",
+    backgroundColor: "#F3EFE8",
     borderWidth: 1,
-    borderColor: '#DECFC0',
+    borderColor: "#DECFC0",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
     marginBottom: 12,
   },
   groupBadgeText: {
-    color: '#8A6237',
+    color: "#8A6237",
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.8,
   },
   welcomeTitle: {
     fontSize: 24,
-    fontWeight: '700',
-    color: '#1A211C',
+    fontWeight: "700",
+    color: "#1A211C",
     marginBottom: 4,
   },
   welcomeSubtitle: {
     fontSize: 13,
-    color: '#6B655C',
+    color: "#6B655C",
     marginBottom: 20,
   },
   boldText: {
-    fontWeight: '700',
-    color: '#1A211C',
+    fontWeight: "700",
+    color: "#1A211C",
   },
   metricsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FAF8F4',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FAF8F4",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#EAE4D9',
+    borderColor: "#EAE4D9",
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginBottom: 20,
   },
   metricItem: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: "center",
   },
   metricDivider: {
     width: 1,
     height: 24,
-    backgroundColor: '#DECFC0',
+    backgroundColor: "#DECFC0",
   },
   metricLabel: {
     fontSize: 11,
-    color: '#8C857B',
+    color: "#8C857B",
     marginBottom: 2,
   },
   metricValue: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#1A211C',
+    fontWeight: "700",
+    color: "#1A211C",
   },
   actionRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginBottom: 20,
   },
   actionTile: {
     flex: 1,
-    backgroundColor: '#FAFAF7',
+    backgroundColor: "#FAFAF7",
     borderRadius: 10,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#EAE4DA',
+    borderColor: "#EAE4DA",
   },
   actionIcon: {
     fontSize: 20,
@@ -690,23 +745,23 @@ const styles = StyleSheet.create({
   },
   actionHeading: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#1A211C',
+    fontWeight: "700",
+    color: "#1A211C",
     marginBottom: 4,
   },
   actionDesc: {
     fontSize: 11,
-    color: '#756F66',
+    color: "#756F66",
     lineHeight: 16,
   },
   cardFooter: {
     borderTopWidth: 1,
-    borderTopColor: '#F0EBE2',
+    borderTopColor: "#F0EBE2",
     paddingTop: 12,
-    alignItems: 'center',
+    alignItems: "center",
   },
   creditText: {
-    color: '#9E978D',
+    color: "#9E978D",
     fontSize: 11,
   },
 });

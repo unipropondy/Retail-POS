@@ -1,5 +1,5 @@
 // ==============================================================================
-// Author: JAVITH 28-10-2026
+// Author: JAVITH, BAVANI 28-10-2026
 // Project: Supermarket Retail POS
 // File: server.js
 // Description: Main HTTP server entry point with non-blocking DB pool connection,
@@ -7,20 +7,19 @@
 // ==============================================================================
 
 // Load secret variables from .env into process.env
-require('dotenv').config();
+require("dotenv").config();
 
 // Express: Fast, unopinionated, minimalist web framework for Node.js
-const express = require('express');
+const express = require("express");
 
 // CORS: Enables your React Native / Expo app (on port 8081) to communicate with this server (port 5000)
-const cors = require('cors');
+const cors = require("cors");
 
 // Crypto: Built-in Node tool to generate unpredictable secure keys
-const crypto = require('crypto');
+const crypto = require("crypto");
 
 // Database pool instance
-const { getPool, isDbConnected } = require('./config/db');
-
+const { getPool, isDbConnected } = require("./config/db");
 
 // ==============================================================================
 // 1. DYNAMIC JWT SECRET GENERATION
@@ -28,8 +27,7 @@ const { getPool, isDbConnected } = require('./config/db');
 
 // Generates a 64-byte random hex string every time the server boots up.
 // This guarantees that security keys are freshly created on every deployment or server restart.
-const JWT_SECRET = crypto.randomBytes(64).toString('hex');
-
+const JWT_SECRET = crypto.randomBytes(64).toString("hex");
 
 // ==============================================================================
 // 2. EXPRESS APPLICATION CONFIGURATION
@@ -44,17 +42,16 @@ app.use(cors());
 // Automatically parse incoming JSON request bodies
 app.use(express.json());
 
-
 // ==============================================================================
 // 3. API ROUTES SETUP
 // ==============================================================================
 
 // Root health check endpoint to check server & database status
 // Developer: JAVITH 28-10-2026
-app.get('/', (req, res) => {
+app.get("/", (req, res) => {
   res.json({
-    status: 'online',
-    system: 'Supermarket Retail POS Backend',
+    status: "online",
+    system: "Supermarket Retail POS Backend",
     database: process.env.DB_NAME,
     sqlServerReachable: isDbConnected(),
     timestamp: new Date().toISOString(),
@@ -62,17 +59,16 @@ app.get('/', (req, res) => {
 });
 
 // Mount authentication routes (handles login against tblMausermaster)
-const authRoutes = require('./routes/auth')(JWT_SECRET);
-app.use('/api/auth', authRoutes);
+const authRoutes = require("./routes/auth")(JWT_SECRET);
+app.use("/api/auth", authRoutes);
 
 // [JAVITH - 28-10-2026]: Mount touch screen inventory routes (TBLinventorytsgroup & tblInventoryTSList)
-const inventoryRoutes = require('./routes/inventory');
-app.use('/api/inventory', inventoryRoutes);
+const inventoryRoutes = require("./routes/inventory");
+app.use("/api/inventory", inventoryRoutes);
 
 // [JAVITH - 28-10-2026]: Mount dedicated payment mode routes (tblInvPaymode)
-const paymodeRoutes = require('./routes/paymode');
-app.use('/api/paymode', paymodeRoutes);
-
+const paymodeRoutes = require("./routes/paymode");
+app.use("/api/paymode", paymodeRoutes);
 
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
@@ -80,13 +76,13 @@ app.use('/api/paymode', paymodeRoutes);
 
 // Start listening for HTTP connections immediately
 app.listen(PORT, async () => {
-  console.log('====================================================');
+  console.log("====================================================");
   console.log(`🚀 Retail POS Server is live on port: ${PORT}`);
   console.log(`🌐 Base URL: http://localhost:${PORT}`);
-  console.log('🔒 JWT Session Security: Initialized');
-  console.log('====================================================');
+  console.log("🔒 JWT Session Security: Initialized");
+  console.log("====================================================");
 
   // Attempt to connect to MS SQL in the background without blocking the HTTP server
-  console.log('🔄 Checking MS SQL Server connection...');
+  console.log("🔄 Checking MS SQL Server connection...");
   await getPool();
 });

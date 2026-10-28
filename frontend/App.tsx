@@ -1,5 +1,5 @@
 // ==============================================================================
-// Author: JAVITH 28-10-2026
+// Author: JAVITH, BAVANI 28-10-2026
 // Project: Supermarket Retail POS
 // File: App.tsx
 // Description: Main application root with persistent POS session restore.
@@ -13,30 +13,34 @@
 //     ensuring unauthorized users cannot access POS billing after cashier sign-out.
 // ==============================================================================
 
-import React, { useState, useEffect } from 'react';
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, ActivityIndicator } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import LoginScreen, { CashierProfile, TerminalProfile } from './src/screens/login';
-import PosBillingScreen from './src/screens/pos_billing';
+import React, { useState, useEffect } from "react";
+import { StatusBar } from "expo-status-bar";
+import { StyleSheet, View, ActivityIndicator } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import LoginScreen, {
+  CashierProfile,
+  TerminalProfile,
+} from "./src/screens/login";
+import PosBillingScreen from "./src/screens/pos_billing";
 
 // Storage key used to store the serialized cashier and terminal session
-// Author: JAVITH 28-10-2026: Unique storage key for persistent cashier authentication
-const SESSION_STORAGE_KEY = '@pos_active_session';
+// Author: JAVITH, BAVANI 28-10-2026: Unique storage key for persistent cashier authentication
+const SESSION_STORAGE_KEY = "@pos_active_session";
 
 export default function App() {
   // Cashier state (null = not authenticated, CashierProfile = logged in)
   const [currentUser, setCurrentUser] = useState<CashierProfile | null>(null);
 
   // Terminal state matching tblmaTerminal (HQPC1, etc.)
-  const [currentTerminal, setCurrentTerminal] = useState<TerminalProfile | null>(null);
+  const [currentTerminal, setCurrentTerminal] =
+    useState<TerminalProfile | null>(null);
 
   // Loading state while restoring session from AsyncStorage on cold boot or refresh
   const [isRestoring, setIsRestoring] = useState(true);
 
   // ---------------------------------------------------------------------------
   // Session Restore on Startup / F5 Page Refresh
-  // Author: JAVITH 28-10-2026: Automatically restores cashier and terminal state
+  // Author: JAVITH, BAVANI 28-10-2026: Automatically restores cashier and terminal state
   // from storage so the POS billing screen remains open after browser reload.
   // ---------------------------------------------------------------------------
   useEffect(() => {
@@ -54,7 +58,7 @@ export default function App() {
         }
       } catch (e) {
         // Fallback gracefully to login screen if storage is corrupt or inaccessible
-        console.warn('⚠️ Could not restore cashier session from storage.');
+        console.warn("⚠️ Could not restore cashier session from storage.");
       } finally {
         // Finished checking storage, allow UI to render
         setIsRestoring(false);
@@ -66,9 +70,12 @@ export default function App() {
 
   // ---------------------------------------------------------------------------
   // Cashier Login Success Handler
-  // Author: JAVITH 28-10-2026: Saves authenticated user & terminal to AsyncStorage
+  // Author: JAVITH, BAVANI 28-10-2026: Saves authenticated user & terminal to AsyncStorage
   // ---------------------------------------------------------------------------
-  const handleLoginSuccess = async (user: CashierProfile, terminal: TerminalProfile | null) => {
+  const handleLoginSuccess = async (
+    user: CashierProfile,
+    terminal: TerminalProfile | null,
+  ) => {
     setCurrentUser(user);
     setCurrentTerminal(terminal);
     try {
@@ -79,16 +86,16 @@ export default function App() {
           user,
           terminal,
           savedAt: new Date().toISOString(),
-        })
+        }),
       );
     } catch (e) {
-      console.warn('⚠️ Could not save session to storage.');
+      console.warn("⚠️ Could not save session to storage.");
     }
   };
 
   // ---------------------------------------------------------------------------
   // Cashier Logout Handler (F10 Exit)
-  // Author: JAVITH 28-10-2026: Deletes session from AsyncStorage to enforce security
+  // Author: JAVITH, BAVANI 28-10-2026: Deletes session from AsyncStorage to enforce security
   // ---------------------------------------------------------------------------
   const handleLogout = async () => {
     setCurrentUser(null);
@@ -97,7 +104,7 @@ export default function App() {
       // Remove stored session key so next page refresh prompts for login credentials
       await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
     } catch (e) {
-      console.warn('⚠️ Could not remove session from storage.');
+      console.warn("⚠️ Could not remove session from storage.");
     }
   };
 
@@ -121,7 +128,7 @@ export default function App() {
           terminalCode={currentTerminal?.terminalCode}
         />
       )}
-      <StatusBar style={currentUser ? 'light' : 'dark'} />
+      <StatusBar style={currentUser ? "light" : "dark"} />
     </View>
   );
 }
@@ -129,11 +136,10 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: "#0a0a0a",
   },
   centerLoader: {
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
 });
-

@@ -8,7 +8,7 @@
 //                          eliminated category rail gap, connected real inventory prices and codes.
 // ==============================================================================
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from "react";
 import {
   StyleSheet,
   View,
@@ -19,9 +19,9 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
-} from 'react-native';
+} from "react-native";
 
-const API_URL = 'http://localhost:5000';
+const API_URL = "http://localhost:5000";
 
 // Live Touch Screen Group Interface matching TBLinventorytsgroup
 export interface TouchGroup {
@@ -41,7 +41,7 @@ export interface TouchItem {
 }
 
 // Live PayMode Interface matching [dbo].[tblInvPaymode]
-// Author: JAVITH 28-10-2026: Typed interface for tblInvPaymode
+// Author: JAVITH, BAVANI 28-10-2026: Typed interface for tblInvPaymode
 export interface PayModeItem {
   Position: number;
   PayMode: string;
@@ -71,51 +71,84 @@ interface PosBillingProps {
 
 // [JAVITH - 28-10-2026]: Dynamic color palette for database categories
 const CATEGORY_PALETTE = [
-  '#237a3b', '#b45309', '#0284c7', '#f59e0b', '#4d695b',
-  '#ec4899', '#8b5cf6', '#d97706', '#06b6d4', '#dc2626',
-  '#ca8a04', '#0f766e', '#7c3aed', '#57534e', '#0d9488',
-  '#334155', '#475569', '#2563eb', '#78350f', '#059669',
+  "#237a3b",
+  "#b45309",
+  "#0284c7",
+  "#f59e0b",
+  "#4d695b",
+  "#ec4899",
+  "#8b5cf6",
+  "#d97706",
+  "#06b6d4",
+  "#dc2626",
+  "#ca8a04",
+  "#0f766e",
+  "#7c3aed",
+  "#57534e",
+  "#0d9488",
+  "#334155",
+  "#475569",
+  "#2563eb",
+  "#78350f",
+  "#059669",
 ];
 
 function getGroupVisuals(groupCode: string, index: number) {
   const bg = CATEGORY_PALETTE[index % CATEGORY_PALETTE.length];
   return {
     bg,
-    icon: '📦',
+    icon: "📦",
   };
 }
 
 // [JAVITH - 28-10-2026]: Dynamic visual attributes for tblInvPaymode payment buttons
 function getPayModeVisual(payMode: string, index: number) {
-  const upper = (payMode || '').toUpperCase().trim();
-  if (upper.includes('CASH')) return { bg: '#f4b400', icon: '💵' };
-  if (upper.includes('NETS') && !upper.includes('FLASH') && !upper.includes('QR')) return { bg: '#1976d2', icon: '💳' };
-  if (upper.includes('PAYNOW')) return { bg: '#00bcd4', icon: '📱' };
-  if (upper.includes('CDC')) return { bg: '#0097a7', icon: '🏷️' };
-  if (upper.includes('FLASH')) return { bg: '#00838f', icon: '⚡' };
-  if (upper.includes('AMEX')) return { bg: '#0070ba', icon: '💳' };
-  if (upper.includes('EZLINK')) return { bg: '#7b1fa2', icon: '📇' };
-  if (upper.includes('CREDIT')) return { bg: '#c2185b', icon: '💳' };
-  if (upper.includes('VOUCHER')) return { bg: '#e65100', icon: '🎟️' };
+  const upper = (payMode || "").toUpperCase().trim();
+  if (upper.includes("CASH")) return { bg: "#f4b400", icon: "💵" };
+  if (
+    upper.includes("NETS") &&
+    !upper.includes("FLASH") &&
+    !upper.includes("QR")
+  )
+    return { bg: "#1976d2", icon: "💳" };
+  if (upper.includes("PAYNOW")) return { bg: "#00bcd4", icon: "📱" };
+  if (upper.includes("CDC")) return { bg: "#0097a7", icon: "🏷️" };
+  if (upper.includes("FLASH")) return { bg: "#00838f", icon: "⚡" };
+  if (upper.includes("AMEX")) return { bg: "#0070ba", icon: "💳" };
+  if (upper.includes("EZLINK")) return { bg: "#7b1fa2", icon: "📇" };
+  if (upper.includes("CREDIT")) return { bg: "#c2185b", icon: "💳" };
+  if (upper.includes("VOUCHER")) return { bg: "#e65100", icon: "🎟️" };
 
-  const fallback = ['#f4b400', '#1976d2', '#00bcd4', '#0097a7', '#8e24aa', '#e65100', '#2e7d32'];
-  return { bg: fallback[index % fallback.length], icon: '💳' };
+  const fallback = [
+    "#f4b400",
+    "#1976d2",
+    "#00bcd4",
+    "#0097a7",
+    "#8e24aa",
+    "#e65100",
+    "#2e7d32",
+  ];
+  return { bg: fallback[index % fallback.length], icon: "💳" };
 }
 
-export default function PosBillingScreen({ onLogout, cashierName, terminalCode }: PosBillingProps) {
+export default function PosBillingScreen({
+  onLogout,
+  cashierName,
+  terminalCode,
+}: PosBillingProps) {
   // ---------------------------------------------------------------------------
   // LIVE DATABASE STATE (TBLinventorytsgroup & tblInventoryTSList & tblInvPaymode)
   // ---------------------------------------------------------------------------
   const [groups, setGroups] = useState<TouchGroup[]>([]);
   const [items, setItems] = useState<TouchItem[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<string>('');
+  const [selectedGroup, setSelectedGroup] = useState<string>("");
   const [loadingGroups, setLoadingGroups] = useState<boolean>(true);
   const [loadingItems, setLoadingItems] = useState<boolean>(false);
 
   // Paymode state from tblInvPaymode
   // Author: JAVITH 28-10-2026: Live state populated directly from tblInvPaymode
   const [payModes, setPayModes] = useState<PayModeItem[]>([]);
-  const [selectedPayMode, setSelectedPayMode] = useState<string>('CASH');
+  const [selectedPayMode, setSelectedPayMode] = useState<string>("CASH");
   const [loadingPayModes, setLoadingPayModes] = useState<boolean>(true);
   const [showMorePayModes, setShowMorePayModes] = useState<boolean>(false);
 
@@ -130,17 +163,17 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
     price: number;
     stock: number;
   }>({
-    name: 'READY TO SCAN / SELECT ITEM',
+    name: "READY TO SCAN / SELECT ITEM",
     qty: 0,
     price: 0.0,
     stock: 0,
   });
 
   // Search & Payment state
-  const [skuCode, setSkuCode] = useState('');
-  const [skuDesc, setSkuDesc] = useState('');
-  const [tenderAmount, setTenderAmount] = useState('0.00');
-  const [numpadValue, setNumpadValue] = useState('');
+  const [skuCode, setSkuCode] = useState("");
+  const [skuDesc, setSkuDesc] = useState("");
+  const [tenderAmount, setTenderAmount] = useState("0.00");
+  const [numpadValue, setNumpadValue] = useState("");
 
   // ---------------------------------------------------------------------------
   // [JAVITH - 28-10-2026]: Load Initial Live Data from Database
@@ -165,7 +198,7 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
         setPayModes([]);
       }
     } catch (e) {
-      console.warn('⚠️ Could not fetch live paymodes from database.');
+      console.warn("⚠️ Could not fetch live paymodes from database.");
       setPayModes([]);
     } finally {
       setLoadingPayModes(false);
@@ -187,7 +220,7 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
         setGroups([]);
       }
     } catch (e) {
-      console.warn('⚠️ Could not fetch live groups from database.');
+      console.warn("⚠️ Could not fetch live groups from database.");
       setGroups([]);
     } finally {
       setLoadingGroups(false);
@@ -211,7 +244,7 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
         setItems(data.items);
       }
     } catch (e) {
-      console.warn('⚠️ Could not fetch items from backend.');
+      console.warn("⚠️ Could not fetch items from backend.");
     } finally {
       setLoadingItems(false);
     }
@@ -230,7 +263,7 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
     let result = items;
     if (selectedGroup) {
       result = result.filter(
-        (it) => it.GroupCode.toUpperCase() === selectedGroup.toUpperCase()
+        (it) => it.GroupCode.toUpperCase() === selectedGroup.toUpperCase(),
       );
     }
     if (skuDesc.trim()) {
@@ -239,7 +272,9 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
     }
     if (skuCode.trim()) {
       const q = skuCode.toLowerCase().trim();
-      result = result.filter((it) => it.InventoryCode.toLowerCase().includes(q));
+      result = result.filter((it) =>
+        it.InventoryCode.toLowerCase().includes(q),
+      );
     }
     return result;
   }, [items, selectedGroup, skuDesc, skuCode]);
@@ -256,7 +291,9 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
     });
 
     setCart((prev) => {
-      const existingIndex = prev.findIndex((c) => c.code === item.InventoryCode);
+      const existingIndex = prev.findIndex(
+        (c) => c.code === item.InventoryCode,
+      );
       if (existingIndex > -1) {
         return prev.map((c, i) =>
           i === existingIndex
@@ -265,7 +302,7 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                 qty: c.qty + 1,
                 amount: parseFloat(((c.qty + 1) * c.price - c.disc).toFixed(2)),
               }
-            : c
+            : c,
         );
       } else {
         const newItem: CartItem = {
@@ -285,7 +322,8 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
   // Adjust active item qty
   const handleQtyChange = (delta: number) => {
     if (cart.length === 0) return;
-    const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    const targetIdx =
+      selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
     setCart((prev) => {
       return prev
         .map((c, i) => {
@@ -307,7 +345,8 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
   // Delete cart item
   const handleDeleteItem = () => {
     if (cart.length === 0) return;
-    const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    const targetIdx =
+      selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
     setCart((prev) => prev.filter((_, i) => i !== targetIdx));
     setSelectedCartIndex(-1);
   };
@@ -316,10 +355,10 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
   const handleClearCart = () => {
     setCart([]);
     setSelectedCartIndex(-1);
-    setNumpadValue('');
-    setTenderAmount('');
+    setNumpadValue("");
+    setTenderAmount("");
     setActiveItem({
-      name: 'READY TO SCAN / SELECT ITEM',
+      name: "READY TO SCAN / SELECT ITEM",
       qty: 0,
       price: 0.0,
       stock: 0,
@@ -328,15 +367,15 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
 
   // Numpad key press
   const handleNumpad = (val: string) => {
-    if (val === 'ENTER') {
+    if (val === "ENTER") {
       if (numpadValue) {
         setTenderAmount(numpadValue);
-        setNumpadValue('');
+        setNumpadValue("");
       }
       return;
     }
-    if (val === 'C') {
-      setNumpadValue('');
+    if (val === "C") {
+      setNumpadValue("");
       return;
     }
     setNumpadValue((prev) => prev + val);
@@ -363,7 +402,8 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
       isVoucher: false,
       isMember: false,
     };
-    const isSelected = selectedPayMode.toUpperCase() === payItem.PayMode.toUpperCase();
+    const isSelected =
+      selectedPayMode.toUpperCase() === payItem.PayMode.toUpperCase();
     const visual = getPayModeVisual(payItem.PayMode, slotIndex);
 
     return (
@@ -420,28 +460,34 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
         {/* Math Calculation: -1 x 1.50 -1.50 */}
         <View style={styles.calcBox}>
           <Text style={styles.calcText}>
-            {activeItem.qty} x {activeItem.price.toFixed(2)}{' '}
+            {activeItem.qty} x {activeItem.price.toFixed(2)}{" "}
             {(activeItem.qty * activeItem.price).toFixed(2)}
           </Text>
         </View>
 
         {/* Plus / Minus Quick Buttons */}
-        <TouchableOpacity style={styles.qtyPlusBtn} onPress={() => handleQtyChange(1)}>
+        <TouchableOpacity
+          style={styles.qtyPlusBtn}
+          onPress={() => handleQtyChange(1)}
+        >
           <Text style={styles.qtyBtnText}>+</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.qtyMinusBtn} onPress={() => handleQtyChange(-1)}>
+        <TouchableOpacity
+          style={styles.qtyMinusBtn}
+          onPress={() => handleQtyChange(-1)}
+        >
           <Text style={styles.qtyBtnText}>-</Text>
         </TouchableOpacity>
 
         {/* Price Check Button */}
         <TouchableOpacity style={styles.priceCheckBtn}>
-          <Text style={styles.priceCheckText}>Price{'\n'}Check</Text>
+          <Text style={styles.priceCheckText}>Price{"\n"}Check</Text>
         </TouchableOpacity>
 
         {/* Station Badge */}
         <View style={styles.stationBadge}>
           <Text style={styles.stationBadgeText}>
-            {terminalCode || 'HQPC1'} • {cashierName || 'CASHIER'}
+            {terminalCode || "HQPC1"} • {cashierName || "CASHIER"}
           </Text>
         </View>
 
@@ -507,76 +553,131 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
             <View style={styles.tableHeader}>
               <Text style={[styles.thCell, { width: 85 }]}>Code</Text>
               <Text style={[styles.thCell, { flex: 1 }]}>Description</Text>
-              <Text style={[styles.thCell, { width: 55, textAlign: 'center' }]}>Qty</Text>
-              <Text style={[styles.thCell, { width: 75, textAlign: 'right' }]}>Price</Text>
-              <Text style={[styles.thCell, { width: 60, textAlign: 'right' }]}>Disc</Text>
-              <Text style={[styles.thCell, { width: 85, textAlign: 'right', paddingRight: 8 }]}>Amount</Text>
+              <Text style={[styles.thCell, { width: 55, textAlign: "center" }]}>
+                Qty
+              </Text>
+              <Text style={[styles.thCell, { width: 75, textAlign: "right" }]}>
+                Price
+              </Text>
+              <Text style={[styles.thCell, { width: 60, textAlign: "right" }]}>
+                Disc
+              </Text>
+              <Text
+                style={[
+                  styles.thCell,
+                  { width: 85, textAlign: "right", paddingRight: 8 },
+                ]}
+              >
+                Amount
+              </Text>
             </View>
 
             {/* Table Rows */}
-            <ScrollView style={styles.tableBody} showsVerticalScrollIndicator={false}>
-              {cart.length === 0 ? (
-                Array.from({ length: 8 }).map((_, idx) => (
-                  <View
-                    key={idx}
-                    style={[styles.tableRow, idx % 2 === 1 ? styles.rowEven : styles.rowOdd]}
-                  >
-                    <Text style={[styles.tdCell, { width: 85 }]}></Text>
-                    <Text style={[styles.tdCell, { flex: 1 }]}></Text>
-                    <Text style={[styles.tdCell, { width: 55 }]}></Text>
-                    <Text style={[styles.tdCell, { width: 75 }]}></Text>
-                    <Text style={[styles.tdCell, { width: 60 }]}></Text>
-                    <Text style={[styles.tdCell, { width: 85 }]}></Text>
-                  </View>
-                ))
-              ) : (
-                cart.map((item, idx) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    onPress={() => setSelectedCartIndex(idx)}
-                    style={[
-                      styles.tableRow,
-                      selectedCartIndex === idx
-                        ? styles.rowSelected
-                        : idx % 2 === 1
-                        ? styles.rowEven
-                        : styles.rowOdd,
-                    ]}
-                  >
-                    <Text style={[styles.tdCell, { width: 85, fontWeight: '700' }]}>{item.code}</Text>
-                    <Text style={[styles.tdCell, { flex: 1, fontWeight: '600' }]} numberOfLines={1}>
-                      {item.description}
-                    </Text>
-                    <Text style={[styles.tdCell, { width: 55, textAlign: 'center', fontWeight: '700' }]}>
-                      {item.qty}
-                    </Text>
-                    <Text style={[styles.tdCell, { width: 75, textAlign: 'right' }]}>
-                      {item.price.toFixed(2)}
-                    </Text>
-                    <Text style={[styles.tdCell, { width: 60, textAlign: 'right' }]}>
-                      {item.disc.toFixed(2)}
-                    </Text>
-                    <Text style={[styles.tdCell, { width: 85, textAlign: 'right', paddingRight: 8, fontWeight: '700' }]}>
-                      {item.amount.toFixed(2)}
-                    </Text>
-                  </TouchableOpacity>
-                ))
-              )}
+            <ScrollView
+              style={styles.tableBody}
+              showsVerticalScrollIndicator={false}
+            >
+              {cart.length === 0
+                ? Array.from({ length: 8 }).map((_, idx) => (
+                    <View
+                      key={idx}
+                      style={[
+                        styles.tableRow,
+                        idx % 2 === 1 ? styles.rowEven : styles.rowOdd,
+                      ]}
+                    >
+                      <Text style={[styles.tdCell, { width: 85 }]}></Text>
+                      <Text style={[styles.tdCell, { flex: 1 }]}></Text>
+                      <Text style={[styles.tdCell, { width: 55 }]}></Text>
+                      <Text style={[styles.tdCell, { width: 75 }]}></Text>
+                      <Text style={[styles.tdCell, { width: 60 }]}></Text>
+                      <Text style={[styles.tdCell, { width: 85 }]}></Text>
+                    </View>
+                  ))
+                : cart.map((item, idx) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      onPress={() => setSelectedCartIndex(idx)}
+                      style={[
+                        styles.tableRow,
+                        selectedCartIndex === idx
+                          ? styles.rowSelected
+                          : idx % 2 === 1
+                            ? styles.rowEven
+                            : styles.rowOdd,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.tdCell,
+                          { width: 85, fontWeight: "700" },
+                        ]}
+                      >
+                        {item.code}
+                      </Text>
+                      <Text
+                        style={[styles.tdCell, { flex: 1, fontWeight: "600" }]}
+                        numberOfLines={1}
+                      >
+                        {item.description}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.tdCell,
+                          { width: 55, textAlign: "center", fontWeight: "700" },
+                        ]}
+                      >
+                        {item.qty}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.tdCell,
+                          { width: 75, textAlign: "right" },
+                        ]}
+                      >
+                        {item.price.toFixed(2)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.tdCell,
+                          { width: 60, textAlign: "right" },
+                        ]}
+                      >
+                        {item.disc.toFixed(2)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.tdCell,
+                          {
+                            width: 85,
+                            textAlign: "right",
+                            paddingRight: 8,
+                            fontWeight: "700",
+                          },
+                        ]}
+                      >
+                        {item.amount.toFixed(2)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
             </ScrollView>
 
             {/* Table Bottom Totals Strip */}
             <View style={styles.tableFooterStrip}>
               <Text style={styles.footerSummaryText}>
-                Total <Text style={styles.footerVal}>{subTotal.toFixed(2)}</Text>
+                Total{" "}
+                <Text style={styles.footerVal}>{subTotal.toFixed(2)}</Text>
               </Text>
               <Text style={styles.footerSummaryText}>
-                Tot Qty <Text style={styles.footerVal}>{totalQty.toFixed(2)}</Text>
+                Tot Qty{" "}
+                <Text style={styles.footerVal}>{totalQty.toFixed(2)}</Text>
               </Text>
               <Text style={styles.footerSummaryText}>
                 Disc <Text style={styles.footerVal}>{discount.toFixed(2)}</Text>
               </Text>
               <Text style={styles.footerSummaryText}>
-                SubTotal <Text style={styles.footerVal}>{subTotal.toFixed(2)}</Text>
+                SubTotal{" "}
+                <Text style={styles.footerVal}>{subTotal.toFixed(2)}</Text>
               </Text>
               <Text style={styles.footerSummaryText}>
                 Tax <Text style={styles.footerVal}>0.0000</Text>
@@ -593,64 +694,75 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
             {/* Author: JAVITH 28-10-2026: Column 3 dynamically linked to tblInvPaymode */}
             <View style={styles.posActionGrid}>
               {/* Row 1 */}
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#2ba84a' }]}>
+              <TouchableOpacity
+                style={[styles.posBtn, { backgroundColor: "#2ba84a" }]}
+              >
                 <Text style={styles.posBtnIcon}>💵</Text>
                 <Text style={styles.posBtnText}>Hold</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.posBtn, { backgroundColor: '#ea4335' }]}
+                style={[styles.posBtn, { backgroundColor: "#ea4335" }]}
                 onPress={handleDeleteItem}
               >
                 <Text style={styles.posBtnIcon}>🗑</Text>
                 <Text style={styles.posBtnText}>Delete</Text>
               </TouchableOpacity>
-              {renderPayModeButton(0, 'CASH')}
+              {renderPayModeButton(0, "CASH")}
 
               {/* Row 2 */}
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#926c58' }]}>
+              <TouchableOpacity
+                style={[styles.posBtn, { backgroundColor: "#926c58" }]}
+              >
                 <Text style={styles.posBtnSubtitle}>F7</Text>
                 <Text style={styles.posBtnText}>Release</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.posBtn, { backgroundColor: '#ff9800' }]}
+                style={[styles.posBtn, { backgroundColor: "#ff9800" }]}
                 onPress={handleClearCart}
               >
                 <Text style={styles.posBtnSubtitle}>F2</Text>
                 <Text style={styles.posBtnText}>Clear</Text>
               </TouchableOpacity>
-              {renderPayModeButton(1, 'NETS')}
+              {renderPayModeButton(1, "NETS")}
 
               {/* Row 3 */}
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#e91e63' }]}>
+              <TouchableOpacity
+                style={[styles.posBtn, { backgroundColor: "#e91e63" }]}
+              >
                 <Text style={styles.posBtnIcon}>📄</Text>
                 <Text style={styles.posBtnTextSmall}>View Bill</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#3f51b5' }]}>
+              <TouchableOpacity
+                style={[styles.posBtn, { backgroundColor: "#3f51b5" }]}
+              >
                 <Text style={styles.posBtnIcon}>🔍</Text>
                 <Text style={styles.posBtnTextSmall}>Search</Text>
               </TouchableOpacity>
-              {renderPayModeButton(2, 'PAYNOW')}
+              {renderPayModeButton(2, "PAYNOW")}
 
               {/* Row 4 */}
               <TouchableOpacity
-                style={[styles.posBtn, { backgroundColor: '#d32f2f' }]}
+                style={[styles.posBtn, { backgroundColor: "#d32f2f" }]}
                 onPress={onLogout}
               >
                 <Text style={styles.posBtnSubtitle}>F10</Text>
                 <Text style={styles.posBtnText}>Exit</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#607d8b' }]}>
+              <TouchableOpacity
+                style={[styles.posBtn, { backgroundColor: "#607d8b" }]}
+              >
                 <Text style={styles.posBtnIcon}>⚙</Text>
-                <Text style={styles.posBtnTextSmall}>Price{'\n'}Change</Text>
+                <Text style={styles.posBtnTextSmall}>Price{"\n"}Change</Text>
               </TouchableOpacity>
-              {renderPayModeButton(3, 'CDC')}
+              {renderPayModeButton(3, "CDC")}
             </View>
 
             {/* 2. Total Display & Tender */}
             <View style={styles.totalDisplayBox}>
               <View style={styles.totalHeaderRow}>
                 <Text style={styles.totalLabel}>
-                  Net Total to Pay (F4) {selectedPayMode ? `• [${selectedPayMode}]` : ''}
+                  Net Total to Pay (F4){" "}
+                  {selectedPayMode ? `• [${selectedPayMode}]` : ""}
                 </Text>
               </View>
               <View style={styles.totalBigNumberRow}>
@@ -660,11 +772,15 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
               <View style={styles.tenderBalanceRow}>
                 <View style={styles.tenderCol}>
                   <Text style={styles.tenderLabel}>Tender</Text>
-                  <Text style={styles.tenderValueGreen}>{tender.toFixed(2)}</Text>
+                  <Text style={styles.tenderValueGreen}>
+                    {tender.toFixed(2)}
+                  </Text>
                 </View>
                 <View style={styles.tenderCol}>
                   <Text style={styles.tenderLabel}>Balance</Text>
-                  <Text style={styles.balanceValueRed}>{balance.toFixed(2)}</Text>
+                  <Text style={styles.balanceValueRed}>
+                    {balance.toFixed(2)}
+                  </Text>
                 </View>
               </View>
             </View>
@@ -672,69 +788,105 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
             {/* 3. Numeric Keypad - Author: JAVITH 28-10-2026: 4x4 symmetric touch keypad */}
             <View style={styles.numpadGrid}>
               {/* Row 1 */}
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('1')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("1")}
+              >
                 <Text style={styles.numKeyText}>1</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('2')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("2")}
+              >
                 <Text style={styles.numKeyText}>2</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('3')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("3")}
+              >
                 <Text style={styles.numKeyText}>3</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.numKey, styles.numKeySpecial]}
-                onPress={() => handleNumpad('-')}
+                onPress={() => handleNumpad("-")}
               >
                 <Text style={styles.numKeyText}>-</Text>
               </TouchableOpacity>
 
               {/* Row 2 */}
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('4')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("4")}
+              >
                 <Text style={styles.numKeyText}>4</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('5')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("5")}
+              >
                 <Text style={styles.numKeyText}>5</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('6')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("6")}
+              >
                 <Text style={styles.numKeyText}>6</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.numKey, styles.numKeySpecial]}
-                onPress={() => handleNumpad('+')}
+                onPress={() => handleNumpad("+")}
               >
                 <Text style={styles.numKeyText}>+</Text>
               </TouchableOpacity>
 
               {/* Row 3 */}
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('7')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("7")}
+              >
                 <Text style={styles.numKeyText}>7</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('8')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("8")}
+              >
                 <Text style={styles.numKeyText}>8</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('9')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("9")}
+              >
                 <Text style={styles.numKeyText}>9</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('0')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("0")}
+              >
                 <Text style={styles.numKeyText}>0</Text>
               </TouchableOpacity>
 
               {/* Row 4 */}
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('00')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad("00")}
+              >
                 <Text style={styles.numKeyText}>00</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('.')}>
+              <TouchableOpacity
+                style={styles.numKey}
+                onPress={() => handleNumpad(".")}
+              >
                 <Text style={styles.numKeyText}>.</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.numKey, styles.numKeySpecial]}
-                onPress={() => handleNumpad('C')}
+                onPress={() => handleNumpad("C")}
               >
                 <Text style={styles.numKeyText}>C</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.numKey, styles.enterKey]}
-                onPress={() => handleNumpad('ENTER')}
+                onPress={() => handleNumpad("ENTER")}
               >
                 <Text style={styles.enterKeyText}>↵</Text>
               </TouchableOpacity>
@@ -752,10 +904,16 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
               contentContainerStyle={{ paddingVertical: 4, paddingBottom: 28 }}
             >
               {loadingGroups ? (
-                <ActivityIndicator color="#fff" size="small" style={{ marginTop: 20 }} />
+                <ActivityIndicator
+                  color="#fff"
+                  size="small"
+                  style={{ marginTop: 20 }}
+                />
               ) : (
                 groups.map((group, idx) => {
-                  const isSelected = selectedGroup.toUpperCase() === group.GroupCode.toUpperCase();
+                  const isSelected =
+                    selectedGroup.toUpperCase() ===
+                    group.GroupCode.toUpperCase();
                   const visual = getGroupVisuals(group.GroupCode, idx);
 
                   return (
@@ -785,13 +943,17 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
             {loadingItems ? (
               <View style={styles.centerLoading}>
                 <ActivityIndicator color="#1e3129" size="large" />
-                <Text style={styles.loadingText}>Loading {selectedGroup} items...</Text>
+                <Text style={styles.loadingText}>
+                  Loading {selectedGroup} items...
+                </Text>
               </View>
             ) : filteredProducts.length === 0 ? (
               <View style={styles.centerEmpty}>
                 <Text style={styles.emptyIcon}>📦</Text>
                 <Text style={styles.emptyTitle}>No items configured</Text>
-                <Text style={styles.emptySubtitle}>No items found in group "{selectedGroup}"</Text>
+                <Text style={styles.emptySubtitle}>
+                  No items found in group "{selectedGroup}"
+                </Text>
               </View>
             ) : (
               <ScrollView
@@ -810,10 +972,17 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                       activeOpacity={0.85}
                     >
                       {/* Product Thumbnail Banner */}
-                      <View style={[styles.productThumb, { backgroundColor: visual.bg + '18' }]}>
+                      <View
+                        style={[
+                          styles.productThumb,
+                          { backgroundColor: visual.bg + "18" },
+                        ]}
+                      >
                         <Text style={styles.productEmoji}>{visual.icon}</Text>
                         <View style={styles.skuBadge}>
-                          <Text style={styles.skuBadgeText}>{prod.InventoryCode}</Text>
+                          <Text style={styles.skuBadgeText}>
+                            {prod.InventoryCode}
+                          </Text>
                         </View>
                       </View>
 
@@ -825,8 +994,12 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                       {/* Bottom Row: Price and Quick (+) Button */}
                       <View style={styles.productCardBottom}>
                         <View>
-                          <Text style={styles.productPrice}>${prod.SellingPrice.toFixed(2)}</Text>
-                          {prod.UOM ? <Text style={styles.productUom}>{prod.UOM}</Text> : null}
+                          <Text style={styles.productPrice}>
+                            ${prod.SellingPrice.toFixed(2)}
+                          </Text>
+                          {prod.UOM ? (
+                            <Text style={styles.productUom}>{prod.UOM}</Text>
+                          ) : null}
                         </View>
                         <View style={styles.productAddBtn}>
                           <Text style={styles.productAddPlus}>+</Text>
@@ -854,7 +1027,9 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Payment Mode (tblInvPaymode)</Text>
+              <Text style={styles.modalTitle}>
+                Select Payment Mode (tblInvPaymode)
+              </Text>
               <TouchableOpacity
                 onPress={() => setShowMorePayModes(false)}
                 style={styles.modalCloseBtn}
@@ -867,7 +1042,8 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
               <View style={styles.payModeGridModal}>
                 {payModes.map((pm, idx) => {
                   const visual = getPayModeVisual(pm.PayMode, idx);
-                  const isSel = selectedPayMode.toUpperCase() === pm.PayMode.toUpperCase();
+                  const isSel =
+                    selectedPayMode.toUpperCase() === pm.PayMode.toUpperCase();
                   return (
                     <TouchableOpacity
                       key={pm.PayMode}
@@ -905,12 +1081,12 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: "#0a0a0a",
     padding: 4,
-    ...(Platform.OS === 'web'
+    ...(Platform.OS === "web"
       ? {
-          height: '100vh',
-          userSelect: 'none',
+          height: "100vh",
+          userSelect: "none",
         }
       : {}),
   },
@@ -920,132 +1096,132 @@ const styles = StyleSheet.create({
   // ---------------------------------------------------------------------------
   topHeader: {
     height: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fffdf9',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fffdf9",
     borderRadius: 6,
     paddingHorizontal: 8,
     marginBottom: 4,
     borderWidth: 1,
-    borderColor: '#e5ded1',
+    borderColor: "#e5ded1",
   },
   logoBadge: {
     width: 36,
     height: 36,
     borderRadius: 8,
-    backgroundColor: '#4a2e18',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#4a2e18",
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 10,
   },
   logoSymbol: {
-    color: '#f8d7b3',
+    color: "#f8d7b3",
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   stockBox: {
     paddingHorizontal: 8,
     height: 32,
-    backgroundColor: '#f1eae0',
+    backgroundColor: "#f1eae0",
     borderRadius: 4,
-    justifyContent: 'center',
+    justifyContent: "center",
     marginRight: 8,
     borderWidth: 1,
-    borderColor: '#dcd1c2',
+    borderColor: "#dcd1c2",
   },
   stockLabel: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#4a3b2c',
+    fontWeight: "700",
+    color: "#4a3b2c",
   },
   activeNameBox: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     marginRight: 8,
   },
   activeItemName: {
     fontSize: 15,
-    fontWeight: '800',
-    color: '#8b1e1b',
-    textTransform: 'uppercase',
+    fontWeight: "800",
+    color: "#8b1e1b",
+    textTransform: "uppercase",
   },
   calcBox: {
     paddingHorizontal: 10,
-    justifyContent: 'center',
+    justifyContent: "center",
     marginRight: 8,
   },
   calcText: {
     fontSize: 13,
-    fontWeight: 'bold',
-    color: '#2a1a0e',
+    fontWeight: "bold",
+    color: "#2a1a0e",
   },
   qtyPlusBtn: {
     width: 38,
     height: 36,
-    backgroundColor: '#43a047',
+    backgroundColor: "#43a047",
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 4,
   },
   qtyMinusBtn: {
     width: 38,
     height: 36,
-    backgroundColor: '#e53935',
+    backgroundColor: "#e53935",
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 6,
   },
   qtyBtnText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 22,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     lineHeight: 24,
   },
   priceCheckBtn: {
     paddingHorizontal: 12,
     height: 36,
-    backgroundColor: '#f59e0b',
+    backgroundColor: "#f59e0b",
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 6,
   },
   priceCheckText: {
-    color: '#fff',
-    fontWeight: 'bold',
+    color: "#fff",
+    fontWeight: "bold",
     fontSize: 11,
-    textAlign: 'center',
+    textAlign: "center",
     lineHeight: 13,
   },
   stationBadge: {
-    backgroundColor: '#eee6d8',
+    backgroundColor: "#eee6d8",
     paddingHorizontal: 10,
     height: 32,
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 6,
     borderWidth: 1,
-    borderColor: '#d8ccb9',
+    borderColor: "#d8ccb9",
   },
   stationBadgeText: {
     fontSize: 11,
-    fontWeight: '700',
-    color: '#423d36',
+    fontWeight: "700",
+    color: "#423d36",
   },
   iconSquareBtn: {
     width: 36,
     height: 36,
-    backgroundColor: '#5d4037',
+    backgroundColor: "#5d4037",
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginLeft: 2,
   },
   topIconText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
   },
 
@@ -1054,23 +1230,23 @@ const styles = StyleSheet.create({
   // ---------------------------------------------------------------------------
   inputBar: {
     height: 36,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fffcf7',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fffcf7",
     borderRadius: 4,
     paddingHorizontal: 4,
     marginBottom: 4,
     borderWidth: 1,
-    borderColor: '#e8e0d4',
+    borderColor: "#e8e0d4",
   },
   skuCodBox: {
     width: 90,
     height: 28,
     borderWidth: 1,
-    borderColor: '#d1c7b8',
+    borderColor: "#d1c7b8",
     borderRadius: 4,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
+    backgroundColor: "#fff",
+    justifyContent: "center",
     paddingHorizontal: 6,
     marginRight: 4,
   },
@@ -1078,60 +1254,60 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 28,
     borderWidth: 1,
-    borderColor: '#d1c7b8',
+    borderColor: "#d1c7b8",
     borderRadius: 4,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
+    backgroundColor: "#fff",
+    justifyContent: "center",
     paddingHorizontal: 8,
     marginRight: 8,
   },
   inputField: {
     fontSize: 13,
-    color: '#333',
+    color: "#333",
     padding: 0,
   },
   pillInputRed: {
     minWidth: 32,
     height: 26,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: '#e57373',
+    borderColor: "#e57373",
     borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingHorizontal: 6,
     marginRight: 4,
   },
   pillRedText: {
-    color: '#d32f2f',
-    fontWeight: 'bold',
+    color: "#d32f2f",
+    fontWeight: "bold",
     fontSize: 12,
   },
   pillTagBlue: {
-    backgroundColor: '#1976d2',
+    backgroundColor: "#1976d2",
     height: 26,
     paddingHorizontal: 10,
     borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 4,
   },
   pillTagText: {
-    color: '#fff',
-    fontWeight: 'bold',
+    color: "#fff",
+    fontWeight: "bold",
     fontSize: 12,
   },
   pillTagDark: {
-    backgroundColor: '#37474f',
+    backgroundColor: "#37474f",
     height: 26,
     paddingHorizontal: 10,
     borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   pillTagDarkText: {
-    color: '#fff',
-    fontWeight: 'bold',
+    color: "#fff",
+    fontWeight: "bold",
     fontSize: 12,
   },
 
@@ -1140,7 +1316,7 @@ const styles = StyleSheet.create({
   // ---------------------------------------------------------------------------
   mainContent: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: "row",
   },
 
   // LEFT PANEL (Cart table + Controls)
@@ -1148,134 +1324,134 @@ const styles = StyleSheet.create({
   leftPanel: {
     flex: 6.5,
     marginRight: 4,
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
   },
 
   // TABLE STYLES
   tableContainer: {
     flex: 1,
-    backgroundColor: '#fbf7ee',
+    backgroundColor: "#fbf7ee",
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#ded4c3',
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
+    borderColor: "#ded4c3",
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
   },
   tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#3d6c46',
+    flexDirection: "row",
+    backgroundColor: "#3d6c46",
     height: 32,
-    alignItems: 'center',
+    alignItems: "center",
     paddingHorizontal: 6,
   },
   thCell: {
-    color: '#ffffff',
-    fontWeight: 'bold',
+    color: "#ffffff",
+    fontWeight: "bold",
     fontSize: 11,
     paddingHorizontal: 2,
   },
   tableBody: {
     flex: 1,
-    backgroundColor: '#fbf7ee',
+    backgroundColor: "#fbf7ee",
   },
   tableRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     height: 32,
     paddingHorizontal: 6,
     borderBottomWidth: 1,
-    borderBottomColor: '#ede4d4',
+    borderBottomColor: "#ede4d4",
   },
   rowOdd: {
-    backgroundColor: '#faf6eb',
+    backgroundColor: "#faf6eb",
   },
   rowEven: {
-    backgroundColor: '#f4ede0',
+    backgroundColor: "#f4ede0",
   },
   rowSelected: {
-    backgroundColor: '#e2f0d9',
+    backgroundColor: "#e2f0d9",
   },
   tdCell: {
-    color: '#2a1a0e',
+    color: "#2a1a0e",
     fontSize: 11,
     paddingHorizontal: 2,
   },
   tableFooterStrip: {
     height: 26,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderTopWidth: 1,
-    borderTopColor: '#d6cabd',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
+    borderTopColor: "#d6cabd",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
     paddingHorizontal: 6,
   },
   footerSummaryText: {
     fontSize: 11,
-    fontWeight: 'bold',
-    color: '#2b2118',
+    fontWeight: "bold",
+    color: "#2b2118",
   },
   footerVal: {
-    color: '#000000',
-    fontWeight: '900',
+    color: "#000000",
+    fontWeight: "900",
   },
 
   // LOWER CONTROL BLOCK
   // Author: JAVITH 28-10-2026: Enhanced spacious layout for paymodes, net total, and numeric touch keys
   lowerControlBlock: {
     height: 220,
-    flexDirection: 'row',
+    flexDirection: "row",
     marginTop: 4,
   },
   posActionGrid: {
     width: 255,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    alignContent: 'space-between',
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignContent: "space-between",
     marginRight: 4,
   },
   posBtn: {
-    width: '31.5%',
+    width: "31.5%",
     height: 50,
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 4,
     padding: 2,
   },
   posBtnIcon: {
     fontSize: 15,
-    color: '#fff',
+    color: "#fff",
   },
   posBtnSubtitle: {
-    color: '#ffffffcc',
+    color: "#ffffffcc",
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   posBtnText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 11,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   posBtnTextBig: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: "900",
   },
   posBtnTextSmall: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 10,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontWeight: "bold",
+    textAlign: "center",
   },
   posBtnActivePayMode: {
     borderWidth: 2.5,
-    borderColor: '#ffffff',
+    borderColor: "#ffffff",
     transform: [{ scale: 1.04 }],
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOpacity: 0.35,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
@@ -1283,171 +1459,171 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(0,0,0,0.65)",
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   modalContent: {
     width: 460,
-    maxHeight: '80%',
-    backgroundColor: '#ffffff',
+    maxHeight: "80%",
+    backgroundColor: "#ffffff",
     borderRadius: 10,
-    overflow: 'hidden',
-    shadowColor: '#000',
+    overflow: "hidden",
+    shadowColor: "#000",
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 6,
   },
   modalHeader: {
     height: 44,
-    backgroundColor: '#3d6c46',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    backgroundColor: "#3d6c46",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 16,
   },
   modalTitle: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   modalCloseBtn: {
     width: 32,
     height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   modalCloseText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   modalBody: {
     padding: 16,
   },
   payModeGridModal: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
   },
   payModeModalBtn: {
-    width: '48%',
+    width: "48%",
     height: 70,
     borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 12,
     padding: 8,
   },
   payModeModalIcon: {
     fontSize: 22,
-    color: '#ffffff',
+    color: "#ffffff",
   },
   payModeModalLabel: {
     fontSize: 14,
-    fontWeight: '900',
-    color: '#ffffff',
+    fontWeight: "900",
+    color: "#ffffff",
     marginTop: 2,
   },
   payModeModalDesc: {
     fontSize: 10,
-    color: '#ffffffee',
+    color: "#ffffffee",
   },
 
   // TOTAL DISPLAY
   totalDisplayBox: {
     flex: 1,
-    backgroundColor: '#fde5b9',
+    backgroundColor: "#fde5b9",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#e8c98e',
+    borderColor: "#e8c98e",
     padding: 8,
     marginRight: 4,
-    justifyContent: 'space-between',
+    justifyContent: "space-between",
   },
   totalHeaderRow: {
-    alignItems: 'center',
+    alignItems: "center",
   },
   totalLabel: {
     fontSize: 15,
-    fontWeight: 'bold',
-    color: '#3a2717',
+    fontWeight: "bold",
+    color: "#3a2717",
   },
   totalBigNumberRow: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginVertical: 4,
   },
   totalBigNumber: {
     fontSize: 46,
-    fontWeight: '900',
-    color: '#281a0e',
+    fontWeight: "900",
+    color: "#281a0e",
     letterSpacing: -1,
   },
   tenderBalanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#ffffffdd',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#ffffffdd",
     borderRadius: 6,
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: '#e8d9c2',
+    borderColor: "#e8d9c2",
   },
   tenderCol: {
-    alignItems: 'flex-start',
+    alignItems: "flex-start",
   },
   tenderLabel: {
     fontSize: 11,
-    fontWeight: 'bold',
-    color: '#555',
+    fontWeight: "bold",
+    color: "#555",
   },
   tenderValueGreen: {
     fontSize: 19,
-    fontWeight: '900',
-    color: '#1b8a36',
+    fontWeight: "900",
+    color: "#1b8a36",
   },
   balanceValueRed: {
     fontSize: 19,
-    fontWeight: '900',
-    color: '#d32f2f',
+    fontWeight: "900",
+    color: "#d32f2f",
   },
 
   // NUMPAD
   numpadGrid: {
     width: 215,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    alignContent: 'space-between',
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignContent: "space-between",
   },
   numKey: {
-    width: '23%',
+    width: "23%",
     height: 50,
-    backgroundColor: '#eee6d8',
+    backgroundColor: "#eee6d8",
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 4,
     borderWidth: 1,
-    borderColor: '#d8ccb9',
+    borderColor: "#d8ccb9",
   },
   numKeySpecial: {
-    backgroundColor: '#dfd2c0',
+    backgroundColor: "#dfd2c0",
   },
   numKeyText: {
     fontSize: 19,
-    fontWeight: 'bold',
-    color: '#33271d',
+    fontWeight: "bold",
+    color: "#33271d",
   },
   enterKey: {
-    backgroundColor: '#523a28',
+    backgroundColor: "#523a28",
   },
   enterKeyText: {
     fontSize: 22,
-    color: '#ffffff',
-    fontWeight: 'bold',
+    color: "#ffffff",
+    fontWeight: "bold",
   },
 
   // ---------------------------------------------------------------------------
@@ -1456,12 +1632,12 @@ const styles = StyleSheet.create({
   // ---------------------------------------------------------------------------
   rightPanel: {
     flex: 3.5,
-    flexDirection: 'row',
-    backgroundColor: '#fbf7ee',
+    flexDirection: "row",
+    backgroundColor: "#fbf7ee",
     borderRadius: 6,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderWidth: 1,
-    borderColor: '#e5ded1',
+    borderColor: "#e5ded1",
   },
 
   // Category Rail Container - Compact vertical bar
@@ -1471,7 +1647,7 @@ const styles = StyleSheet.create({
     maxWidth: 78,
     flexGrow: 0,
     flexShrink: 0,
-    backgroundColor: '#1e1c1a',
+    backgroundColor: "#1e1c1a",
   },
   categoryRailScroll: {
     flex: 1,
@@ -1482,145 +1658,145 @@ const styles = StyleSheet.create({
     marginVertical: 3,
     marginHorizontal: 4,
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 2,
   },
   categoryBtnActive: {
     borderWidth: 2.5,
-    borderColor: '#ffffff',
+    borderColor: "#ffffff",
     transform: [{ scale: 1.03 }],
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOpacity: 0.3,
     shadowRadius: 3,
     shadowOffset: { width: 0, height: 1 },
   },
   catIcon: {
     fontSize: 16,
-    color: '#fff',
+    color: "#fff",
     marginBottom: 2,
   },
   catLabel: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 9,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontWeight: "bold",
+    textAlign: "center",
     lineHeight: 11,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
   },
 
   // Products Grid Container - Fills all remaining space smoothly!
   productsContainer: {
     flex: 1,
-    backgroundColor: '#fbf7ee',
+    backgroundColor: "#fbf7ee",
   },
   productsScroll: {
     flex: 1,
   },
   productsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     padding: 4,
-    justifyContent: 'flex-start',
+    justifyContent: "flex-start",
   },
   // Author: JAVITH 28-10-2026: 3-column compact product card layout for neat display
   productCard: {
-    width: '31.8%',
+    width: "31.8%",
     height: 122,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 8,
-    margin: '0.7%',
+    margin: "0.7%",
     padding: 5,
     borderWidth: 1,
-    borderColor: '#ded5c5',
-    justifyContent: 'space-between',
+    borderColor: "#ded5c5",
+    justifyContent: "space-between",
     elevation: 1,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOpacity: 0.05,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },
   },
   productThumb: {
-    width: '100%',
+    width: "100%",
     height: 50,
     borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
   },
   productEmoji: {
     fontSize: 22,
   },
   skuBadge: {
-    position: 'absolute',
+    position: "absolute",
     top: 2,
     left: 3,
-    backgroundColor: '#00000044',
+    backgroundColor: "#00000044",
     paddingHorizontal: 3,
     paddingVertical: 1,
     borderRadius: 3,
   },
   skuBadgeText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   productName: {
     fontSize: 10,
-    fontWeight: '700',
-    color: '#2a1e17',
-    textAlign: 'left',
+    fontWeight: "700",
+    color: "#2a1e17",
+    textAlign: "left",
     marginTop: 2,
     lineHeight: 12,
   },
   productCardBottom: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginTop: 2,
   },
   productPrice: {
     fontSize: 11,
-    fontWeight: '900',
-    color: '#1a1816',
+    fontWeight: "900",
+    color: "#1a1816",
   },
   productUom: {
     fontSize: 8,
-    fontWeight: '600',
-    color: '#78716c',
+    fontWeight: "600",
+    color: "#78716c",
   },
   productAddBtn: {
     width: 22,
     height: 22,
-    backgroundColor: '#2e7d32',
+    backgroundColor: "#2e7d32",
     borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   productAddPlus: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     lineHeight: 16,
   },
 
   // Loading & Empty States
   centerLoading: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   loadingText: {
     marginTop: 10,
     fontSize: 12,
-    fontWeight: '600',
-    color: '#6b655c',
+    fontWeight: "600",
+    color: "#6b655c",
   },
   centerEmpty: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   emptyIcon: {
@@ -1629,13 +1805,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 14,
-    fontWeight: '700',
-    color: '#44403c',
+    fontWeight: "700",
+    color: "#44403c",
     marginBottom: 4,
   },
   emptySubtitle: {
     fontSize: 11,
-    color: '#78716c',
-    textAlign: 'center',
+    color: "#78716c",
+    textAlign: "center",
   },
 });
