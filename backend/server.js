@@ -69,6 +69,10 @@ app.use('/api/auth', authRoutes);
 const inventoryRoutes = require('./routes/inventory');
 app.use('/api/inventory', inventoryRoutes);
 
+// [JAVITH - 28-10-2026]: Mount dedicated payment mode routes (tblInvPaymode)
+const paymodeRoutes = require('./routes/paymode');
+app.use('/api/paymode', paymodeRoutes);
+
 
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)

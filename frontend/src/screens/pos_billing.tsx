@@ -18,6 +18,7 @@ import {
   ScrollView,
   Platform,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 
 const API_URL = 'http://localhost:5000';
@@ -37,6 +38,18 @@ export interface TouchItem {
   SellingPrice: number;
   RetailPrice: number;
   UOM: string;
+}
+
+// Live PayMode Interface matching [dbo].[tblInvPaymode]
+// Author: JAVITH 28-10-2026: Typed interface for tblInvPaymode
+export interface PayModeItem {
+  Position: number;
+  PayMode: string;
+  Description: string;
+  Active: boolean;
+  Commission: number;
+  isVoucher: boolean;
+  isMember: boolean;
 }
 
 // Bill Item in cart table
@@ -72,15 +85,39 @@ function getGroupVisuals(groupCode: string, index: number) {
   };
 }
 
+// [JAVITH - 28-10-2026]: Dynamic visual attributes for tblInvPaymode payment buttons
+function getPayModeVisual(payMode: string, index: number) {
+  const upper = (payMode || '').toUpperCase().trim();
+  if (upper.includes('CASH')) return { bg: '#f4b400', icon: '💵' };
+  if (upper.includes('NETS') && !upper.includes('FLASH') && !upper.includes('QR')) return { bg: '#1976d2', icon: '💳' };
+  if (upper.includes('PAYNOW')) return { bg: '#00bcd4', icon: '📱' };
+  if (upper.includes('CDC')) return { bg: '#0097a7', icon: '🏷️' };
+  if (upper.includes('FLASH')) return { bg: '#00838f', icon: '⚡' };
+  if (upper.includes('AMEX')) return { bg: '#0070ba', icon: '💳' };
+  if (upper.includes('EZLINK')) return { bg: '#7b1fa2', icon: '📇' };
+  if (upper.includes('CREDIT')) return { bg: '#c2185b', icon: '💳' };
+  if (upper.includes('VOUCHER')) return { bg: '#e65100', icon: '🎟️' };
+
+  const fallback = ['#f4b400', '#1976d2', '#00bcd4', '#0097a7', '#8e24aa', '#e65100', '#2e7d32'];
+  return { bg: fallback[index % fallback.length], icon: '💳' };
+}
+
 export default function PosBillingScreen({ onLogout, cashierName, terminalCode }: PosBillingProps) {
   // ---------------------------------------------------------------------------
-  // LIVE DATABASE STATE (TBLinventorytsgroup & tblInventoryTSList)
+  // LIVE DATABASE STATE (TBLinventorytsgroup & tblInventoryTSList & tblInvPaymode)
   // ---------------------------------------------------------------------------
   const [groups, setGroups] = useState<TouchGroup[]>([]);
   const [items, setItems] = useState<TouchItem[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [loadingGroups, setLoadingGroups] = useState<boolean>(true);
   const [loadingItems, setLoadingItems] = useState<boolean>(false);
+
+  // Paymode state from tblInvPaymode
+  // Author: JAVITH 28-10-2026: Live state populated directly from tblInvPaymode
+  const [payModes, setPayModes] = useState<PayModeItem[]>([]);
+  const [selectedPayMode, setSelectedPayMode] = useState<string>('CASH');
+  const [loadingPayModes, setLoadingPayModes] = useState<boolean>(true);
+  const [showMorePayModes, setShowMorePayModes] = useState<boolean>(false);
 
   // Cart state
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -106,11 +143,34 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
   const [numpadValue, setNumpadValue] = useState('');
 
   // ---------------------------------------------------------------------------
-  // [JAVITH - 28-10-2026]: Load Touch Screen Groups from TBLinventorytsgroup
+  // [JAVITH - 28-10-2026]: Load Initial Live Data from Database
   // ---------------------------------------------------------------------------
   useEffect(() => {
     fetchTouchGroups();
+    fetchPayModes();
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // [JAVITH - 28-10-2026]: Load PayModes from tblInvPaymode
+  // ---------------------------------------------------------------------------
+  const fetchPayModes = async () => {
+    setLoadingPayModes(true);
+    try {
+      const res = await fetch(`${API_URL}/api/paymode`);
+      const data = await res.json();
+      if (res.ok && data.success && data.paymodes && data.paymodes.length > 0) {
+        setPayModes(data.paymodes);
+        setSelectedPayMode(data.paymodes[0].PayMode);
+      } else {
+        setPayModes([]);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not fetch live paymodes from database.');
+      setPayModes([]);
+    } finally {
+      setLoadingPayModes(false);
+    }
+  };
 
   const fetchTouchGroups = async () => {
     setLoadingGroups(true);
@@ -280,6 +340,50 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
       return;
     }
     setNumpadValue((prev) => prev + val);
+  };
+
+  // Paymode selection from tblInvPaymode
+  // Author: JAVITH 28-10-2026: Selects active payment mode and automatically populates tender
+  const handleSelectPayMode = (mode: string) => {
+    setSelectedPayMode(mode);
+    if (!numpadValue && !tenderAmount && netTotal > 0) {
+      setTenderAmount(netTotal.toFixed(2));
+    }
+  };
+
+  // Render PayMode Button dynamically from tblInvPaymode
+  // Author: JAVITH 28-10-2026: Renders active paymodes from tblInvPaymode with visual selection
+  const renderPayModeButton = (slotIndex: number, fallbackMode: string) => {
+    const payItem = payModes[slotIndex] || {
+      PayMode: fallbackMode,
+      Description: fallbackMode,
+      Position: slotIndex + 1,
+      Active: true,
+      Commission: 0,
+      isVoucher: false,
+      isMember: false,
+    };
+    const isSelected = selectedPayMode.toUpperCase() === payItem.PayMode.toUpperCase();
+    const visual = getPayModeVisual(payItem.PayMode, slotIndex);
+
+    return (
+      <TouchableOpacity
+        key={payItem.PayMode}
+        style={[
+          styles.posBtn,
+          { backgroundColor: visual.bg },
+          isSelected && styles.posBtnActivePayMode,
+        ]}
+        onPress={() => handleSelectPayMode(payItem.PayMode)}
+        onLongPress={() => setShowMorePayModes(true)}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.posBtnIcon}>{visual.icon}</Text>
+        <Text style={styles.posBtnTextBig} numberOfLines={1}>
+          {payItem.PayMode}
+        </Text>
+      </TouchableOpacity>
+    );
   };
 
   // Totals calculations
@@ -485,8 +589,10 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
 
           {/* Lower POS Control Block */}
           <View style={styles.lowerControlBlock}>
-            {/* 1. Quick Function Keys */}
+            {/* 1. Quick Function Keys & Dynamic PayModes from tblInvPaymode */}
+            {/* Author: JAVITH 28-10-2026: Column 3 dynamically linked to tblInvPaymode */}
             <View style={styles.posActionGrid}>
+              {/* Row 1 */}
               <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#2ba84a' }]}>
                 <Text style={styles.posBtnIcon}>💵</Text>
                 <Text style={styles.posBtnText}>Hold</Text>
@@ -498,11 +604,9 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                 <Text style={styles.posBtnIcon}>🗑</Text>
                 <Text style={styles.posBtnText}>Delete</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#f4b400' }]}>
-                <Text style={styles.posBtnIcon}>💵</Text>
-                <Text style={styles.posBtnText}>CASH</Text>
-              </TouchableOpacity>
+              {renderPayModeButton(0, 'CASH')}
 
+              {/* Row 2 */}
               <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#926c58' }]}>
                 <Text style={styles.posBtnSubtitle}>F7</Text>
                 <Text style={styles.posBtnText}>Release</Text>
@@ -514,10 +618,9 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                 <Text style={styles.posBtnSubtitle}>F2</Text>
                 <Text style={styles.posBtnText}>Clear</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#1976d2' }]}>
-                <Text style={styles.posBtnTextBig}>NETS</Text>
-              </TouchableOpacity>
+              {renderPayModeButton(1, 'NETS')}
 
+              {/* Row 3 */}
               <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#e91e63' }]}>
                 <Text style={styles.posBtnIcon}>📄</Text>
                 <Text style={styles.posBtnTextSmall}>View Bill</Text>
@@ -526,10 +629,9 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                 <Text style={styles.posBtnIcon}>🔍</Text>
                 <Text style={styles.posBtnTextSmall}>Search</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#00bcd4' }]}>
-                <Text style={styles.posBtnTextSmall}>PAYNOW</Text>
-              </TouchableOpacity>
+              {renderPayModeButton(2, 'PAYNOW')}
 
+              {/* Row 4 */}
               <TouchableOpacity
                 style={[styles.posBtn, { backgroundColor: '#d32f2f' }]}
                 onPress={onLogout}
@@ -541,15 +643,15 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                 <Text style={styles.posBtnIcon}>⚙</Text>
                 <Text style={styles.posBtnTextSmall}>Price{'\n'}Change</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#0097a7' }]}>
-                <Text style={styles.posBtnTextSmall}>FLASH{'\n'}PAY</Text>
-              </TouchableOpacity>
+              {renderPayModeButton(3, 'CDC')}
             </View>
 
             {/* 2. Total Display & Tender */}
             <View style={styles.totalDisplayBox}>
               <View style={styles.totalHeaderRow}>
-                <Text style={styles.totalLabel}>Net Total to Pay (F4)</Text>
+                <Text style={styles.totalLabel}>
+                  Net Total to Pay (F4) {selectedPayMode ? `• [${selectedPayMode}]` : ''}
+                </Text>
               </View>
               <View style={styles.totalBigNumberRow}>
                 <Text style={styles.totalBigNumber}>{netTotal.toFixed(2)}</Text>
@@ -738,6 +840,60 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
           </View>
         </View>
       </View>
+
+      {/* =========================================================================
+          MODAL: All Payment Modes from tblInvPaymode
+          Author: JAVITH 28-10-2026: Dialog to choose any active paymode from tblInvPaymode
+      ========================================================================= */}
+      <Modal
+        visible={showMorePayModes}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowMorePayModes(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Payment Mode (tblInvPaymode)</Text>
+              <TouchableOpacity
+                onPress={() => setShowMorePayModes(false)}
+                style={styles.modalCloseBtn}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody}>
+              <View style={styles.payModeGridModal}>
+                {payModes.map((pm, idx) => {
+                  const visual = getPayModeVisual(pm.PayMode, idx);
+                  const isSel = selectedPayMode.toUpperCase() === pm.PayMode.toUpperCase();
+                  return (
+                    <TouchableOpacity
+                      key={pm.PayMode}
+                      style={[
+                        styles.payModeModalBtn,
+                        { backgroundColor: visual.bg },
+                        isSel && styles.posBtnActivePayMode,
+                      ]}
+                      onPress={() => {
+                        handleSelectPayMode(pm.PayMode);
+                        setShowMorePayModes(false);
+                      }}
+                    >
+                      <Text style={styles.payModeModalIcon}>{visual.icon}</Text>
+                      <Text style={styles.payModeModalLabel}>{pm.PayMode}</Text>
+                      <Text style={styles.payModeModalDesc} numberOfLines={1}>
+                        {pm.Description}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1114,6 +1270,89 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  posBtnActivePayMode: {
+    borderWidth: 2.5,
+    borderColor: '#ffffff',
+    transform: [{ scale: 1.04 }],
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: 460,
+    maxHeight: '80%',
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  modalHeader: {
+    height: 44,
+    backgroundColor: '#3d6c46',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  modalTitle: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalBody: {
+    padding: 16,
+  },
+  payModeGridModal: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  payModeModalBtn: {
+    width: '48%',
+    height: 70,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+    padding: 8,
+  },
+  payModeModalIcon: {
+    fontSize: 22,
+    color: '#ffffff',
+  },
+  payModeModalLabel: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#ffffff',
+    marginTop: 2,
+  },
+  payModeModalDesc: {
+    fontSize: 10,
+    color: '#ffffffee',
   },
 
   // TOTAL DISPLAY

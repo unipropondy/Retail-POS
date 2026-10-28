@@ -134,7 +134,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         if (data.terminal) {
           setTerminal(data.terminal);
         }
-        setPassword('');
+        // [JAVITH - 28-10-2026]: Hand over authenticated cashier & terminal session to App.tsx
+        // App.tsx persists this session into AsyncStorage (@pos_active_session) so cashiers
+        // stay signed into POS billing even when refreshing the browser page (F5).
         if (onLoginSuccess) {
           onLoginSuccess(data.user, resolvedTerminal);
         }
