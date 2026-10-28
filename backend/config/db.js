@@ -1,5 +1,5 @@
 // ==============================================================================
-// Author: JAVITH,BAVANI 28-10-2026
+// Author: JAVITH, BAVANI 28-10-2026
 // Project: Supermarket Retail POS
 // File: config/db.js
 // Description: Microsoft SQL Server connection pool manager with auto-retry
