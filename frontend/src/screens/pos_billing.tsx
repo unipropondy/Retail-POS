@@ -830,7 +830,7 @@ export default function PosBillingScreen({
                 Tax <Text style={styles.footerVal}>0.0000</Text>
               </Text>
               <Text style={styles.footerSummaryText}>
-                RoundOFF <Text style={styles.footerVal}>0.00</Text>
+                RoundOff <Text style={styles.footerVal}>0.00</Text>
               </Text>
             </View>
           </View>
