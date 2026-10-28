@@ -1,4 +1,14 @@
-import React, { useState } from 'react';
+// ==============================================================================
+// Project: Supermarket Retail POS
+// Module: Touch Screen Billing Screen (POS)
+// File: src/screens/pos_billing.tsx
+//
+// Change History:
+//   - 28-10-2026 | JAVITH | Linked live MS SQL tables (TBLinventorytsgroup & tblInventoryTSList),
+//                          eliminated category rail gap, connected real inventory prices and codes.
+// ==============================================================================
+
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -6,82 +16,30 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  FlatList,
   Platform,
-  Image,
+  ActivityIndicator,
 } from 'react-native';
 
-// Categories matching the reference UI left-side category rail
-interface Category {
-  id: string;
-  name: string;
-  icon: string;
-  bg: string;
-  count?: number;
+const API_URL = 'http://localhost:5000';
+
+// Live Touch Screen Group Interface matching TBLinventorytsgroup
+export interface TouchGroup {
+  GroupCode: string;
+  SortCode: number;
 }
 
-const CATEGORIES: Category[] = [
-  { id: 'misc', name: 'MISC', icon: '⊞', bg: '#4d695b' },
-  { id: 'hot_drinks', name: 'HOT\nDRINKS', icon: '☕', bg: '#c72e27' },
-  { id: 'cold_drink', name: 'COLD\nDRINK', icon: '🥤', bg: '#177bb3' },
-  { id: 'snacks', name: 'SNACKS', icon: '🍟', bg: '#f49d25' },
-  { id: 'sweets', name: 'SWEETS', icon: '🍰', bg: '#c43a7a' },
-  { id: 'veg1', name: 'VEGETABL\nES 1', icon: '🥬', bg: '#237a3b' },
-  { id: 'veg2', name: 'VEGETABL\nES 2', icon: '🥦', bg: '#237a3b' },
-  { id: 'veg3', name: 'VEGETABL\nE 3', icon: '🥕', bg: '#1d899f' },
-  { id: 'fruits', name: 'FRUITS\nElectronics', icon: '🍎', bg: '#d8296a' },
-  { id: 'soaps', name: 'Soaps\nDetergent', icon: '🧴', bg: '#764ba2' },
-  { id: 'unsca', name: 'UNSCA\nITEM3', icon: '📦', bg: '#82563b' },
-  { id: 'rice', name: 'RICE ATTA', icon: '🌾', bg: '#e27b2b' },
-  { id: 'others', name: 'OTHERS', icon: '💬', bg: '#5e6871' },
-  { id: 'non_veg', name: 'NON VEG', icon: '🍗', bg: '#54463a' },
-];
-
-// Product Item interface
-interface ProductItem {
-  id: string;
-  code: string;
-  name: string;
-  category: string;
-  price: number;
-  image?: string;
-  avatarBg?: string;
-  isHot?: boolean;
+// Live Touch Screen Item Interface matching tblInventoryTSList joined with tblInventory
+export interface TouchItem {
+  GroupCode: string;
+  InventoryCode: string;
+  SortOrder: number;
+  Description: string;
+  SellingPrice: number;
+  RetailPrice: number;
+  UOM: string;
 }
 
-// Sample catalog based exactly on the image products
-const SAMPLE_PRODUCTS: ProductItem[] = [
-  { id: '1', code: 'TEA01', name: 'MINI TEA', category: 'hot_drinks', price: 0.80, avatarBg: '#ffedd5' },
-  { id: '2', code: 'COF01', name: 'MINI COFFEE', category: 'hot_drinks', price: 1.00, avatarBg: '#fef3c7' },
-  { id: '3', code: 'GIN01', name: 'GINGER TEA', category: 'hot_drinks', price: 1.00, avatarBg: '#ecfccb' },
-  { id: '4', code: 'ELA01', name: 'ELACHI TEA', category: 'hot_drinks', price: 1.00, avatarBg: '#ffedd5' },
-  { id: '5', code: 'MAS01', name: 'MASALATEA', category: 'hot_drinks', price: 1.00, avatarBg: '#fed7aa' },
-  { id: '6', code: 'MIL01', name: 'FRESH MILK', category: 'hot_drinks', price: 1.00, avatarBg: '#f1f5f9' },
-  { id: '7', code: 'TAK01', name: 'TEA-TAKE\nAWAY', category: 'hot_drinks', price: 1.30, avatarBg: '#fee2e2' },
-  { id: '8', code: 'TAK02', name: 'COFFEE\nTAKE AWAY', category: 'hot_drinks', price: 1.30, avatarBg: '#ffedd5' },
-  { id: '9', code: 'TAK03', name: 'GINGER TEA\nTAKE', category: 'hot_drinks', price: 1.30, avatarBg: '#fef9c3' },
-  { id: '10', code: 'TAK04', name: 'ELACHI TEA\nTAKE', category: 'hot_drinks', price: 1.30, avatarBg: '#fef08a' },
-  { id: '11', code: 'TAK05', name: 'MASALATEA\nTAKE', category: 'hot_drinks', price: 1.30, avatarBg: '#fed7aa' },
-  { id: '12', code: 'BIG01', name: 'TEA- BIG\nCUP', category: 'hot_drinks', price: 1.20, avatarBg: '#f3e8ff' },
-  { id: '13', code: 'BIG02', name: 'COFFEE BIG\nCUP', category: 'hot_drinks', price: 1.50, avatarBg: '#ffedd5' },
-  { id: '14', code: 'GIN02', name: 'GINGER TEA\n- BI', category: 'hot_drinks', price: 1.40, avatarBg: '#fef08a' },
-  { id: '15', code: 'ELA02', name: 'ELACHI TEA\n- BI', category: 'hot_drinks', price: 1.40, avatarBg: '#fde68a' },
-  { id: '16', code: 'MAS02', name: 'MASALATEA\n- BI', category: 'hot_drinks', price: 1.50, avatarBg: '#fed7aa' },
-  { id: '17', code: 'BST01', name: 'BOOST', category: 'hot_drinks', price: 1.50, avatarBg: '#fee2e2' },
-  { id: '18', code: 'HOR01', name: 'HORLICKS', category: 'hot_drinks', price: 1.50, avatarBg: '#e0f2fe' },
-  { id: '19', code: 'MAL01', name: 'MALTOVA', category: 'hot_drinks', price: 1.80, avatarBg: '#ffedd5' },
-  { id: '20', code: 'BRN01', name: 'BOURNVITA', category: 'hot_drinks', price: 1.50, avatarBg: '#fae8ff' },
-  { id: '21', code: 'RSM01', name: 'ROSE MILK', category: 'cold_drink', price: 1.50, avatarBg: '#fce7f3' },
-  { id: '22', code: 'FML02', name: 'FRESH MILK\n- BI', category: 'hot_drinks', price: 1.50, avatarBg: '#f8fafc' },
-  { id: '23', code: 'SKU01', name: 'SUKKU\nCOFFEE', category: 'hot_drinks', price: 1.30, avatarBg: '#fed7aa' },
-  { id: '24', code: 'SKU02', name: 'SUKKU\nCOFFEE -', category: 'hot_drinks', price: 1.50, avatarBg: '#ffedd5' },
-  { id: '25', code: 'EGG01', name: 'EGG PUPS', category: 'snacks', price: 1.50, avatarBg: '#fef3c7' },
-  { id: '26', code: 'SAM01', name: 'SAMOSA', category: 'snacks', price: 1.00, avatarBg: '#fed7aa' },
-  { id: '27', code: 'VAD01', name: 'MEDU VADA', category: 'snacks', price: 0.80, avatarBg: '#ffedd5' },
-  { id: '28', code: 'JAL01', name: 'JALEBI', category: 'sweets', price: 2.00, avatarBg: '#fed7aa' },
-];
-
-// Bill Item in table
+// Bill Item in cart table
 interface CartItem {
   id: string;
   code: string;
@@ -98,53 +56,166 @@ interface PosBillingProps {
   terminalCode?: string;
 }
 
+// [JAVITH - 28-10-2026]: Dynamic color palette for database categories
+const CATEGORY_PALETTE = [
+  '#237a3b', '#b45309', '#0284c7', '#f59e0b', '#4d695b',
+  '#ec4899', '#8b5cf6', '#d97706', '#06b6d4', '#dc2626',
+  '#ca8a04', '#0f766e', '#7c3aed', '#57534e', '#0d9488',
+  '#334155', '#475569', '#2563eb', '#78350f', '#059669',
+];
+
+function getGroupVisuals(groupCode: string, index: number) {
+  const bg = CATEGORY_PALETTE[index % CATEGORY_PALETTE.length];
+  return {
+    bg,
+    icon: '📦',
+  };
+}
+
 export default function PosBillingScreen({ onLogout, cashierName, terminalCode }: PosBillingProps) {
-  const [selectedCategory, setSelectedCategory] = useState('hot_drinks');
-  const [cart, setCart] = useState<CartItem[]>([
-    // Start with empty or sample row like Egg Pups
-  ]);
-  const [activeItem, setActiveItem] = useState<{ name: string; qty: number; price: number; stock: number }>({
-    name: 'EGG PUPS',
-    qty: -1,
-    price: 1.50,
+  // ---------------------------------------------------------------------------
+  // LIVE DATABASE STATE (TBLinventorytsgroup & tblInventoryTSList)
+  // ---------------------------------------------------------------------------
+  const [groups, setGroups] = useState<TouchGroup[]>([]);
+  const [items, setItems] = useState<TouchItem[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<string>('');
+  const [loadingGroups, setLoadingGroups] = useState<boolean>(true);
+  const [loadingItems, setLoadingItems] = useState<boolean>(false);
+
+  // Cart state
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1);
+
+  // Active top banner item
+  const [activeItem, setActiveItem] = useState<{
+    name: string;
+    qty: number;
+    price: number;
+    stock: number;
+  }>({
+    name: 'READY TO SCAN / SELECT ITEM',
+    qty: 0,
+    price: 0.0,
     stock: 0,
   });
 
+  // Search & Payment state
   const [skuCode, setSkuCode] = useState('');
   const [skuDesc, setSkuDesc] = useState('');
-  const [tenderAmount, setTenderAmount] = useState('2.00');
+  const [tenderAmount, setTenderAmount] = useState('0.00');
   const [numpadValue, setNumpadValue] = useState('');
 
-  // Add product to cart
-  const handleAddProduct = (prod: ProductItem) => {
+  // ---------------------------------------------------------------------------
+  // [JAVITH - 28-10-2026]: Load Touch Screen Groups from TBLinventorytsgroup
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    fetchTouchGroups();
+  }, []);
+
+  const fetchTouchGroups = async () => {
+    setLoadingGroups(true);
+    try {
+      const res = await fetch(`${API_URL}/api/inventory/touch-groups`);
+      const data = await res.json();
+      if (res.ok && data.success && data.groups && data.groups.length > 0) {
+        setGroups(data.groups);
+        // Default to first group returned from TBLinventorytsgroup
+        const firstGroup = data.groups[0].GroupCode;
+        setSelectedGroup(firstGroup);
+        fetchTouchItems(firstGroup);
+      } else {
+        setGroups([]);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not fetch live groups from database.');
+      setGroups([]);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // [JAVITH - 28-10-2026]: Load Touch Screen Items from tblInventoryTSList & tblInventory
+  // ---------------------------------------------------------------------------
+  const fetchTouchItems = async (groupCode?: string) => {
+    setLoadingItems(true);
+    try {
+      const url = groupCode
+        ? `${API_URL}/api/inventory/touch-items?groupCode=${encodeURIComponent(groupCode)}`
+        : `${API_URL}/api/inventory/touch-items`;
+
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (res.ok && data.success && data.items) {
+        setItems(data.items);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not fetch items from backend.');
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
+  // Switch category handler
+  const handleSelectGroup = (groupCode: string) => {
+    setSelectedGroup(groupCode);
+    fetchTouchItems(groupCode);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Filtered Products (by selected category & search input)
+  // ---------------------------------------------------------------------------
+  const filteredProducts = useMemo(() => {
+    let result = items;
+    if (selectedGroup) {
+      result = result.filter(
+        (it) => it.GroupCode.toUpperCase() === selectedGroup.toUpperCase()
+      );
+    }
+    if (skuDesc.trim()) {
+      const q = skuDesc.toLowerCase().trim();
+      result = result.filter((it) => it.Description.toLowerCase().includes(q));
+    }
+    if (skuCode.trim()) {
+      const q = skuCode.toLowerCase().trim();
+      result = result.filter((it) => it.InventoryCode.toLowerCase().includes(q));
+    }
+    return result;
+  }, [items, selectedGroup, skuDesc, skuCode]);
+
+  // ---------------------------------------------------------------------------
+  // CART OPERATIONS
+  // ---------------------------------------------------------------------------
+  const handleAddItem = (item: TouchItem) => {
     setActiveItem({
-      name: prod.name.replace('\n', ' '),
+      name: item.Description,
       qty: 1,
-      price: prod.price,
+      price: item.SellingPrice,
       stock: 25,
     });
 
     setCart((prev) => {
-      const existing = prev.find((item) => item.code === prod.code);
-      if (existing) {
-        return prev.map((item) =>
-          item.code === prod.code
+      const existingIndex = prev.findIndex((c) => c.code === item.InventoryCode);
+      if (existingIndex > -1) {
+        return prev.map((c, i) =>
+          i === existingIndex
             ? {
-                ...item,
-                qty: item.qty + 1,
-                amount: parseFloat(((item.qty + 1) * item.price - item.disc).toFixed(2)),
+                ...c,
+                qty: c.qty + 1,
+                amount: parseFloat(((c.qty + 1) * c.price - c.disc).toFixed(2)),
               }
-            : item
+            : c
         );
       } else {
         const newItem: CartItem = {
-          id: Date.now().toString(),
-          code: prod.code,
-          description: prod.name.replace('\n', ' '),
+          id: Date.now().toString() + Math.random().toString(),
+          code: item.InventoryCode,
+          description: item.Description,
           qty: 1,
-          price: prod.price,
+          price: item.SellingPrice,
           disc: 0.0,
-          amount: prod.price,
+          amount: item.SellingPrice,
         };
         return [...prev, newItem];
       }
@@ -153,9 +224,45 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
 
   // Adjust active item qty
   const handleQtyChange = (delta: number) => {
-    setActiveItem((prev) => {
-      const nextQty = prev.qty + delta;
-      return { ...prev, qty: nextQty };
+    if (cart.length === 0) return;
+    const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    setCart((prev) => {
+      return prev
+        .map((c, i) => {
+          if (i === targetIdx) {
+            const nextQty = c.qty + delta;
+            if (nextQty <= 0) return null;
+            return {
+              ...c,
+              qty: nextQty,
+              amount: parseFloat((nextQty * c.price - c.disc).toFixed(2)),
+            };
+          }
+          return c;
+        })
+        .filter(Boolean) as CartItem[];
+    });
+  };
+
+  // Delete cart item
+  const handleDeleteItem = () => {
+    if (cart.length === 0) return;
+    const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    setCart((prev) => prev.filter((_, i) => i !== targetIdx));
+    setSelectedCartIndex(-1);
+  };
+
+  // Clear entire cart - Author: JAVITH 28-10-2026: Clears cart & resets tender/balance state
+  const handleClearCart = () => {
+    setCart([]);
+    setSelectedCartIndex(-1);
+    setNumpadValue('');
+    setTenderAmount('');
+    setActiveItem({
+      name: 'READY TO SCAN / SELECT ITEM',
+      qty: 0,
+      price: 0.0,
+      stock: 0,
     });
   };
 
@@ -179,21 +286,14 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
   const totalQty = cart.reduce((acc, curr) => acc + curr.qty, 0);
   const subTotal = cart.reduce((acc, curr) => acc + curr.amount, 0);
   const discount = cart.reduce((acc, curr) => acc + curr.disc, 0);
-  const tax = 0.0;
-  const roundOff = 0.0;
   const netTotal = Math.max(0, subTotal);
-  const tender = parseFloat(tenderAmount) || 0.0;
+  const tender = parseFloat(numpadValue || tenderAmount) || 0.0;
   const balance = Math.max(0, tender - netTotal);
-
-  // Filter products by selected category
-  const filteredProducts = SAMPLE_PRODUCTS.filter(
-    (p) => selectedCategory === 'misc' || p.category === selectedCategory
-  );
 
   return (
     <View style={styles.screen}>
       {/* =========================================================================
-          TOP BAR: Brand, Stock Status, Selected Item, Quick Qty, Buttons
+          TOP BAR: Brand, Stock Status, Selected Item, Quick Qty, Actions
       ========================================================================= */}
       <View style={styles.topHeader}>
         {/* Logo / Brand Icon */}
@@ -208,13 +308,16 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
 
         {/* Item Name */}
         <View style={styles.activeNameBox}>
-          <Text style={styles.activeItemName}>{activeItem.name}</Text>
+          <Text style={styles.activeItemName} numberOfLines={1}>
+            {activeItem.name}
+          </Text>
         </View>
 
         {/* Math Calculation: -1 x 1.50 -1.50 */}
         <View style={styles.calcBox}>
           <Text style={styles.calcText}>
-            {activeItem.qty} x   {activeItem.price.toFixed(2)}   {(activeItem.qty * activeItem.price).toFixed(2)}
+            {activeItem.qty} x {activeItem.price.toFixed(2)}{' '}
+            {(activeItem.qty * activeItem.price).toFixed(2)}
           </Text>
         </View>
 
@@ -231,24 +334,26 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
           <Text style={styles.priceCheckText}>Price{'\n'}Check</Text>
         </TouchableOpacity>
 
-        {/* Cash Drawer / Radio Icon */}
-        <TouchableOpacity style={styles.iconSquareBtn}>
-          <Text style={styles.topIconText}>📻</Text>
-        </TouchableOpacity>
+        {/* Station Badge */}
+        <View style={styles.stationBadge}>
+          <Text style={styles.stationBadgeText}>
+            {terminalCode || 'HQPC1'} • {cashierName || 'CASHIER'}
+          </Text>
+        </View>
 
-        {/* Hamburger Menu */}
-        <TouchableOpacity style={styles.iconSquareBtn}>
-          <Text style={styles.topIconText}>☰</Text>
+        {/* Exit / Logout */}
+        <TouchableOpacity style={styles.iconSquareBtn} onPress={onLogout}>
+          <Text style={styles.topIconText}>⏻</Text>
         </TouchableOpacity>
       </View>
 
       {/* =========================================================================
-          INPUT BAR: SKU Cod, Description, Fast Qty, JD, JD, Round, TG
+          INPUT SEARCH BAR: SKU Code, Description, Fast Qty, JD, TG
       ========================================================================= */}
       <View style={styles.inputBar}>
         <View style={styles.skuCodBox}>
           <TextInput
-            placeholder="SKU Cod"
+            placeholder="SKU Code"
             placeholderTextColor="#8a7967"
             style={styles.inputField}
             value={skuCode}
@@ -257,7 +362,7 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
         </View>
         <View style={styles.descBox}>
           <TextInput
-            placeholder="Description"
+            placeholder="Search items by description..."
             placeholderTextColor="#8a7967"
             style={styles.inputField}
             value={skuDesc}
@@ -287,55 +392,70 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
       </View>
 
       {/* =========================================================================
-          MAIN BODY: LEFT TABLE + NUMPAD/ACTIONS, RIGHT CATEGORIES + PRODUCTS
+          MAIN BODY: LEFT TABLE + CONTROLS, RIGHT CATEGORIES + PRODUCT GRID
       ========================================================================= */}
       <View style={styles.mainContent}>
         {/* ---------------- LEFT PANEL: Table & Payment Controls ---------------- */}
         <View style={styles.leftPanel}>
           {/* Grid Table */}
           <View style={styles.tableContainer}>
-            {/* Table Header */}
+            {/* Table Header - Author: JAVITH 28-10-2026: Expanded column widths for clear readability */}
             <View style={styles.tableHeader}>
-              <Text style={[styles.thCell, { width: 65 }]}>Code</Text>
+              <Text style={[styles.thCell, { width: 85 }]}>Code</Text>
               <Text style={[styles.thCell, { flex: 1 }]}>Description</Text>
               <Text style={[styles.thCell, { width: 55, textAlign: 'center' }]}>Qty</Text>
-              <Text style={[styles.thCell, { width: 65, textAlign: 'right' }]}>Price</Text>
-              <Text style={[styles.thCell, { width: 55, textAlign: 'right' }]}>Disc</Text>
-              <Text style={[styles.thCell, { width: 75, textAlign: 'right', paddingRight: 8 }]}>Amount</Text>
+              <Text style={[styles.thCell, { width: 75, textAlign: 'right' }]}>Price</Text>
+              <Text style={[styles.thCell, { width: 60, textAlign: 'right' }]}>Disc</Text>
+              <Text style={[styles.thCell, { width: 85, textAlign: 'right', paddingRight: 8 }]}>Amount</Text>
             </View>
 
-            {/* Table Rows (Zebra striped cream/tan) */}
-            <ScrollView style={styles.tableBody}>
+            {/* Table Rows */}
+            <ScrollView style={styles.tableBody} showsVerticalScrollIndicator={false}>
               {cart.length === 0 ? (
-                // Fill empty lines for authentic POS screen look
                 Array.from({ length: 8 }).map((_, idx) => (
                   <View
                     key={idx}
                     style={[styles.tableRow, idx % 2 === 1 ? styles.rowEven : styles.rowOdd]}
                   >
-                    <Text style={[styles.tdCell, { width: 65 }]}></Text>
+                    <Text style={[styles.tdCell, { width: 85 }]}></Text>
                     <Text style={[styles.tdCell, { flex: 1 }]}></Text>
                     <Text style={[styles.tdCell, { width: 55 }]}></Text>
-                    <Text style={[styles.tdCell, { width: 65 }]}></Text>
-                    <Text style={[styles.tdCell, { width: 55 }]}></Text>
                     <Text style={[styles.tdCell, { width: 75 }]}></Text>
+                    <Text style={[styles.tdCell, { width: 60 }]}></Text>
+                    <Text style={[styles.tdCell, { width: 85 }]}></Text>
                   </View>
                 ))
               ) : (
                 cart.map((item, idx) => (
-                  <View
+                  <TouchableOpacity
                     key={item.id}
-                    style={[styles.tableRow, idx % 2 === 1 ? styles.rowEven : styles.rowOdd]}
+                    onPress={() => setSelectedCartIndex(idx)}
+                    style={[
+                      styles.tableRow,
+                      selectedCartIndex === idx
+                        ? styles.rowSelected
+                        : idx % 2 === 1
+                        ? styles.rowEven
+                        : styles.rowOdd,
+                    ]}
                   >
-                    <Text style={[styles.tdCell, { width: 65 }]}>{item.code}</Text>
-                    <Text style={[styles.tdCell, { flex: 1, fontWeight: '600' }]}>{item.description}</Text>
-                    <Text style={[styles.tdCell, { width: 55, textAlign: 'center' }]}>{item.qty}</Text>
-                    <Text style={[styles.tdCell, { width: 65, textAlign: 'right' }]}>{item.price.toFixed(2)}</Text>
-                    <Text style={[styles.tdCell, { width: 55, textAlign: 'right' }]}>{item.disc.toFixed(2)}</Text>
-                    <Text style={[styles.tdCell, { width: 75, textAlign: 'right', paddingRight: 8 }]}>
+                    <Text style={[styles.tdCell, { width: 85, fontWeight: '700' }]}>{item.code}</Text>
+                    <Text style={[styles.tdCell, { flex: 1, fontWeight: '600' }]} numberOfLines={1}>
+                      {item.description}
+                    </Text>
+                    <Text style={[styles.tdCell, { width: 55, textAlign: 'center', fontWeight: '700' }]}>
+                      {item.qty}
+                    </Text>
+                    <Text style={[styles.tdCell, { width: 75, textAlign: 'right' }]}>
+                      {item.price.toFixed(2)}
+                    </Text>
+                    <Text style={[styles.tdCell, { width: 60, textAlign: 'right' }]}>
+                      {item.disc.toFixed(2)}
+                    </Text>
+                    <Text style={[styles.tdCell, { width: 85, textAlign: 'right', paddingRight: 8, fontWeight: '700' }]}>
                       {item.amount.toFixed(2)}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 ))
               )}
             </ScrollView>
@@ -363,16 +483,18 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
             </View>
           </View>
 
-          {/* Lower POS Control Block: 3 sub-sections */}
+          {/* Lower POS Control Block */}
           <View style={styles.lowerControlBlock}>
-            {/* 1. Quick Function Keys (Hold, Delete, Cash, Nets, Search, Paynow, Flash Pay) */}
+            {/* 1. Quick Function Keys */}
             <View style={styles.posActionGrid}>
-              {/* Row 1 */}
               <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#2ba84a' }]}>
                 <Text style={styles.posBtnIcon}>💵</Text>
                 <Text style={styles.posBtnText}>Hold</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#ea4335' }]}>
+              <TouchableOpacity
+                style={[styles.posBtn, { backgroundColor: '#ea4335' }]}
+                onPress={handleDeleteItem}
+              >
                 <Text style={styles.posBtnIcon}>🗑</Text>
                 <Text style={styles.posBtnText}>Delete</Text>
               </TouchableOpacity>
@@ -381,12 +503,14 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                 <Text style={styles.posBtnText}>CASH</Text>
               </TouchableOpacity>
 
-              {/* Row 2 */}
               <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#926c58' }]}>
                 <Text style={styles.posBtnSubtitle}>F7</Text>
                 <Text style={styles.posBtnText}>Release</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#ff9800' }]}>
+              <TouchableOpacity
+                style={[styles.posBtn, { backgroundColor: '#ff9800' }]}
+                onPress={handleClearCart}
+              >
                 <Text style={styles.posBtnSubtitle}>F2</Text>
                 <Text style={styles.posBtnText}>Clear</Text>
               </TouchableOpacity>
@@ -394,7 +518,6 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                 <Text style={styles.posBtnTextBig}>NETS</Text>
               </TouchableOpacity>
 
-              {/* Row 3 */}
               <TouchableOpacity style={[styles.posBtn, { backgroundColor: '#e91e63' }]}>
                 <Text style={styles.posBtnIcon}>📄</Text>
                 <Text style={styles.posBtnTextSmall}>View Bill</Text>
@@ -407,7 +530,6 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
                 <Text style={styles.posBtnTextSmall}>PAYNOW</Text>
               </TouchableOpacity>
 
-              {/* Row 4 */}
               <TouchableOpacity
                 style={[styles.posBtn, { backgroundColor: '#d32f2f' }]}
                 onPress={onLogout}
@@ -445,7 +567,7 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
               </View>
             </View>
 
-            {/* 3. Numeric Keypad */}
+            {/* 3. Numeric Keypad - Author: JAVITH 28-10-2026: 4x4 symmetric touch keypad */}
             <View style={styles.numpadGrid}>
               {/* Row 1 */}
               <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('1')}>
@@ -457,7 +579,10 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
               <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('3')}>
                 <Text style={styles.numKeyText}>3</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.numKey, styles.numKeySpecial]} onPress={() => handleNumpad('-')}>
+              <TouchableOpacity
+                style={[styles.numKey, styles.numKeySpecial]}
+                onPress={() => handleNumpad('-')}
+              >
                 <Text style={styles.numKeyText}>-</Text>
               </TouchableOpacity>
 
@@ -471,7 +596,10 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
               <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('6')}>
                 <Text style={styles.numKeyText}>6</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.numKey, styles.numKeySpecial]} onPress={() => handleNumpad('+')}>
+              <TouchableOpacity
+                style={[styles.numKey, styles.numKeySpecial]}
+                onPress={() => handleNumpad('+')}
+              >
                 <Text style={styles.numKeyText}>+</Text>
               </TouchableOpacity>
 
@@ -485,22 +613,28 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
               <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('9')}>
                 <Text style={styles.numKeyText}>9</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.numKey, styles.enterKey]}
-                onPress={() => handleNumpad('ENTER')}
-              >
-                <Text style={styles.enterKeyText}>↵</Text>
-              </TouchableOpacity>
-
-              {/* Row 4 */}
               <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('0')}>
                 <Text style={styles.numKeyText}>0</Text>
               </TouchableOpacity>
+
+              {/* Row 4 */}
               <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('00')}>
                 <Text style={styles.numKeyText}>00</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.numKey} onPress={() => handleNumpad('.')}>
                 <Text style={styles.numKeyText}>.</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.numKey, styles.numKeySpecial]}
+                onPress={() => handleNumpad('C')}
+              >
+                <Text style={styles.numKeyText}>C</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.numKey, styles.enterKey]}
+                onPress={() => handleNumpad('ENTER')}
+              >
+                <Text style={styles.enterKeyText}>↵</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -508,72 +642,109 @@ export default function PosBillingScreen({ onLogout, cashierName, terminalCode }
 
         {/* ---------------- RIGHT PANEL: Category Sidebar + Product Grid ---------------- */}
         <View style={styles.rightPanel}>
-          {/* Vertical Category Rail */}
-          <ScrollView
-            style={styles.categoryRail}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingVertical: 2 }}
-          >
-            {CATEGORIES.map((cat) => {
-              const isSelected = selectedCategory === cat.id;
-              return (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={[
-                    styles.categoryBtn,
-                    { backgroundColor: cat.bg },
-                    isSelected && styles.categoryBtnActive,
-                  ]}
-                  onPress={() => setSelectedCategory(cat.id)}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.catIcon}>{cat.icon}</Text>
-                  <Text style={styles.catLabel}>{cat.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          {/* Vertical Category Rail (Compact vertical strip) */}
+          <View style={styles.categoryRailContainer}>
+            <ScrollView
+              style={styles.categoryRailScroll}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingVertical: 4, paddingBottom: 28 }}
+            >
+              {loadingGroups ? (
+                <ActivityIndicator color="#fff" size="small" style={{ marginTop: 20 }} />
+              ) : (
+                groups.map((group, idx) => {
+                  const isSelected = selectedGroup.toUpperCase() === group.GroupCode.toUpperCase();
+                  const visual = getGroupVisuals(group.GroupCode, idx);
 
-          {/* Product Items Grid (4 columns exactly like image) */}
-          <ScrollView style={styles.productsScroll} contentContainerStyle={styles.productsGrid}>
-            {filteredProducts.map((prod) => (
-              <View key={prod.id} style={styles.productCard}>
-                {/* Visual Avatar / Photo Thumbnail */}
-                <View style={[styles.productThumb, { backgroundColor: prod.avatarBg || '#fef3c7' }]}>
-                  <Text style={styles.productEmoji}>
-                    {prod.category === 'hot_drinks'
-                      ? '☕'
-                      : prod.category === 'cold_drink'
-                      ? '🥛'
-                      : prod.category === 'snacks'
-                      ? '🥐'
-                      : '🧁'}
-                  </Text>
-                </View>
+                  return (
+                    <TouchableOpacity
+                      key={group.GroupCode}
+                      style={[
+                        styles.categoryBtn,
+                        { backgroundColor: visual.bg },
+                        isSelected && styles.categoryBtnActive,
+                      ]}
+                      onPress={() => handleSelectGroup(group.GroupCode)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.catIcon}>{visual.icon}</Text>
+                      <Text style={styles.catLabel} numberOfLines={2}>
+                        {group.GroupCode}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
 
-                {/* Product Name */}
-                <Text style={styles.productName} numberOfLines={2}>
-                  {prod.name}
-                </Text>
-
-                {/* Bottom Row: Price and Quick (+) Button */}
-                <View style={styles.productCardBottom}>
-                  <Text style={styles.productPrice}>${prod.price.toFixed(2)}</Text>
-                  <TouchableOpacity
-                    style={styles.productAddBtn}
-                    onPress={() => handleAddProduct(prod)}
-                  >
-                    <Text style={styles.productAddPlus}>+</Text>
-                  </TouchableOpacity>
-                </View>
+          {/* Product Items Grid (Fills the entire remaining width cleanly with 4 equal columns) */}
+          <View style={styles.productsContainer}>
+            {loadingItems ? (
+              <View style={styles.centerLoading}>
+                <ActivityIndicator color="#1e3129" size="large" />
+                <Text style={styles.loadingText}>Loading {selectedGroup} items...</Text>
               </View>
-            ))}
-          </ScrollView>
+            ) : filteredProducts.length === 0 ? (
+              <View style={styles.centerEmpty}>
+                <Text style={styles.emptyIcon}>📦</Text>
+                <Text style={styles.emptyTitle}>No items configured</Text>
+                <Text style={styles.emptySubtitle}>No items found in group "{selectedGroup}"</Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.productsScroll}
+                contentContainerStyle={styles.productsGrid}
+                showsVerticalScrollIndicator={true}
+              >
+                {filteredProducts.map((prod) => {
+                  const visual = getGroupVisuals(prod.GroupCode, 0);
+
+                  return (
+                    <TouchableOpacity
+                      key={prod.InventoryCode}
+                      style={styles.productCard}
+                      onPress={() => handleAddItem(prod)}
+                      activeOpacity={0.85}
+                    >
+                      {/* Product Thumbnail Banner */}
+                      <View style={[styles.productThumb, { backgroundColor: visual.bg + '18' }]}>
+                        <Text style={styles.productEmoji}>{visual.icon}</Text>
+                        <View style={styles.skuBadge}>
+                          <Text style={styles.skuBadgeText}>{prod.InventoryCode}</Text>
+                        </View>
+                      </View>
+
+                      {/* Product Name */}
+                      <Text style={styles.productName} numberOfLines={2}>
+                        {prod.Description}
+                      </Text>
+
+                      {/* Bottom Row: Price and Quick (+) Button */}
+                      <View style={styles.productCardBottom}>
+                        <View>
+                          <Text style={styles.productPrice}>${prod.SellingPrice.toFixed(2)}</Text>
+                          {prod.UOM ? <Text style={styles.productUom}>{prod.UOM}</Text> : null}
+                        </View>
+                        <View style={styles.productAddBtn}>
+                          <Text style={styles.productAddPlus}>+</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
         </View>
       </View>
     </View>
   );
 }
+
+// ==============================================================================
+// STYLESHEET
+// ==============================================================================
 
 const styles = StyleSheet.create({
   screen: {
@@ -618,49 +789,57 @@ const styles = StyleSheet.create({
   },
   stockBox: {
     paddingHorizontal: 8,
-    marginRight: 16,
+    height: 32,
+    backgroundColor: '#f1eae0',
+    borderRadius: 4,
+    justifyContent: 'center',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#dcd1c2',
   },
   stockLabel: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#222',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4a3b2c',
   },
   activeNameBox: {
-    marginRight: 20,
+    flex: 1,
+    justifyContent: 'center',
+    marginRight: 8,
   },
   activeItemName: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#7b1e18',
-    letterSpacing: 0.5,
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#8b1e1b',
+    textTransform: 'uppercase',
   },
   calcBox: {
-    flex: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    marginRight: 8,
   },
   calcText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: 'bold',
-    color: '#222',
-    letterSpacing: 0.5,
+    color: '#2a1a0e',
   },
   qtyPlusBtn: {
-    width: 44,
+    width: 38,
     height: 36,
-    backgroundColor: '#4cae4f',
+    backgroundColor: '#43a047',
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 6,
+    marginRight: 4,
   },
   qtyMinusBtn: {
-    width: 44,
+    width: 38,
     height: 36,
     backgroundColor: '#e53935',
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   qtyBtnText: {
     color: '#fff',
@@ -669,9 +848,9 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   priceCheckBtn: {
-    backgroundColor: '#f59e0b',
     paddingHorizontal: 12,
     height: 36,
+    backgroundColor: '#f59e0b',
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
@@ -684,14 +863,30 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 13,
   },
+  stationBadge: {
+    backgroundColor: '#eee6d8',
+    paddingHorizontal: 10,
+    height: 32,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+    borderWidth: 1,
+    borderColor: '#d8ccb9',
+  },
+  stationBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#423d36',
+  },
   iconSquareBtn: {
-    width: 38,
+    width: 36,
     height: 36,
     backgroundColor: '#5d4037',
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 6,
+    marginLeft: 2,
   },
   topIconText: {
     color: '#fff',
@@ -792,9 +987,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
 
-  // LEFT PANEL
+  // LEFT PANEL (Cart table + Controls)
+  // Author: JAVITH 28-10-2026: Expanded to flex 6.5 to give maximum room to cart table, paymodes, total box, and numpad
   leftPanel: {
-    flex: 6,
+    flex: 6.5,
     marginRight: 4,
     display: 'flex',
     flexDirection: 'column',
@@ -813,67 +1009,72 @@ const styles = StyleSheet.create({
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#3d6c46', // Classic olive green header from screenshot
+    backgroundColor: '#3d6c46',
     height: 32,
     alignItems: 'center',
     paddingHorizontal: 6,
   },
   thCell: {
     color: '#ffffff',
-    fontWeight: '700',
-    fontSize: 13,
+    fontWeight: 'bold',
+    fontSize: 11,
+    paddingHorizontal: 2,
   },
   tableBody: {
     flex: 1,
+    backgroundColor: '#fbf7ee',
   },
   tableRow: {
     flexDirection: 'row',
-    height: 30,
     alignItems: 'center',
+    height: 32,
     paddingHorizontal: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#ede4d4',
   },
   rowOdd: {
-    backgroundColor: '#fffdf8',
+    backgroundColor: '#faf6eb',
   },
   rowEven: {
-    backgroundColor: '#f7f1e3',
+    backgroundColor: '#f4ede0',
+  },
+  rowSelected: {
+    backgroundColor: '#e2f0d9',
   },
   tdCell: {
-    fontSize: 12,
-    color: '#2c251f',
+    color: '#2a1a0e',
+    fontSize: 11,
+    paddingHorizontal: 2,
   },
   tableFooterStrip: {
-    height: 30,
+    height: 26,
+    backgroundColor: '#ffffff',
+    borderTopWidth: 1,
+    borderTopColor: '#d6cabd',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#f4ede0',
-    paddingHorizontal: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#dfd5c4',
+    justifyContent: 'space-around',
+    paddingHorizontal: 6,
   },
   footerSummaryText: {
     fontSize: 11,
-    color: '#443b33',
     fontWeight: 'bold',
+    color: '#2b2118',
   },
   footerVal: {
-    color: '#111',
+    color: '#000000',
     fontWeight: '900',
   },
 
   // LOWER CONTROL BLOCK
+  // Author: JAVITH 28-10-2026: Enhanced spacious layout for paymodes, net total, and numeric touch keys
   lowerControlBlock: {
     height: 220,
     flexDirection: 'row',
     marginTop: 4,
   },
-
-  // 1. POS FUNCTION BUTTONS
   posActionGrid: {
-    width: 210,
+    width: 255,
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
@@ -881,18 +1082,13 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   posBtn: {
-    width: '31%',
+    width: '31.5%',
     height: 50,
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 4,
     padding: 2,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
   },
   posBtnIcon: {
     fontSize: 15,
@@ -920,10 +1116,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // 2. TOTAL DISPLAY
+  // TOTAL DISPLAY
   totalDisplayBox: {
     flex: 1,
-    backgroundColor: '#fde5b9', // Golden yellow box from screenshot
+    backgroundColor: '#fde5b9',
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e8c98e',
@@ -935,7 +1131,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   totalLabel: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#3a2717',
   },
@@ -945,7 +1141,7 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   totalBigNumber: {
-    fontSize: 48,
+    fontSize: 46,
     fontWeight: '900',
     color: '#281a0e',
     letterSpacing: -1,
@@ -956,7 +1152,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffffdd',
     borderRadius: 6,
     paddingVertical: 4,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderWidth: 1,
     borderColor: '#e8d9c2',
   },
@@ -969,19 +1165,19 @@ const styles = StyleSheet.create({
     color: '#555',
   },
   tenderValueGreen: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '900',
     color: '#1b8a36',
   },
   balanceValueRed: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '900',
     color: '#d32f2f',
   },
 
-  // 3. NUMPAD
+  // NUMPAD
   numpadGrid: {
-    width: 190,
+    width: 215,
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
@@ -1002,56 +1198,63 @@ const styles = StyleSheet.create({
     backgroundColor: '#dfd2c0',
   },
   numKeyText: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: 'bold',
     color: '#33271d',
   },
   enterKey: {
     backgroundColor: '#523a28',
-    height: 104,
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: '23%',
   },
   enterKeyText: {
-    fontSize: 26,
+    fontSize: 22,
     color: '#ffffff',
     fontWeight: 'bold',
   },
 
   // ---------------------------------------------------------------------------
-  // RIGHT PANEL: CATEGORY RAIL + PRODUCT TILES
+  // RIGHT PANEL: Category Rail + Products Grid (Compact item page)
+  // Author: JAVITH 28-10-2026: Sized to flex 3.5 to keep item section compact & efficient
   // ---------------------------------------------------------------------------
   rightPanel: {
-    flex: 5.5,
+    flex: 3.5,
     flexDirection: 'row',
-    backgroundColor: '#fcf8f0',
+    backgroundColor: '#fbf7ee',
     borderRadius: 6,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#e5ded1',
   },
 
-  // Category sidebar
-  categoryRail: {
-    width: 86,
-    backgroundColor: '#272522',
+  // Category Rail Container - Compact vertical bar
+  categoryRailContainer: {
+    width: 78,
+    minWidth: 78,
+    maxWidth: 78,
+    flexGrow: 0,
+    flexShrink: 0,
+    backgroundColor: '#1e1c1a',
+  },
+  categoryRailScroll: {
+    flex: 1,
   },
   categoryBtn: {
-    width: 80,
-    height: 60,
-    marginVertical: 2,
-    marginHorizontal: 3,
+    width: 70,
+    height: 56,
+    marginVertical: 3,
+    marginHorizontal: 4,
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 2,
   },
   categoryBtnActive: {
-    borderWidth: 2,
+    borderWidth: 2.5,
     borderColor: '#ffffff',
-    transform: [{ scale: 1.02 }],
+    transform: [{ scale: 1.03 }],
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
   },
   catIcon: {
     fontSize: 16,
@@ -1064,12 +1267,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     lineHeight: 11,
+    textTransform: 'uppercase',
   },
 
-  // Products grid
+  // Products Grid Container - Fills all remaining space smoothly!
+  productsContainer: {
+    flex: 1,
+    backgroundColor: '#fbf7ee',
+  },
   productsScroll: {
     flex: 1,
-    backgroundColor: '#fbf6ec',
   },
   productsGrid: {
     flexDirection: 'row',
@@ -1077,13 +1284,14 @@ const styles = StyleSheet.create({
     padding: 4,
     justifyContent: 'flex-start',
   },
+  // Author: JAVITH 28-10-2026: 3-column compact product card layout for neat display
   productCard: {
-    width: '23.8%',
-    height: 132,
+    width: '31.8%',
+    height: 122,
     backgroundColor: '#ffffff',
-    borderRadius: 6,
-    margin: '0.6%',
-    padding: 4,
+    borderRadius: 8,
+    margin: '0.7%',
+    padding: 5,
     borderWidth: 1,
     borderColor: '#ded5c5',
     justifyContent: 'space-between',
@@ -1095,17 +1303,32 @@ const styles = StyleSheet.create({
   },
   productThumb: {
     width: '100%',
-    height: 64,
-    borderRadius: 4,
+    height: 50,
+    borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
   },
   productEmoji: {
-    fontSize: 32,
+    fontSize: 22,
+  },
+  skuBadge: {
+    position: 'absolute',
+    top: 2,
+    left: 3,
+    backgroundColor: '#00000044',
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  skuBadgeText: {
+    color: '#ffffff',
+    fontSize: 8,
+    fontWeight: '700',
   },
   productName: {
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: '#2a1e17',
     textAlign: 'left',
     marginTop: 2,
@@ -1118,22 +1341,62 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   productPrice: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
     color: '#1a1816',
   },
+  productUom: {
+    fontSize: 8,
+    fontWeight: '600',
+    color: '#78716c',
+  },
   productAddBtn: {
-    width: 24,
-    height: 24,
-    backgroundColor: '#388e3c',
+    width: 22,
+    height: 22,
+    backgroundColor: '#2e7d32',
     borderRadius: 4,
     justifyContent: 'center',
     alignItems: 'center',
   },
   productAddPlus: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
-    lineHeight: 18,
+    lineHeight: 16,
+  },
+
+  // Loading & Empty States
+  centerLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b655c',
+  },
+  centerEmpty: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyIcon: {
+    fontSize: 36,
+    marginBottom: 8,
+  },
+  emptyTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#44403c',
+    marginBottom: 4,
+  },
+  emptySubtitle: {
+    fontSize: 11,
+    color: '#78716c',
+    textAlign: 'center',
   },
 });

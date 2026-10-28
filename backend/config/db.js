@@ -7,26 +7,26 @@
 // ==============================================================================
 
 // Load secret variables from .env into process.env
-require('dotenv').config();
+require("dotenv").config();
 
 // Import the official Microsoft SQL driver for Node.js
-const sql = require('mssql');
+const sql = require("mssql");
 
 // Database connection configuration object
 const dbConfig = {
-  // Database user from .env (e.g. "ups")
+  // Database user from .env
   user: process.env.DB_USER,
 
-  // Database password from .env (e.g. "ups")
+  // Database password from .env
   password: process.env.DB_PASSWORD,
 
-  // IP address of your SQL Server machine (e.g. "26.63.60.58")
+  // IP address of your SQL Server machine
   server: process.env.DB_SERVER,
 
-  // Custom port number for SQL Server (e.g. 5799)
+  // Custom port number for SQL Server
   port: parseInt(process.env.DB_PORT, 10),
 
-  // Target database name (e.g. "RetailposERPKALAISMR")
+  // Target database name
   database: process.env.DB_NAME,
 
   options: {
@@ -64,14 +64,20 @@ async function getPool() {
     // Create new connection pool to MS SQL Server
     poolPromise = await sql.connect(dbConfig);
     isConnected = true;
-    console.log(`✅ [DB] Successfully connected to MS SQL Server (${process.env.DB_SERVER}:${process.env.DB_PORT})`);
+    console.log(
+      `✅ [DB] Successfully connected to MS SQL Server (${process.env.DB_SERVER}:${process.env.DB_PORT})`,
+    );
     return poolPromise;
   } catch (error) {
     isConnected = false;
     poolPromise = null;
     // Log friendly warning without crashing the entire backend server
-    console.warn(`⚠️ [DB] SQL Server currently unreachable at ${process.env.DB_SERVER}:${process.env.DB_PORT} (${error.message}).`);
-    console.warn(`ℹ️ [DB] Running in resilient mode. System will retry on next query.`);
+    console.warn(
+      `⚠️ [DB] SQL Server currently unreachable at ${process.env.DB_SERVER}:${process.env.DB_PORT} (${error.message}).`,
+    );
+    console.warn(
+      `ℹ️ [DB] Running in resilient mode. System will retry on next query.`,
+    );
     return null;
   }
 }

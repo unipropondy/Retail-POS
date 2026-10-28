@@ -65,6 +65,10 @@ app.get('/', (req, res) => {
 const authRoutes = require('./routes/auth')(JWT_SECRET);
 app.use('/api/auth', authRoutes);
 
+// [JAVITH - 28-10-2026]: Mount touch screen inventory routes (TBLinventorytsgroup & tblInventoryTSList)
+const inventoryRoutes = require('./routes/inventory');
+app.use('/api/inventory', inventoryRoutes);
+
 
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
