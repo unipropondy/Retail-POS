@@ -20,8 +20,20 @@ import {
   ActivityIndicator,
   Modal,
 } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 const API_URL = "http://localhost:5000";
+
+// Author: JAVITH, BAVANI 28-10-2026: Enterprise POS Typography Stack
+const FONT_FAMILY = Platform.select({
+  web: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  default: undefined,
+});
+
+const FONT_MONO = Platform.select({
+  web: '"JetBrains Mono", "SF Mono", Menlo, Consolas, Monaco, "Liberation Mono", "Courier New", monospace',
+  default: undefined,
+});
 
 // Live Touch Screen Group Interface matching TBLinventorytsgroup
 export interface TouchGroup {
@@ -93,42 +105,169 @@ const CATEGORY_PALETTE = [
   "#059669",
 ];
 
-function getGroupVisuals(groupCode: string, index: number) {
+// Author: JAVITH, BAVANI 28-10-2026: Intelligent vector icon mapping for category groups
+function getGroupIconName(
+  groupCode: string,
+): keyof typeof MaterialCommunityIcons.glyphMap {
+  const code = (groupCode || "").toUpperCase().trim();
+  if (
+    code.includes("VEG") ||
+    code.includes("FRUIT") ||
+    code.includes("GREENS") ||
+    code.includes("PRODUCE")
+  ) {
+    return "food-apple-outline";
+  }
+  if (
+    code.includes("BEER") ||
+    code.includes("ALCOHOL") ||
+    code.includes("WINE") ||
+    code.includes("LIQUOR")
+  ) {
+    return "glass-mug-variant";
+  }
+  if (
+    code.includes("GROCERY") ||
+    code.includes("RICE") ||
+    code.includes("OIL") ||
+    code.includes("PROVISION")
+  ) {
+    return "basket-outline";
+  }
+  if (
+    code.includes("DRINK") ||
+    code.includes("BEV") ||
+    code.includes("WATER") ||
+    code.includes("JUICE") ||
+    code.includes("TEA") ||
+    code.includes("COFFEE")
+  ) {
+    return "cup-water";
+  }
+  if (
+    code.includes("PHONE") ||
+    code.includes("ACC") ||
+    code.includes("ELEC") ||
+    code.includes("CABLE") ||
+    code.includes("MOBILE")
+  ) {
+    return "cellphone";
+  }
+  if (
+    code.includes("SNACK") ||
+    code.includes("BISCUIT") ||
+    code.includes("CHIP") ||
+    code.includes("COOKIE") ||
+    code.includes("CANDY")
+  ) {
+    return "cookie-outline";
+  }
+  if (
+    code.includes("BEEDI") ||
+    code.includes("TOBACCO") ||
+    code.includes("CIG") ||
+    code.includes("SMOKE")
+  ) {
+    return "fire";
+  }
+  if (
+    code.includes("BAKERY") ||
+    code.includes("BREAD") ||
+    code.includes("CAKE") ||
+    code.includes("PASTRY")
+  ) {
+    return "bread-slice-outline";
+  }
+  if (
+    code.includes("MEAT") ||
+    code.includes("CHICKEN") ||
+    code.includes("BEEF") ||
+    code.includes("PORK")
+  ) {
+    return "food-steak";
+  }
+  if (code.includes("FISH") || code.includes("SEAFOOD")) {
+    return "fish";
+  }
+  if (code.includes("FROZEN") || code.includes("ICE")) {
+    return "snowflake";
+  }
+  if (
+    code.includes("CLEAN") ||
+    code.includes("HOUSE") ||
+    code.includes("DETERGENT")
+  ) {
+    return "spray-bottle";
+  }
+  if (code.includes("STAT") || code.includes("BOOK") || code.includes("PEN")) {
+    return "notebook-outline";
+  }
+  if (
+    code.includes("MED") ||
+    code.includes("PHARM") ||
+    code.includes("HEALTH")
+  ) {
+    return "pill";
+  }
+  if (code.includes("MISC") || code.includes("SUNDRY")) {
+    return "shape-outline";
+  }
+  return "tag-outline";
+}
+
+function getGroupVisuals(
+  groupCode: string,
+  index: number,
+): { bg: string; iconName: keyof typeof MaterialCommunityIcons.glyphMap } {
   const bg = CATEGORY_PALETTE[index % CATEGORY_PALETTE.length];
   return {
     bg,
-    icon: "📦",
+    iconName: getGroupIconName(groupCode),
   };
 }
 
-// [JAVITH - 28-10-2026]: Dynamic visual attributes for tblInvPaymode payment buttons
-function getPayModeVisual(payMode: string, index: number) {
+// Author: JAVITH, BAVANI 28-10-2026: Vector icon mapping for tblInvPaymode payment modes
+function getPayModeVisual(
+  payMode: string,
+  index: number,
+): { bg: string; iconName: keyof typeof MaterialCommunityIcons.glyphMap } {
   const upper = (payMode || "").toUpperCase().trim();
-  if (upper.includes("CASH")) return { bg: "#f4b400", icon: "💵" };
+  if (upper.includes("CASH"))
+    return { bg: "#f4b400", iconName: "cash-multiple" };
   if (
     upper.includes("NETS") &&
     !upper.includes("FLASH") &&
     !upper.includes("QR")
   )
-    return { bg: "#1976d2", icon: "💳" };
-  if (upper.includes("PAYNOW")) return { bg: "#00bcd4", icon: "📱" };
-  if (upper.includes("CDC")) return { bg: "#0097a7", icon: "🏷️" };
-  if (upper.includes("FLASH")) return { bg: "#00838f", icon: "⚡" };
-  if (upper.includes("AMEX")) return { bg: "#0070ba", icon: "💳" };
-  if (upper.includes("EZLINK")) return { bg: "#7b1fa2", icon: "📇" };
-  if (upper.includes("CREDIT")) return { bg: "#c2185b", icon: "💳" };
-  if (upper.includes("VOUCHER")) return { bg: "#e65100", icon: "🎟️" };
+    return { bg: "#1976d2", iconName: "credit-card-outline" };
+  if (upper.includes("PAYNOW"))
+    return { bg: "#00bcd4", iconName: "qrcode-scan" };
+  if (upper.includes("CDC"))
+    return { bg: "#0097a7", iconName: "ticket-percent-outline" };
+  if (upper.includes("FLASH"))
+    return { bg: "#00838f", iconName: "flash-outline" };
+  if (upper.includes("AMEX"))
+    return { bg: "#0070ba", iconName: "credit-card-check-outline" };
+  if (upper.includes("EZLINK"))
+    return { bg: "#7b1fa2", iconName: "smart-card-outline" };
+  if (upper.includes("CREDIT"))
+    return { bg: "#c2185b", iconName: "credit-card-fast-outline" };
+  if (upper.includes("VOUCHER"))
+    return { bg: "#e65100", iconName: "ticket-confirmation-outline" };
 
-  const fallback = [
-    "#f4b400",
-    "#1976d2",
-    "#00bcd4",
-    "#0097a7",
-    "#8e24aa",
-    "#e65100",
-    "#2e7d32",
+  const fallback: Array<{
+    bg: string;
+    iconName: keyof typeof MaterialCommunityIcons.glyphMap;
+  }> = [
+    { bg: "#f4b400", iconName: "cash-multiple" },
+    { bg: "#1976d2", iconName: "credit-card-outline" },
+    { bg: "#00bcd4", iconName: "qrcode-scan" },
+    { bg: "#0097a7", iconName: "ticket-percent-outline" },
+    { bg: "#8e24aa", iconName: "credit-card-outline" },
+    { bg: "#e65100", iconName: "ticket-outline" },
+    { bg: "#2e7d32", iconName: "wallet-outline" },
   ];
-  return { bg: fallback[index % fallback.length], icon: "💳" };
+  return fallback[index % fallback.length];
 }
 
 export default function PosBillingScreen({
@@ -418,7 +557,11 @@ export default function PosBillingScreen({
         onLongPress={() => setShowMorePayModes(true)}
         activeOpacity={0.85}
       >
-        <Text style={styles.posBtnIcon}>{visual.icon}</Text>
+        <MaterialCommunityIcons
+          name={visual.iconName}
+          size={18}
+          color="#ffffff"
+        />
         <Text style={styles.posBtnTextBig} numberOfLines={1}>
           {payItem.PayMode}
         </Text>
@@ -442,7 +585,11 @@ export default function PosBillingScreen({
       <View style={styles.topHeader}>
         {/* Logo / Brand Icon */}
         <View style={styles.logoBadge}>
-          <Text style={styles.logoSymbol}>❖</Text>
+          <MaterialCommunityIcons
+            name="storefront-outline"
+            size={20}
+            color="#f8d7b3"
+          />
         </View>
 
         {/* Stock info */}
@@ -470,13 +617,13 @@ export default function PosBillingScreen({
           style={styles.qtyPlusBtn}
           onPress={() => handleQtyChange(1)}
         >
-          <Text style={styles.qtyBtnText}>+</Text>
+          <MaterialCommunityIcons name="plus" size={20} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.qtyMinusBtn}
           onPress={() => handleQtyChange(-1)}
         >
-          <Text style={styles.qtyBtnText}>-</Text>
+          <MaterialCommunityIcons name="minus" size={20} color="#fff" />
         </TouchableOpacity>
 
         {/* Price Check Button */}
@@ -493,7 +640,7 @@ export default function PosBillingScreen({
 
         {/* Exit / Logout */}
         <TouchableOpacity style={styles.iconSquareBtn} onPress={onLogout}>
-          <Text style={styles.topIconText}>⏻</Text>
+          <MaterialCommunityIcons name="power" size={18} color="#fff" />
         </TouchableOpacity>
       </View>
 
@@ -683,7 +830,7 @@ export default function PosBillingScreen({
                 Tax <Text style={styles.footerVal}>0.0000</Text>
               </Text>
               <Text style={styles.footerSummaryText}>
-                RoundOF <Text style={styles.footerVal}>0.00</Text>
+                RoundOFF <Text style={styles.footerVal}>0.00</Text>
               </Text>
             </View>
           </View>
@@ -697,14 +844,22 @@ export default function PosBillingScreen({
               <TouchableOpacity
                 style={[styles.posBtn, { backgroundColor: "#2ba84a" }]}
               >
-                <Text style={styles.posBtnIcon}>💵</Text>
+                <MaterialCommunityIcons
+                  name="pause-circle-outline"
+                  size={18}
+                  color="#fff"
+                />
                 <Text style={styles.posBtnText}>Hold</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.posBtn, { backgroundColor: "#ea4335" }]}
                 onPress={handleDeleteItem}
               >
-                <Text style={styles.posBtnIcon}>🗑</Text>
+                <MaterialCommunityIcons
+                  name="trash-can-outline"
+                  size={18}
+                  color="#fff"
+                />
                 <Text style={styles.posBtnText}>Delete</Text>
               </TouchableOpacity>
               {renderPayModeButton(0, "CASH")}
@@ -729,13 +884,17 @@ export default function PosBillingScreen({
               <TouchableOpacity
                 style={[styles.posBtn, { backgroundColor: "#e91e63" }]}
               >
-                <Text style={styles.posBtnIcon}>📄</Text>
+                <MaterialCommunityIcons
+                  name="receipt-text-outline"
+                  size={18}
+                  color="#fff"
+                />
                 <Text style={styles.posBtnTextSmall}>View Bill</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.posBtn, { backgroundColor: "#3f51b5" }]}
               >
-                <Text style={styles.posBtnIcon}>🔍</Text>
+                <MaterialCommunityIcons name="magnify" size={18} color="#fff" />
                 <Text style={styles.posBtnTextSmall}>Search</Text>
               </TouchableOpacity>
               {renderPayModeButton(2, "PAYNOW")}
@@ -751,7 +910,11 @@ export default function PosBillingScreen({
               <TouchableOpacity
                 style={[styles.posBtn, { backgroundColor: "#607d8b" }]}
               >
-                <Text style={styles.posBtnIcon}>⚙</Text>
+                <MaterialCommunityIcons
+                  name="tag-edit-outline"
+                  size={18}
+                  color="#fff"
+                />
                 <Text style={styles.posBtnTextSmall}>Price{"\n"}Change</Text>
               </TouchableOpacity>
               {renderPayModeButton(3, "CDC")}
@@ -888,7 +1051,11 @@ export default function PosBillingScreen({
                 style={[styles.numKey, styles.enterKey]}
                 onPress={() => handleNumpad("ENTER")}
               >
-                <Text style={styles.enterKeyText}>↵</Text>
+                <MaterialCommunityIcons
+                  name="keyboard-return"
+                  size={22}
+                  color="#ffffff"
+                />
               </TouchableOpacity>
             </View>
           </View>
@@ -927,7 +1094,12 @@ export default function PosBillingScreen({
                       onPress={() => handleSelectGroup(group.GroupCode)}
                       activeOpacity={0.85}
                     >
-                      <Text style={styles.catIcon}>{visual.icon}</Text>
+                      <MaterialCommunityIcons
+                        name={visual.iconName}
+                        size={18}
+                        color="#ffffff"
+                        style={styles.catIcon}
+                      />
                       <Text style={styles.catLabel} numberOfLines={2}>
                         {group.GroupCode}
                       </Text>
@@ -949,7 +1121,11 @@ export default function PosBillingScreen({
               </View>
             ) : filteredProducts.length === 0 ? (
               <View style={styles.centerEmpty}>
-                <Text style={styles.emptyIcon}>📦</Text>
+                <MaterialCommunityIcons
+                  name="cube-off-outline"
+                  size={38}
+                  color="#9ca3af"
+                />
                 <Text style={styles.emptyTitle}>No items configured</Text>
                 <Text style={styles.emptySubtitle}>
                   No items found in group "{selectedGroup}"
@@ -975,10 +1151,14 @@ export default function PosBillingScreen({
                       <View
                         style={[
                           styles.productThumb,
-                          { backgroundColor: visual.bg + "18" },
+                          { backgroundColor: visual.bg + "14" },
                         ]}
                       >
-                        <Text style={styles.productEmoji}>{visual.icon}</Text>
+                        <MaterialCommunityIcons
+                          name={visual.iconName}
+                          size={24}
+                          color={visual.bg}
+                        />
                         <View style={styles.skuBadge}>
                           <Text style={styles.skuBadgeText}>
                             {prod.InventoryCode}
@@ -1002,7 +1182,11 @@ export default function PosBillingScreen({
                           ) : null}
                         </View>
                         <View style={styles.productAddBtn}>
-                          <Text style={styles.productAddPlus}>+</Text>
+                          <MaterialCommunityIcons
+                            name="plus"
+                            size={16}
+                            color="#fff"
+                          />
                         </View>
                       </View>
                     </TouchableOpacity>
@@ -1057,7 +1241,11 @@ export default function PosBillingScreen({
                         setShowMorePayModes(false);
                       }}
                     >
-                      <Text style={styles.payModeModalIcon}>{visual.icon}</Text>
+                      <MaterialCommunityIcons
+                        name={visual.iconName}
+                        size={24}
+                        color="#ffffff"
+                      />
                       <Text style={styles.payModeModalLabel}>{pm.PayMode}</Text>
                       <Text style={styles.payModeModalDesc} numberOfLines={1}>
                         {pm.Description}
@@ -1114,11 +1302,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 10,
   },
-  logoSymbol: {
-    color: "#f8d7b3",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
   stockBox: {
     paddingHorizontal: 8,
     height: 32,
@@ -1130,6 +1313,7 @@ const styles = StyleSheet.create({
     borderColor: "#dcd1c2",
   },
   stockLabel: {
+    fontFamily: FONT_FAMILY,
     fontSize: 12,
     fontWeight: "700",
     color: "#4a3b2c",
@@ -1140,6 +1324,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   activeItemName: {
+    fontFamily: FONT_FAMILY,
     fontSize: 15,
     fontWeight: "800",
     color: "#8b1e1b",
@@ -1151,6 +1336,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   calcText: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     fontSize: 13,
     fontWeight: "bold",
     color: "#2a1a0e",
@@ -1173,12 +1360,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 6,
   },
-  qtyBtnText: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "bold",
-    lineHeight: 24,
-  },
   priceCheckBtn: {
     paddingHorizontal: 12,
     height: 36,
@@ -1189,6 +1370,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   priceCheckText: {
+    fontFamily: FONT_FAMILY,
     color: "#fff",
     fontWeight: "bold",
     fontSize: 11,
@@ -1207,6 +1389,8 @@ const styles = StyleSheet.create({
     borderColor: "#d8ccb9",
   },
   stationBadgeText: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     fontSize: 11,
     fontWeight: "700",
     color: "#423d36",
@@ -1219,10 +1403,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginLeft: 2,
-  },
-  topIconText: {
-    color: "#fff",
-    fontSize: 16,
   },
 
   // ---------------------------------------------------------------------------
@@ -1262,6 +1442,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   inputField: {
+    fontFamily: FONT_FAMILY,
     fontSize: 13,
     color: "#333",
     padding: 0,
@@ -1279,6 +1460,8 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   pillRedText: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     color: "#d32f2f",
     fontWeight: "bold",
     fontSize: 12,
@@ -1293,6 +1476,7 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   pillTagText: {
+    fontFamily: FONT_FAMILY,
     color: "#fff",
     fontWeight: "bold",
     fontSize: 12,
@@ -1306,6 +1490,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   pillTagDarkText: {
+    fontFamily: FONT_FAMILY,
     color: "#fff",
     fontWeight: "bold",
     fontSize: 12,
@@ -1347,6 +1532,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   thCell: {
+    fontFamily: FONT_FAMILY,
     color: "#ffffff",
     fontWeight: "bold",
     fontSize: 11,
@@ -1374,6 +1560,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#e2f0d9",
   },
   tdCell: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     color: "#2a1a0e",
     fontSize: 11,
     paddingHorizontal: 2,
@@ -1389,11 +1577,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   footerSummaryText: {
+    fontFamily: FONT_FAMILY,
     fontSize: 11,
     fontWeight: "bold",
     color: "#2b2118",
   },
   footerVal: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     color: "#000000",
     fontWeight: "900",
   },
@@ -1421,27 +1612,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 4,
     padding: 2,
-  },
-  posBtnIcon: {
-    fontSize: 15,
-    color: "#fff",
+    gap: 2,
   },
   posBtnSubtitle: {
+    fontFamily: FONT_FAMILY,
     color: "#ffffffcc",
     fontSize: 10,
     fontWeight: "700",
   },
   posBtnText: {
+    fontFamily: FONT_FAMILY,
     color: "#ffffff",
     fontSize: 11,
     fontWeight: "bold",
   },
   posBtnTextBig: {
+    fontFamily: FONT_FAMILY,
     color: "#ffffff",
     fontSize: 13,
     fontWeight: "900",
   },
   posBtnTextSmall: {
+    fontFamily: FONT_FAMILY,
     color: "#ffffff",
     fontSize: 10,
     fontWeight: "bold",
@@ -1484,6 +1676,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   modalTitle: {
+    fontFamily: FONT_FAMILY,
     color: "#ffffff",
     fontSize: 14,
     fontWeight: "bold",
@@ -1495,6 +1688,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalCloseText: {
+    fontFamily: FONT_FAMILY,
     color: "#ffffff",
     fontSize: 18,
     fontWeight: "bold",
@@ -1515,18 +1709,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
     padding: 8,
-  },
-  payModeModalIcon: {
-    fontSize: 22,
-    color: "#ffffff",
+    gap: 2,
   },
   payModeModalLabel: {
+    fontFamily: FONT_FAMILY,
     fontSize: 14,
     fontWeight: "900",
     color: "#ffffff",
     marginTop: 2,
   },
   payModeModalDesc: {
+    fontFamily: FONT_FAMILY,
     fontSize: 10,
     color: "#ffffffee",
   },
@@ -1546,6 +1739,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   totalLabel: {
+    fontFamily: FONT_FAMILY,
     fontSize: 15,
     fontWeight: "bold",
     color: "#3a2717",
@@ -1556,6 +1750,8 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   totalBigNumber: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     fontSize: 46,
     fontWeight: "900",
     color: "#281a0e",
@@ -1575,16 +1771,21 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   tenderLabel: {
+    fontFamily: FONT_FAMILY,
     fontSize: 11,
     fontWeight: "bold",
     color: "#555",
   },
   tenderValueGreen: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     fontSize: 19,
     fontWeight: "900",
     color: "#1b8a36",
   },
   balanceValueRed: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     fontSize: 19,
     fontWeight: "900",
     color: "#d32f2f",
@@ -1613,17 +1814,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#dfd2c0",
   },
   numKeyText: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     fontSize: 19,
     fontWeight: "bold",
     color: "#33271d",
   },
   enterKey: {
     backgroundColor: "#523a28",
-  },
-  enterKeyText: {
-    fontSize: 22,
-    color: "#ffffff",
-    fontWeight: "bold",
   },
 
   // ---------------------------------------------------------------------------
@@ -1672,11 +1870,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
   },
   catIcon: {
-    fontSize: 16,
-    color: "#fff",
     marginBottom: 2,
   },
   catLabel: {
+    fontFamily: FONT_FAMILY,
     color: "#ffffff",
     fontSize: 9,
     fontWeight: "bold",
@@ -1724,9 +1921,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     position: "relative",
   },
-  productEmoji: {
-    fontSize: 22,
-  },
   skuBadge: {
     position: "absolute",
     top: 2,
@@ -1737,11 +1931,14 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   skuBadgeText: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     color: "#ffffff",
     fontSize: 8,
     fontWeight: "700",
   },
   productName: {
+    fontFamily: FONT_FAMILY,
     fontSize: 10,
     fontWeight: "700",
     color: "#2a1e17",
@@ -1756,11 +1953,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   productPrice: {
+    fontFamily: FONT_MONO,
+    fontVariant: ["tabular-nums"],
     fontSize: 11,
     fontWeight: "900",
     color: "#1a1816",
   },
   productUom: {
+    fontFamily: FONT_FAMILY,
     fontSize: 8,
     fontWeight: "600",
     color: "#78716c",
@@ -1773,12 +1973,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  productAddPlus: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "bold",
-    lineHeight: 16,
-  },
 
   // Loading & Empty States
   centerLoading: {
@@ -1788,6 +1982,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   loadingText: {
+    fontFamily: FONT_FAMILY,
     marginTop: 10,
     fontSize: 12,
     fontWeight: "600",
@@ -1799,17 +1994,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 20,
   },
-  emptyIcon: {
-    fontSize: 36,
-    marginBottom: 8,
-  },
   emptyTitle: {
+    fontFamily: FONT_FAMILY,
     fontSize: 14,
     fontWeight: "700",
     color: "#44403c",
+    marginTop: 8,
     marginBottom: 4,
   },
   emptySubtitle: {
+    fontFamily: FONT_FAMILY,
     fontSize: 11,
     color: "#78716c",
     textAlign: "center",

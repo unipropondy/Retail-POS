@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Platform,
 } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 // Backend API URL - connects to our Express server
 const API_URL = "http://localhost:5000";
@@ -247,7 +248,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {/* Quick Action Tiles */}
             <View style={styles.actionRow}>
               <View style={styles.actionTile}>
-                <Text style={styles.actionIcon}>🛒</Text>
+                <MaterialCommunityIcons
+                  name="cart-outline"
+                  size={26}
+                  color="#c59f60"
+                  style={{ marginBottom: 4 }}
+                />
                 <Text style={styles.actionHeading}>New Checkout</Text>
                 <Text style={styles.actionDesc}>
                   Ready to scan barcode items & weigh products
@@ -255,7 +261,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </View>
 
               <View style={styles.actionTile}>
-                <Text style={styles.actionIcon}>📦</Text>
+                <MaterialCommunityIcons
+                  name="tag-outline"
+                  size={26}
+                  color="#c59f60"
+                  style={{ marginBottom: 4 }}
+                />
                 <Text style={styles.actionHeading}>Price & Stock Check</Text>
                 <Text style={styles.actionDesc}>
                   Instant PLU search and stock availability
