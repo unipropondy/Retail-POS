@@ -210,7 +210,20 @@ module.exports = function (jwtSecret) {
         });
       }
 
-      // 7. Generate signed JWT session token with both Cashier and Terminal context
+      // 7. Verify Cashier Permission (IsCashier in tblMausermaster)
+      const isCashier = user.IsCashier === 1 || user.IsCashier === true;
+      if (!isCashier) {
+        console.warn(
+          `⛔ [PERMISSION DENIED] User '${user.UserName}' (${user.UserCode}) has IsCashier = 0. Access denied.`,
+        );
+        return res.status(403).json({
+          success: false,
+          permissionDenied: true,
+          message: "User does not have permission for cashier.",
+        });
+      }
+
+      // 8. Generate signed JWT session token with both Cashier and Terminal context
       const token = jwt.sign(
         {
           unid: user.unid,

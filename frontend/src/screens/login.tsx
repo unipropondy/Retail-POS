@@ -2,8 +2,8 @@
 // Author: JAVITH, BAVANI 28-10-2026
 // Project: Supermarket Retail POS
 // File: src/screens/login.tsx
-// Description: Single-page Cashier Login and Station Terminal UI with
-//              tblmaTerminal ComputerName validation and warm luxury theme.
+// Description: Cashier Login Screen themed to GreenMart Supermarket POS with
+//              integrated high-density Touch Numpad and terminal validation.
 // ==============================================================================
 
 import React, { useState, useEffect } from "react";
@@ -21,6 +21,17 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 // Backend API URL - connects to our Express server
 const API_URL = "http://localhost:5000";
+
+// Enterprise POS Typography Stack
+const FONT_FAMILY = Platform.select({
+  web: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  default: undefined,
+});
+
+const FONT_MONO = Platform.select({
+  web: '"JetBrains Mono", "SF Mono", Menlo, Consolas, Monaco, monospace',
+  default: undefined,
+});
 
 // Interface representing the authenticated cashier / admin from tblMausermaster
 export interface CashierProfile {
@@ -50,9 +61,13 @@ interface LoginScreenProps {
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
-  // State for cashier user input
+  // Cashier user input states
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Focus target for the touch Numpad ('username' or 'password')
+  const [focusedField, setFocusedField] = useState<"username" | "password">("username");
 
   // Terminal configuration states
   const [terminal, setTerminal] = useState<TerminalProfile | null>(null);
@@ -63,7 +78,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Authenticated cashier profile
+  // Authenticated cashier profile (for welcome screen fallback)
   const [activeUser, setActiveUser] = useState<CashierProfile | null>(null);
 
   // ----------------------------------------------------------------------------
@@ -85,15 +100,13 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         setTerminal(data.terminal);
         setIsTerminalBlocked(false);
       } else {
-        // Terminal is not configured in tblmaTerminal
         setIsTerminalBlocked(true);
         setErrorMessage(
           data.message ||
-            "Terminal not configured. Please contact system administartor.",
+            "Terminal not configured. Please contact system administrator.",
         );
       }
-    } catch (err) {
-      // Backend not yet reachable
+    } catch {
       setErrorMessage(
         'Unable to connect to backend server. Make sure "node server.js" is running.',
       );
@@ -103,18 +116,59 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   };
 
   // ----------------------------------------------------------------------------
-  // Handle Cashier Login
+  // Handle Touch Numpad Key Press
   // ----------------------------------------------------------------------------
-  const handleLogin = async () => {
-    // 1. Ensure username is entered
-    if (!username.trim()) {
-      setErrorMessage("Please enter your Staff Code or Username.");
+  const handleNumpadKey = (key: string) => {
+    setErrorMessage(null);
+
+    if (key === "CLEAR") {
+      if (focusedField === "username") {
+        setUsername("");
+      } else {
+        setPassword("");
+      }
       return;
     }
 
-    // 2. Ensure password / PIN is entered
+    if (key === "BACKSPACE") {
+      if (focusedField === "username") {
+        setUsername((prev) => prev.slice(0, -1));
+      } else {
+        setPassword((prev) => prev.slice(0, -1));
+      }
+      return;
+    }
+
+    if (key === "ENTER") {
+      if (focusedField === "username" && username.trim().length > 0) {
+        setFocusedField("password");
+      } else {
+        handleLogin();
+      }
+      return;
+    }
+
+    // Append digit to currently active focused field
+    if (focusedField === "username") {
+      setUsername((prev) => prev + key);
+    } else {
+      setPassword((prev) => prev + key);
+    }
+  };
+
+  // ----------------------------------------------------------------------------
+  // Handle Cashier Login
+  // ----------------------------------------------------------------------------
+  const handleLogin = async () => {
+    if (!username.trim()) {
+      setErrorMessage("Please enter your Staff Code or Username.");
+      setFocusedField("username");
+      return;
+    }
+
     if (!password.trim()) {
       setErrorMessage("Please enter your security PIN / Password.");
+      setFocusedField("password");
       return;
     }
 
@@ -122,7 +176,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     setErrorMessage(null);
 
     try {
-      // 3. Make HTTP POST request to backend
       const response = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
         headers: {
@@ -136,29 +189,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
       const data = await response.json();
 
-      // 4. Check response status
       if (response.ok && data.success) {
         setActiveUser(data.user);
         const resolvedTerminal = data.terminal || terminal;
         if (data.terminal) {
           setTerminal(data.terminal);
         }
-        // [JAVITH - 28-10-2026]: Hand over authenticated cashier & terminal session to App.tsx
-        // App.tsx persists this session into AsyncStorage (@pos_active_session) so cashiers
-        // stay signed into POS billing even when refreshing the browser page (F5).
         if (onLoginSuccess) {
           onLoginSuccess(data.user, resolvedTerminal);
         }
       } else {
-        // If terminal check failed
-        if (response.status === 403 || data.terminalConfigured === false) {
+        if (data.terminalConfigured === false) {
           setIsTerminalBlocked(true);
         }
         setErrorMessage(
           data.message || "Login failed. Please verify credentials.",
         );
       }
-    } catch (err: any) {
+    } catch {
       setErrorMessage(
         'Unable to connect to backend server. Please make sure "node server.js" is running.',
       );
@@ -175,10 +223,20 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       <SafeAreaView style={styles.pageContainer}>
         {/* Top Header Bar */}
         <View style={styles.topNav}>
-          <View>
-            <Text style={styles.brandTitle}>KALAISMR</Text>
-            <Text style={styles.brandSubtitle}>SUPERMARKET POS</Text>
+          <View style={styles.brandRow}>
+            <View style={styles.brandIconBox}>
+              <MaterialCommunityIcons
+                name="storefront-outline"
+                size={22}
+                color="#ffffff"
+              />
+            </View>
+            <View>
+              <Text style={styles.brandTitle}>KALAISMR</Text>
+              <Text style={styles.brandSubtitle}>SUPERMARKET POS</Text>
+            </View>
           </View>
+
           <View style={styles.navRight}>
             <View style={styles.statusPill}>
               <View style={styles.statusDot} />
@@ -192,15 +250,15 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               onPress={() => setActiveUser(null)}
               activeOpacity={0.8}
             >
+              <MaterialCommunityIcons name="lock-reset" size={16} color="#ffffff" />
               <Text style={styles.lockButtonText}>Lock / Switch</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Welcome Dashboard Content - Single page with NO scrolling */}
+        {/* Welcome Dashboard Content */}
         <View style={styles.welcomeBody}>
           <View style={styles.welcomeCard}>
-            {/* Cashier Group Tag */}
             <View style={styles.groupBadge}>
               <Text style={styles.groupBadgeText}>
                 {activeUser.isAdmin
@@ -209,7 +267,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </Text>
             </View>
 
-            {/* Welcome Heading */}
             <Text style={styles.welcomeTitle}>
               Welcome, {activeUser.userName}
             </Text>
@@ -223,7 +280,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               ({terminal?.computerName || "PC"})
             </Text>
 
-            {/* Quick Metrics Bar */}
             <View style={styles.metricsRow}>
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Terminal Code</Text>
@@ -245,39 +301,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </View>
             </View>
 
-            {/* Quick Action Tiles */}
-            <View style={styles.actionRow}>
-              <View style={styles.actionTile}>
-                <MaterialCommunityIcons
-                  name="cart-outline"
-                  size={26}
-                  color="#c59f60"
-                  style={{ marginBottom: 4 }}
-                />
-                <Text style={styles.actionHeading}>New Checkout</Text>
-                <Text style={styles.actionDesc}>
-                  Ready to scan barcode items & weigh products
-                </Text>
-              </View>
-
-              <View style={styles.actionTile}>
-                <MaterialCommunityIcons
-                  name="tag-outline"
-                  size={26}
-                  color="#c59f60"
-                  style={{ marginBottom: 4 }}
-                />
-                <Text style={styles.actionHeading}>Price & Stock Check</Text>
-                <Text style={styles.actionDesc}>
-                  Instant PLU search and stock availability
-                </Text>
-              </View>
-            </View>
-
-            {/* Developer: JAVITH 28-10-2026 */}
             <View style={styles.cardFooter}>
               <Text style={styles.creditText}>
-                Kalaismr Supermarket • Point of Sale Station
+                © 2026 Unipro Softwares SG Pte Ltd
               </Text>
             </View>
           </View>
@@ -287,16 +313,26 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   }
 
   // ----------------------------------------------------------------------------
-  // VIEW: COMPACT SINGLE-PAGE CASHIER LOGIN (No scroll, warm luxury theme)
+  // VIEW: GREENMART MODERN CASHIER LOGIN WITH TOUCH NUMPAD
   // ----------------------------------------------------------------------------
   return (
     <SafeAreaView style={styles.pageContainer}>
       {/* Top Header Bar */}
       <View style={styles.topNav}>
-        <View>
-          <Text style={styles.brandTitle}>KALAISMR</Text>
-          <Text style={styles.brandSubtitle}>SUPERMARKET POS</Text>
+        <View style={styles.brandRow}>
+          <View style={styles.brandIconBox}>
+            <MaterialCommunityIcons
+              name="storefront-outline"
+              size={22}
+              color="#ffffff"
+            />
+          </View>
+          <View>
+            <Text style={styles.brandTitle}>KALAISMR</Text>
+            <Text style={styles.brandSubtitle}>SUPERMARKET POS</Text>
+          </View>
         </View>
+
         <View style={styles.statusPill}>
           <View
             style={[
@@ -308,116 +344,409 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {terminalCheckLoading
               ? "CHECKING TERMINAL..."
               : isTerminalBlocked
-                ? "TERMINAL RESTRICTED"
-                : `${terminal?.terminalCode || "HQPC1"} • ${terminal?.locationCode || "HQ"} READY`}
+              ? "TERMINAL RESTRICTED"
+              : `${terminal?.terminalCode || "HQPC1"} • ${terminal?.locationCode || "HQ"} READY`}
           </Text>
         </View>
       </View>
 
-      {/* Main Single Page Centered Content Container */}
+      {/* Main Container: Dual Column Login Card + Touch Numpad */}
       <View style={styles.centerContainer}>
-        <View style={styles.loginCard}>
-          {/* Card Header */}
-          <View style={styles.cardHeader}>
-            <View
-              style={[
-                styles.pillLabel,
-                isTerminalBlocked && styles.pillLabelBlocked,
-              ]}
-            >
-              <Text
+        <View style={styles.loginCardDual}>
+          {/* ================================================================= */}
+          {/* LEFT COLUMN: Cashier Credentials Form                             */}
+          {/* ================================================================= */}
+          <View style={styles.credentialsCol}>
+            {/* Header Badge */}
+            <View style={styles.badgeRow}>
+              <View
                 style={[
-                  styles.pillLabelText,
-                  isTerminalBlocked && styles.pillLabelTextBlocked,
+                  styles.pillLabel,
+                  isTerminalBlocked && styles.pillLabelBlocked,
                 ]}
               >
-                {isTerminalBlocked ? "SECURITY RESTRICTION" : "TERMINAL ACCESS"}
-              </Text>
+                <MaterialCommunityIcons
+                  name={isTerminalBlocked ? "shield-alert" : "shield-check"}
+                  size={14}
+                  color={isTerminalBlocked ? "#dc2626" : "#155d36"}
+                />
+                <Text
+                  style={[
+                    styles.pillLabelText,
+                    isTerminalBlocked && styles.pillLabelTextBlocked,
+                  ]}
+                >
+                  {isTerminalBlocked ? "SECURITY RESTRICTION" : "TERMINAL ACCESS"}
+                </Text>
+              </View>
             </View>
+
             <Text style={styles.loginTitle}>Cashier Sign In</Text>
             <Text style={styles.loginSubtitle}>
               {isTerminalBlocked
                 ? "This computer is not authorized for billing"
-                : "Enter your staff credentials to open this terminal"}
+                : "Select input & tap the touch numpad to sign in"}
             </Text>
-          </View>
 
-          {/* Error Banner */}
-          {errorMessage ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{errorMessage}</Text>
+            {/* Error Banner */}
+            {errorMessage ? (
+              <View style={styles.errorBox}>
+                <MaterialCommunityIcons
+                  name="alert-circle-outline"
+                  size={16}
+                  color="#b91c1c"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.errorText}>{errorMessage}</Text>
+              </View>
+            ) : null}
+
+            {/* Input 1: Staff Code / Username */}
+            <View style={styles.inputGroup}>
+              <View style={styles.inputLabelRow}>
+                <Text style={styles.inputLabel}>Staff Code / Username</Text>
+                {focusedField === "username" && (
+                  <View style={styles.activeFieldTag}>
+                    <Text style={styles.activeFieldTagText}>● NUMPAD TARGET</Text>
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => setFocusedField("username")}
+                style={[
+                  styles.textInputBox,
+                  focusedField === "username" && styles.textInputBoxActive,
+                  isTerminalBlocked && styles.inputDisabled,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="account-tie-outline"
+                  size={20}
+                  color={focusedField === "username" ? "#155d36" : "#64748b"}
+                  style={styles.fieldIcon}
+                />
+                <TextInput
+                  style={styles.textInput}
+                  value={username}
+                  onChangeText={(text) => {
+                    setUsername(text);
+                    setErrorMessage(null);
+                  }}
+                  onFocus={() => setFocusedField("username")}
+                  placeholder="e.g. AMITH or MAYIL"
+                  placeholderTextColor="#94a3b8"
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  editable={!isTerminalBlocked && !loading}
+                />
+                {username ? (
+                  <TouchableOpacity
+                    onPress={() => setUsername("")}
+                    style={styles.fieldActionBtn}
+                  >
+                    <MaterialCommunityIcons
+                      name="close-circle"
+                      size={16}
+                      color="#94a3b8"
+                    />
+                  </TouchableOpacity>
+                ) : null}
+              </TouchableOpacity>
             </View>
-          ) : null}
 
-          {/* Input 1: Staff / User Code */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Staff Code / Username</Text>
-            <TextInput
+            {/* Input 2: Password / PIN */}
+            <View style={styles.inputGroup}>
+              <View style={styles.inputLabelRow}>
+                <Text style={styles.inputLabel}>Security PIN / Password</Text>
+                {focusedField === "password" && (
+                  <View style={styles.activeFieldTag}>
+                    <Text style={styles.activeFieldTagText}>● NUMPAD TARGET</Text>
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => setFocusedField("password")}
+                style={[
+                  styles.textInputBox,
+                  focusedField === "password" && styles.textInputBoxActive,
+                  isTerminalBlocked && styles.inputDisabled,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name="lock-outline"
+                  size={20}
+                  color={focusedField === "password" ? "#155d36" : "#64748b"}
+                  style={styles.fieldIcon}
+                />
+                <TextInput
+                  style={styles.textInput}
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    setErrorMessage(null);
+                  }}
+                  onFocus={() => setFocusedField("password")}
+                  placeholder="Enter PIN / Password"
+                  placeholderTextColor="#94a3b8"
+                  secureTextEntry={!showPassword}
+                  keyboardType="numeric"
+                  onSubmitEditing={handleLogin}
+                  editable={!isTerminalBlocked && !loading}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword(!showPassword)}
+                  style={styles.fieldActionBtn}
+                >
+                  <MaterialCommunityIcons
+                    name={showPassword ? "eye-off-outline" : "eye-outline"}
+                    size={18}
+                    color="#64748b"
+                  />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            </View>
+
+            {/* Quick Staff Presets */}
+            <View style={styles.presetSection}>
+              <Text style={styles.presetTitle}>Quick Staff Presets:</Text>
+              <View style={styles.presetRow}>
+                {["AMITH", "MAYIL", "ADMIN"].map((staff) => (
+                  <TouchableOpacity
+                    key={staff}
+                    style={styles.presetChip}
+                    onPress={() => {
+                      setUsername(staff);
+                      setFocusedField("password");
+                      setErrorMessage(null);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <MaterialCommunityIcons
+                      name="account"
+                      size={12}
+                      color="#155d36"
+                    />
+                    <Text style={styles.presetChipText}>{staff}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Primary Action Button */}
+            <TouchableOpacity
               style={[
-                styles.textInput,
-                isTerminalBlocked && styles.inputDisabled,
+                styles.primaryButton,
+                (loading || isTerminalBlocked) && styles.buttonDisabled,
               ]}
-              value={username}
-              onChangeText={(text) => {
-                setUsername(text);
-                setErrorMessage(null);
-              }}
-              placeholder="e.g. AMITH or MAYIL"
-              placeholderTextColor="#9e988f"
-              autoCapitalize="characters"
-              autoCorrect={false}
-              editable={!isTerminalBlocked && !loading}
-            />
-          </View>
+              onPress={isTerminalBlocked ? checkTerminalStatus : handleLogin}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading ? (
+                <ActivityIndicator color="#ffffff" size="small" />
+              ) : (
+                <View style={styles.primaryButtonContent}>
+                  <Text style={styles.primaryButtonText}>
+                    {isTerminalBlocked
+                      ? "Retry Terminal Check"
+                      : "Authorize & Open Terminal"}
+                  </Text>
+                  <MaterialCommunityIcons
+                    name="arrow-right-circle"
+                    size={20}
+                    color="#ffffff"
+                    style={{ marginLeft: 8 }}
+                  />
+                </View>
+              )}
+            </TouchableOpacity>
 
-          {/* Input 2: Password / PIN */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Security PIN / Password</Text>
-            <TextInput
-              style={[
-                styles.textInput,
-                isTerminalBlocked && styles.inputDisabled,
-              ]}
-              value={password}
-              onChangeText={(text) => {
-                setPassword(text);
-                setErrorMessage(null);
-              }}
-              placeholder="••••••"
-              placeholderTextColor="#9e988f"
-              secureTextEntry
-              keyboardType="numeric"
-              onSubmitEditing={handleLogin}
-              editable={!isTerminalBlocked && !loading}
-            />
-          </View>
-
-          {/* Primary Action Button (Deep Forest Spruce color from theme) */}
-          <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              (loading || isTerminalBlocked) && styles.buttonDisabled,
-            ]}
-            onPress={isTerminalBlocked ? checkTerminalStatus : handleLogin}
-            disabled={loading}
-            activeOpacity={0.85}
-          >
-            {loading ? (
-              <ActivityIndicator color="#ffffff" size="small" />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                {isTerminalBlocked
-                  ? "Retry Terminal Check"
-                  : "Authorize & Open Terminal"}
+            <View style={styles.signatureRow}>
+              <Text style={styles.signatureText}>
+                © 2026 Unipro Softwares SG Pte Ltd
               </Text>
-            )}
-          </TouchableOpacity>
+            </View>
+          </View>
 
-          {/* Developer: JAVITH 28-10-2026 */}
-          <View style={styles.signatureRow}>
-            <Text style={styles.signatureText}>
-              Retail POS • MS SQL Edition
-            </Text>
+          {/* ================================================================= */}
+          {/* RIGHT COLUMN: Dedicated High-Density Touch Numpad                */}
+          {/* ================================================================= */}
+          <View style={styles.numpadCol}>
+            {/* Numpad Header */}
+            <View style={styles.numpadHeader}>
+              <View style={styles.numpadTitleRow}>
+                <MaterialCommunityIcons
+                  name="dialpad"
+                  size={18}
+                  color="#155d36"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.numpadHeading}>TOUCH NUMPAD</Text>
+              </View>
+
+              <View style={styles.targetIndicatorBadge}>
+                <Text style={styles.targetIndicatorText}>
+                  Target: {focusedField === "username" ? "Staff Code" : "PIN"}
+                </Text>
+              </View>
+            </View>
+
+            {/* 4x3 Numpad Keypad */}
+            <View style={styles.keypadGrid}>
+              {/* Row 1 */}
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("1")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>1</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("2")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>2</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("3")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>3</Text>
+              </TouchableOpacity>
+
+              {/* Row 2 */}
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("4")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>4</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("5")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>5</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("6")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>6</Text>
+              </TouchableOpacity>
+
+              {/* Row 3 */}
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("7")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>7</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("8")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>8</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("9")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>9</Text>
+              </TouchableOpacity>
+
+              {/* Row 4 */}
+              <TouchableOpacity
+                style={[styles.keypadBtn, styles.keypadBtnClear]}
+                onPress={() => handleNumpadKey("CLEAR")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadClearText}>C</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.keypadBtn}
+                onPress={() => handleNumpadKey("0")}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.keypadNum}>0</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.keypadBtn, styles.keypadBtnBackspace]}
+                onPress={() => handleNumpadKey("BACKSPACE")}
+                activeOpacity={0.7}
+              >
+                <MaterialCommunityIcons
+                  name="backspace-outline"
+                  size={20}
+                  color="#475569"
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Enter / Next Action Key */}
+            <TouchableOpacity
+              style={styles.keypadEnterBtn}
+              onPress={() => handleNumpadKey("ENTER")}
+              activeOpacity={0.85}
+            >
+              <MaterialCommunityIcons
+                name="keyboard-return"
+                size={20}
+                color="#ffffff"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.keypadEnterText}>
+                {focusedField === "username" ? "NEXT (PIN) ➔" : "SIGN IN ↵"}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Switch target toggle */}
+            <View style={styles.targetSwitcherRow}>
+              <TouchableOpacity
+                style={[
+                  styles.targetSwitchBtn,
+                  focusedField === "username" && styles.targetSwitchBtnActive,
+                ]}
+                onPress={() => setFocusedField("username")}
+              >
+                <Text
+                  style={[
+                    styles.targetSwitchText,
+                    focusedField === "username" && styles.targetSwitchTextActive,
+                  ]}
+                >
+                  Type Staff Code
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.targetSwitchBtn,
+                  focusedField === "password" && styles.targetSwitchBtnActive,
+                ]}
+                onPress={() => setFocusedField("password")}
+              >
+                <Text
+                  style={[
+                    styles.targetSwitchText,
+                    focusedField === "password" && styles.targetSwitchTextActive,
+                  ]}
+                >
+                  Type PIN
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -426,47 +755,63 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 }
 
 // ==============================================================================
-// STYLESHEET (Warm luxury organic palette inspired by reference design)
-// Palette:
-//   Background: #F7F5F0 (Warm Linen / Cream)
-//   Card:       #FFFFFF (Crisp Porcelain White)
-//   Border:     #E5DFD5 (Soft Warm Stone)
-//   Primary:    #1E3129 (Deep Forest Spruce / Espresso Moss)
-//   Accent:     #B88E5E (Warm Bronze / Caramel)
-//   Text Dark:  #1A211C (Deep Obsidian Slate)
-//   Text Muted: #6B655C (Warm Sandstone Gray)
+// STYLESHEET (GreenMart Supermarket POS Theme with Integrated Touch Numpad)
 // ==============================================================================
-
 const styles = StyleSheet.create({
   // Root page wrapper - fills full screen with zero scroll
   pageContainer: {
     flex: 1,
     height: "100%",
-    backgroundColor: "#F7F5F0",
+    backgroundColor: "#f1f5f9", // Cool modern POS slate background
   },
 
-  // Top header bar
+  // Top header bar matching POS billing screen
   topNav: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: "#EBE5DB",
+    borderBottomColor: "#e2e8f0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  brandIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    backgroundColor: "#155d36", // Rich GreenMart forest green
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#155d36",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
   },
   brandTitle: {
     fontSize: 16,
-    fontWeight: "800",
-    color: "#1A211C",
-    letterSpacing: 1.2,
+    fontWeight: "900",
+    color: "#0f172a",
+    letterSpacing: 1,
+    fontFamily: FONT_FAMILY,
   },
   brandSubtitle: {
     fontSize: 10,
-    fontWeight: "600",
-    color: "#B88E5E",
-    letterSpacing: 1,
+    fontWeight: "700",
+    color: "#155d36",
+    letterSpacing: 0.8,
+    fontFamily: FONT_FAMILY,
   },
   navRight: {
     flexDirection: "row",
@@ -476,191 +821,428 @@ const styles = StyleSheet.create({
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F3EFE8",
+    backgroundColor: "#f0fdf4",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#E2DAD0",
+    borderColor: "#bbf7d0",
   },
   statusDot: {
-    width: 7,
-    height: 7,
+    width: 8,
+    height: 8,
     borderRadius: 4,
-    backgroundColor: "#2D8A5E",
-    marginRight: 7,
+    backgroundColor: "#16a34a",
+    marginRight: 8,
   },
   statusDotBlocked: {
-    backgroundColor: "#DC2626",
+    backgroundColor: "#dc2626",
   },
   statusText: {
     fontSize: 11,
-    fontWeight: "600",
-    color: "#4A453E",
+    fontWeight: "700",
+    color: "#155d36",
     letterSpacing: 0.5,
+    fontFamily: FONT_MONO,
   },
   lockButton: {
-    backgroundColor: "#1E3129",
+    backgroundColor: "#155d36",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
   },
   lockButtonText: {
-    color: "#FFFFFF",
+    color: "#ffffff",
     fontSize: 11,
-    fontWeight: "600",
+    fontWeight: "700",
+    fontFamily: FONT_FAMILY,
   },
 
-  // Main centered container - keeps everything visible in one single view
+  // Main centered container
   centerContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
 
-  // Login Card
-  loginCard: {
+  // Dual-Column Login Card (Form + Touch Numpad)
+  loginCardDual: {
     width: "100%",
-    maxWidth: 400,
-    backgroundColor: "#FFFFFF",
+    maxWidth: 780,
+    backgroundColor: "#ffffff",
     borderRadius: 14,
-    paddingHorizontal: 28,
-    paddingVertical: 30,
     borderWidth: 1,
-    borderColor: "#E6E0D6",
-    ...Platform.select({
-      web: {
-        boxShadow: "0 8px 30px rgba(50, 40, 30, 0.05)",
-      },
-      default: {
-        shadowColor: "#30251A",
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.06,
-        shadowRadius: 16,
-        elevation: 3,
-      },
-    }),
+    borderColor: "#e2e8f0",
+    flexDirection: "row",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 4,
   },
-  cardHeader: {
-    marginBottom: 20,
-    alignItems: "center",
+
+  // Left Column: Credentials Form
+  credentialsCol: {
+    flex: 1.2,
+    padding: 24,
+    borderRightWidth: 1,
+    borderRightColor: "#f1f5f9",
+    justifyContent: "space-between",
+  },
+  badgeRow: {
+    marginBottom: 8,
   },
   pillLabel: {
-    backgroundColor: "#F4EFE6",
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#f0fdf4",
     borderWidth: 1,
-    borderColor: "#DECFC0",
+    borderColor: "#bbf7d0",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 14,
-    marginBottom: 10,
   },
   pillLabelBlocked: {
-    backgroundColor: "#FEE2E2",
-    borderColor: "#FCA5A5",
+    backgroundColor: "#fef2f2",
+    borderColor: "#fecaca",
   },
   pillLabelText: {
-    color: "#9E7444",
+    color: "#155d36",
     fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 1,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    fontFamily: FONT_FAMILY,
   },
   pillLabelTextBlocked: {
-    color: "#991B1B",
+    color: "#b91c1c",
   },
   loginTitle: {
     fontSize: 22,
-    fontWeight: "700",
-    color: "#1A211C",
+    fontWeight: "800",
+    color: "#0f172a",
     marginBottom: 4,
-    textAlign: "center",
+    fontFamily: FONT_FAMILY,
   },
   loginSubtitle: {
     fontSize: 12,
-    color: "#756F66",
-    textAlign: "center",
+    color: "#64748b",
+    marginBottom: 16,
+    fontFamily: FONT_FAMILY,
   },
 
   // Error Alert Banner
   errorBox: {
-    backgroundColor: "#FDF2F2",
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fef2f2",
     borderWidth: 1,
-    borderColor: "#F8B4B4",
+    borderColor: "#fca5a5",
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   errorText: {
-    color: "#9B1C1C",
-    fontSize: 12,
-    fontWeight: "500",
-    textAlign: "center",
+    color: "#b91c1c",
+    fontSize: 11.5,
+    fontWeight: "600",
+    flex: 1,
+    fontFamily: FONT_FAMILY,
   },
 
-  // Input styling
+  // Inputs
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 12,
+  },
+  inputLabelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 5,
   },
   inputLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#423D36",
-    marginBottom: 6,
-    letterSpacing: 0.3,
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#334155",
+    fontFamily: FONT_FAMILY,
+  },
+  activeFieldTag: {
+    backgroundColor: "#f0fdf4",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#86efac",
+  },
+  activeFieldTagText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#155d36",
+    fontFamily: FONT_FAMILY,
+  },
+  textInputBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#cbd5e1",
+    paddingHorizontal: 10,
+    height: 44,
+  },
+  textInputBoxActive: {
+    borderColor: "#155d36",
+    backgroundColor: "#ffffff",
+    shadowColor: "#155d36",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  fieldIcon: {
+    marginRight: 8,
   },
   textInput: {
-    backgroundColor: "#FAFAF7",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#DDD6CB",
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    flex: 1,
+    height: 42,
     fontSize: 14,
-    color: "#1A211C",
+    fontWeight: "700",
+    color: "#0f172a",
+    fontFamily: FONT_FAMILY,
+    outlineStyle: "none" as any,
+  },
+  fieldActionBtn: {
+    padding: 6,
   },
   inputDisabled: {
-    backgroundColor: "#F3F4F6",
-    color: "#9CA3AF",
+    backgroundColor: "#f1f5f9",
+    borderColor: "#e2e8f0",
   },
 
-  // Primary Submit Button (Deep Forest Spruce)
+  // Presets
+  presetSection: {
+    marginVertical: 6,
+  },
+  presetTitle: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748b",
+    marginBottom: 6,
+    fontFamily: FONT_FAMILY,
+  },
+  presetRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  presetChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  presetChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#155d36",
+    fontFamily: FONT_FAMILY,
+  },
+
+  // Primary Button
   primaryButton: {
-    backgroundColor: "#1E3129",
+    backgroundColor: "#155d36",
     borderRadius: 8,
-    paddingVertical: 13,
+    height: 46,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 6,
-    ...Platform.select({
-      web: {
-        cursor: "pointer",
-      },
-    }),
+    marginTop: 8,
+    shadowColor: "#155d36",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  primaryButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
   buttonDisabled: {
     opacity: 0.6,
   },
   primaryButtonText: {
-    color: "#FFFFFF",
+    color: "#ffffff",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "800",
     letterSpacing: 0.5,
+    fontFamily: FONT_FAMILY,
   },
 
-  // Signature row
+  // Signature
   signatureRow: {
-    marginTop: 22,
+    marginTop: 10,
     alignItems: "center",
   },
   signatureText: {
-    color: "#A8A196",
-    fontSize: 11,
-    fontWeight: "500",
-    letterSpacing: 0.4,
+    color: "#94a3b8",
+    fontSize: 10.5,
+    fontWeight: "600",
+    fontFamily: FONT_FAMILY,
   },
 
-  // Welcome Screen Styling
+  // ===========================================================================
+  // Right Column: Dedicated High-Density Touch Numpad
+  // ===========================================================================
+  numpadCol: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
+    padding: 20,
+    justifyContent: "space-between",
+  },
+  numpadHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+  numpadTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  numpadHeading: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#0f172a",
+    fontFamily: FONT_FAMILY,
+    letterSpacing: 0.8,
+  },
+  targetIndicatorBadge: {
+    backgroundColor: "#f0fdf4",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: "#86efac",
+  },
+  targetIndicatorText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#155d36",
+    fontFamily: FONT_FAMILY,
+  },
+
+  // 4x3 Grid
+  keypadGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 8,
+  },
+  keypadBtn: {
+    width: "31.5%",
+    height: 48,
+    backgroundColor: "#ffffff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  keypadNum: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0f172a",
+    fontFamily: FONT_MONO,
+  },
+  keypadBtnClear: {
+    backgroundColor: "#fef2f2",
+    borderColor: "#fecaca",
+  },
+  keypadClearText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#dc2626",
+    fontFamily: FONT_FAMILY,
+  },
+  keypadBtnBackspace: {
+    backgroundColor: "#f1f5f9",
+  },
+
+  // Enter Key
+  keypadEnterBtn: {
+    height: 44,
+    backgroundColor: "#155d36",
+    borderRadius: 8,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 10,
+    shadowColor: "#155d36",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  keypadEnterText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    fontFamily: FONT_FAMILY,
+  },
+
+  // Target Switcher Row
+  targetSwitcherRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 8,
+  },
+  targetSwitchBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  targetSwitchBtnActive: {
+    backgroundColor: "#f0fdf4",
+    borderColor: "#155d36",
+  },
+  targetSwitchText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#64748b",
+    fontFamily: FONT_FAMILY,
+  },
+  targetSwitchTextActive: {
+    color: "#155d36",
+    fontWeight: "800",
+  },
+
+  // Welcome Screen Styling (GreenMart theme)
   welcomeBody: {
     flex: 1,
     justifyContent: "center",
@@ -670,50 +1252,58 @@ const styles = StyleSheet.create({
   welcomeCard: {
     width: "100%",
     maxWidth: 580,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#ffffff",
     borderRadius: 14,
     padding: 30,
     borderWidth: 1,
-    borderColor: "#E6E0D6",
+    borderColor: "#e2e8f0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
   },
   groupBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "#F3EFE8",
+    backgroundColor: "#f0fdf4",
     borderWidth: 1,
-    borderColor: "#DECFC0",
+    borderColor: "#bbf7d0",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
     marginBottom: 12,
   },
   groupBadgeText: {
-    color: "#8A6237",
+    color: "#155d36",
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
     letterSpacing: 0.8,
+    fontFamily: FONT_FAMILY,
   },
   welcomeTitle: {
     fontSize: 24,
-    fontWeight: "700",
-    color: "#1A211C",
+    fontWeight: "800",
+    color: "#0f172a",
     marginBottom: 4,
+    fontFamily: FONT_FAMILY,
   },
   welcomeSubtitle: {
     fontSize: 13,
-    color: "#6B655C",
+    color: "#64748b",
     marginBottom: 20,
+    fontFamily: FONT_FAMILY,
   },
   boldText: {
-    fontWeight: "700",
-    color: "#1A211C",
+    fontWeight: "800",
+    color: "#0f172a",
   },
   metricsRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FAF8F4",
+    backgroundColor: "#f8fafc",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#EAE4D9",
+    borderColor: "#e2e8f0",
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginBottom: 20,
@@ -725,54 +1315,30 @@ const styles = StyleSheet.create({
   metricDivider: {
     width: 1,
     height: 24,
-    backgroundColor: "#DECFC0",
+    backgroundColor: "#e2e8f0",
   },
   metricLabel: {
     fontSize: 11,
-    color: "#8C857B",
+    color: "#64748b",
     marginBottom: 2,
+    fontFamily: FONT_FAMILY,
   },
   metricValue: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#1A211C",
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 20,
-  },
-  actionTile: {
-    flex: 1,
-    backgroundColor: "#FAFAF7",
-    borderRadius: 10,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#EAE4DA",
-  },
-  actionIcon: {
-    fontSize: 20,
-    marginBottom: 8,
-  },
-  actionHeading: {
     fontSize: 13,
-    fontWeight: "700",
-    color: "#1A211C",
-    marginBottom: 4,
-  },
-  actionDesc: {
-    fontSize: 11,
-    color: "#756F66",
-    lineHeight: 16,
+    fontWeight: "800",
+    color: "#0f172a",
+    fontFamily: FONT_MONO,
   },
   cardFooter: {
     borderTopWidth: 1,
-    borderTopColor: "#F0EBE2",
+    borderTopColor: "#f1f5f9",
     paddingTop: 12,
     alignItems: "center",
   },
   creditText: {
-    color: "#9E978D",
+    color: "#94a3b8",
     fontSize: 11,
+    fontWeight: "600",
+    fontFamily: FONT_FAMILY,
   },
 });
