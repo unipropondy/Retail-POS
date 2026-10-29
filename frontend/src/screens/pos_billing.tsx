@@ -32,6 +32,7 @@ import {
   ActivityIndicator,
   Modal,
   Image,
+  Linking,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
@@ -272,13 +273,48 @@ export default function PosBillingScreen({
     payMode: string;
   } | null>(null);
 
+  // License validation states (tblMaCompany ValidateDate)
+  const [licenseExpired, setLicenseExpired] = useState(false);
+  const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
+  const [showLicenseModal, setShowLicenseModal] = useState(false);
+
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
 
-  // Load Groups and Paymodes on startup
+  // Check live license status from tblMaCompany
+  const checkLicenseStatus = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/license-status`);
+      const data = await res.json();
+      if (!res.ok || data.success === false || data.licenseExpired) {
+        setLicenseExpired(true);
+        return false;
+      } else {
+        setLicenseExpired(false);
+        if (data.license && data.license.warning) {
+          setLicenseWarning(data.license.warning);
+        } else {
+          setLicenseWarning(null);
+        }
+        return true;
+      }
+    } catch {
+      return !licenseExpired;
+    }
+  };
+
+  // Load Groups and Paymodes on startup & poll license status
   useEffect(() => {
     fetchTouchGroups();
     fetchPayModes();
+    checkLicenseStatus();
+
+    // Live validation interval (checks license every 30s while cashier is billing)
+    const licenseInterval = setInterval(() => {
+      checkLicenseStatus();
+    }, 30000);
+
+    return () => clearInterval(licenseInterval);
   }, []);
 
   const fetchPayModes = async () => {
@@ -435,7 +471,18 @@ export default function PosBillingScreen({
   // ---------------------------------------------------------------------------
   // CART OPERATIONS
   // ---------------------------------------------------------------------------
-  const handleAddItem = (item: TouchItem) => {
+  const handleAddItem = async (item: TouchItem) => {
+    // 1. License Validation: Block item additions if license ended
+    if (licenseExpired) {
+      setShowLicenseModal(true);
+      return;
+    }
+    const isLicenseActive = await checkLicenseStatus();
+    if (!isLicenseActive) {
+      setShowLicenseModal(true);
+      return;
+    }
+
     const qtyToAdd = parseFloat(fastQty) || 1;
     const discToAdd = parseFloat(fastDisc) || 0;
 
@@ -483,7 +530,18 @@ export default function PosBillingScreen({
   };
 
   // Adjust active item quantity with (+) or (-) buttons
-  const handleQtyChange = (delta: number) => {
+  const handleQtyChange = async (delta: number) => {
+    if (delta > 0) {
+      if (licenseExpired) {
+        setShowLicenseModal(true);
+        return;
+      }
+      const isLicenseActive = await checkLicenseStatus();
+      if (!isLicenseActive) {
+        setShowLicenseModal(true);
+        return;
+      }
+    }
     if (cart.length === 0) return;
     const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
 
@@ -546,7 +604,17 @@ export default function PosBillingScreen({
   };
 
   // SKU Bar Enter Key submission
-  const handleSkuSubmit = () => {
+  const handleSkuSubmit = async () => {
+    if (licenseExpired) {
+      setShowLicenseModal(true);
+      return;
+    }
+    const isLicenseActive = await checkLicenseStatus();
+    if (!isLicenseActive) {
+      setShowLicenseModal(true);
+      return;
+    }
+
     if (!skuCode.trim() && !skuDesc.trim()) return;
     const searchVal = (skuCode || skuDesc).trim().toLowerCase();
 
@@ -743,6 +811,21 @@ export default function PosBillingScreen({
           <MaterialCommunityIcons name="power" size={18} color="#ffffff" />
         </TouchableOpacity>
       </View>
+
+      {/* License Expired Live Alert Banner */}
+      {licenseExpired && (
+        <View style={styles.posLicenseExpiredBanner}>
+          <MaterialCommunityIcons name="alert-octagon" size={18} color="#ffffff" />
+          <Text style={styles.posLicenseExpiredText}>
+            License expired. You cannot add items.
+          </Text>
+          <TouchableOpacity onPress={() => Linking.openURL("https://uniprosg.com")}>
+            <Text style={styles.posLicenseExpiredLink}>
+              Please contact https://uniprosg.com
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* =========================================================================
           SEARCH & SKU BAR: SKU Code, Description, Fast Qty, TG / Sales M Tags
@@ -1843,6 +1926,126 @@ export default function PosBillingScreen({
           </View>
         </View>
       </Modal>
+
+      {/* =========================================================================
+          MODAL: License Expired Alert
+      ========================================================================= */}
+      <Modal
+        visible={showLicenseModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowLicenseModal(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View
+            style={[
+              styles.modalCard,
+              {
+                maxWidth: 440,
+                alignItems: "center",
+                paddingVertical: 28,
+                paddingHorizontal: 24,
+              },
+            ]}
+          >
+            <View
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                backgroundColor: "#fee2e2",
+                justifyContent: "center",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <MaterialCommunityIcons
+                name="alert-octagon"
+                size={34}
+                color="#dc2626"
+              />
+            </View>
+
+            <Text
+              style={{
+                fontSize: 18,
+                fontWeight: "800",
+                color: "#991b1b",
+                fontFamily: FONT_FAMILY,
+                marginBottom: 8,
+              }}
+            >
+              License Expired
+            </Text>
+
+            <Text
+              style={{
+                fontSize: 13,
+                color: "#475569",
+                textAlign: "center",
+                lineHeight: 20,
+                fontFamily: FONT_FAMILY,
+                marginBottom: 16,
+                paddingHorizontal: 8,
+              }}
+            >
+              Your software license has expired. You cannot add items to the bill.
+            </Text>
+
+            <TouchableOpacity
+              onPress={() => Linking.openURL("https://uniprosg.com")}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                backgroundColor: "#eff6ff",
+                borderWidth: 1,
+                borderColor: "#bfdbfe",
+                borderRadius: 8,
+                paddingVertical: 10,
+                paddingHorizontal: 16,
+                marginBottom: 20,
+                gap: 6,
+              }}
+            >
+              <MaterialCommunityIcons name="web" size={18} color="#2563eb" />
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontWeight: "700",
+                  color: "#1d4ed8",
+                  textDecorationLine: "underline",
+                  fontFamily: FONT_FAMILY,
+                }}
+              >
+                Please contact https://uniprosg.com
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                width: "100%",
+                height: 42,
+                backgroundColor: "#dc2626",
+                borderRadius: 8,
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+              onPress={() => setShowLicenseModal(false)}
+            >
+              <Text
+                style={{
+                  color: "#ffffff",
+                  fontWeight: "700",
+                  fontSize: 13,
+                  fontFamily: FONT_FAMILY,
+                }}
+              >
+                Close
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1879,6 +2082,58 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     marginBottom: 6,
     gap: 6,
+  },
+
+  // Top Banner for Live Expired License
+  posLicenseExpiredBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#b91c1c",
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+    gap: 8,
+  },
+  posLicenseExpiredText: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 12,
+    fontFamily: FONT_FAMILY,
+  },
+  posLicenseExpiredLink: {
+    color: "#fef08a",
+    fontWeight: "800",
+    fontSize: 12,
+    textDecorationLine: "underline",
+    fontFamily: FONT_FAMILY,
+  },
+
+  // Top Banner for 30-Day Advance Expiry Warning
+  posLicenseWarningBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fefce8",
+    borderWidth: 1,
+    borderColor: "#fde047",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+    gap: 8,
+  },
+  posLicenseWarningText: {
+    color: "#854d0e",
+    fontWeight: "700",
+    fontSize: 12,
+    fontFamily: FONT_FAMILY,
+  },
+  posLicenseWarningLink: {
+    color: "#1d4ed8",
+    fontWeight: "800",
+    fontSize: 12,
+    textDecorationLine: "underline",
+    fontFamily: FONT_FAMILY,
   },
   brandBadge: {
     flexDirection: "row",

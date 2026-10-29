@@ -59,6 +59,162 @@ module.exports = function (jwtSecret) {
   }
 
   // ----------------------------------------------------------------------------
+  // Helper Function: Validate Company Authorization & License (dbo.tblMaCompany)
+  // 1. If count is 0, software is not authorized for use at this location.
+  // 2. If ValidateDate is expired, license has ended.
+  // 3. If ValidateDate is expiring within 30 days, generates advance warning.
+  // ----------------------------------------------------------------------------
+  function parseValidateDate(dateStr) {
+    if (!dateStr || !dateStr.trim()) return null;
+    const s = dateStr.trim();
+    const parts = s.split(/[\/\-\.]/);
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return new Date(
+          parseInt(parts[0], 10),
+          parseInt(parts[1], 10) - 1,
+          parseInt(parts[2], 10),
+          23,
+          59,
+          59,
+        );
+      } else if (parts[2].length === 4) {
+        return new Date(
+          parseInt(parts[2], 10),
+          parseInt(parts[1], 10) - 1,
+          parseInt(parts[0], 10),
+          23,
+          59,
+          59,
+        );
+      }
+    }
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  async function validateCompanyLicense(pool) {
+    try {
+      const result = await pool.request().query(`
+        SELECT 
+          COUNT(*) AS total,
+          MAX(RTRIM(LTRIM(ValidateDate))) AS ValidateDate
+        FROM dbo.tblMaCompany
+      `);
+
+      const total =
+        result.recordset && result.recordset.length > 0
+          ? result.recordset[0].total
+          : 0;
+
+      // Rule 1: If count = 0, no authorization at this location
+      if (total === 0) {
+        return {
+          authorized: false,
+          licenseExpired: true,
+          daysRemaining: 0,
+          message:
+            "Sorry. You are not having proper authorization to use this software at this location.Please contact us at https://uniprosg.com",
+        };
+      }
+
+      const rawValidateDate = result.recordset[0].ValidateDate || "";
+      if (!rawValidateDate.trim()) {
+        // No expiration date set = active license
+        return {
+          authorized: true,
+          licenseExpired: false,
+          daysRemaining: null,
+          rawDate: "",
+          warning: null,
+        };
+      }
+
+      const expiryDate = parseValidateDate(rawValidateDate);
+      if (!expiryDate) {
+        return {
+          authorized: true,
+          licenseExpired: false,
+          daysRemaining: null,
+          rawDate: rawValidateDate,
+          warning: null,
+        };
+      }
+
+      const now = new Date();
+      const diffMs = expiryDate.getTime() - now.getTime();
+      const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+      // Rule 2: If date ended, shouldn't allow login or item additions
+      if (daysRemaining <= 0) {
+        return {
+          authorized: false,
+          licenseExpired: true,
+          daysRemaining: 0,
+          rawDate: rawValidateDate,
+          message: "License expired. Please contact https://uniprosg.com",
+        };
+      }
+
+      // Rule 3: License about to expire within 1 month (30 days)
+      let warning = null;
+      if (daysRemaining <= 30) {
+        warning = `License is about to end in ${daysRemaining} days. Please contact UNIPRO SG (https://uniprosg.com)`;
+      }
+
+      return {
+        authorized: true,
+        licenseExpired: false,
+        daysRemaining,
+        rawDate: rawValidateDate,
+        warning,
+      };
+    } catch (err) {
+      console.error("❌ [LICENSE CHECK ERROR]:", err.message);
+      return {
+        authorized: false,
+        licenseExpired: true,
+        message: "Error verifying license: " + err.message,
+      };
+    }
+  }
+
+  // ----------------------------------------------------------------------------
+  // GET /api/auth/license-status
+  // Live license status check for billing screen and active sessions
+  // ----------------------------------------------------------------------------
+  router.get("/license-status", async (req, res) => {
+    try {
+      const pool = await getPool();
+      if (!pool) {
+        return res.status(503).json({
+          success: false,
+          message: "Database unreachable.",
+        });
+      }
+
+      const license = await validateCompanyLicense(pool);
+      if (!license.authorized) {
+        return res.status(403).json({
+          success: false,
+          licenseExpired: license.licenseExpired,
+          message: license.message,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        license,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: "Error checking license: " + error.message,
+      });
+    }
+  });
+
+  // ----------------------------------------------------------------------------
   // GET /api/auth/terminal-info
   // Checks if the current machine is registered in tblmaTerminal
   // ----------------------------------------------------------------------------
@@ -72,6 +228,18 @@ module.exports = function (jwtSecret) {
           configured: false,
           message:
             "Database is currently unreachable. Please verify network/VPN.",
+        });
+      }
+
+      // 1. Check Company Authorization & License (dbo.tblMaCompany)
+      const license = await validateCompanyLicense(pool);
+      if (!license.authorized) {
+        return res.status(403).json({
+          success: false,
+          configured: false,
+          companyAuthorized: false,
+          licenseExpired: license.licenseExpired,
+          message: license.message,
         });
       }
 
@@ -104,6 +272,12 @@ module.exports = function (jwtSecret) {
           printerName: terminal.PrinterName,
           printerType: terminal.PrinterType,
           tillAmount: terminal.TillAmount,
+        },
+        license: {
+          licenseExpired: false,
+          daysRemaining: license.daysRemaining,
+          rawDate: license.rawDate,
+          warning: license.warning,
         },
       });
     } catch (error) {
@@ -146,7 +320,18 @@ module.exports = function (jwtSecret) {
         });
       }
 
-      // 3. TERMINAL CHECK: Query tblmaTerminal for this PC's ComputerName
+      // 3. COMPANY AUTHORIZATION & LICENSE CHECK
+      const license = await validateCompanyLicense(pool);
+      if (!license.authorized) {
+        return res.status(403).json({
+          success: false,
+          companyAuthorized: false,
+          licenseExpired: license.licenseExpired,
+          message: license.message,
+        });
+      }
+
+      // 4. TERMINAL CHECK: Query tblmaTerminal for this PC's ComputerName
       const { found, computerName, terminal } = await getTerminalConfig(
         pool,
         clientComputerName,

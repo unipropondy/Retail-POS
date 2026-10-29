@@ -16,6 +16,7 @@ import {
   SafeAreaView,
   ActivityIndicator,
   Platform,
+  Linking,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
@@ -67,7 +68,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [showPassword, setShowPassword] = useState(false);
 
   // Focus target for the touch Numpad ('username' or 'password')
-  const [focusedField, setFocusedField] = useState<"username" | "password">("username");
+  const [focusedField, setFocusedField] = useState<"username" | "password">(
+    "username",
+  );
 
   // Terminal configuration states
   const [terminal, setTerminal] = useState<TerminalProfile | null>(null);
@@ -77,6 +80,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   // General loading & error states
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
 
   // Authenticated cashier profile (for welcome screen fallback)
   const [activeUser, setActiveUser] = useState<CashierProfile | null>(null);
@@ -99,6 +103,11 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       if (response.ok && data.success && data.configured) {
         setTerminal(data.terminal);
         setIsTerminalBlocked(false);
+        if (data.license && data.license.warning) {
+          setLicenseWarning(data.license.warning);
+        } else {
+          setLicenseWarning(null);
+        }
       } else {
         setIsTerminalBlocked(true);
         setErrorMessage(
@@ -199,7 +208,11 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           onLoginSuccess(data.user, resolvedTerminal);
         }
       } else {
-        if (data.terminalConfigured === false) {
+        if (
+          data.terminalConfigured === false ||
+          data.companyAuthorized === false ||
+          data.licenseExpired === true
+        ) {
           setIsTerminalBlocked(true);
         }
         setErrorMessage(
@@ -250,7 +263,11 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               onPress={() => setActiveUser(null)}
               activeOpacity={0.8}
             >
-              <MaterialCommunityIcons name="lock-reset" size={16} color="#ffffff" />
+              <MaterialCommunityIcons
+                name="lock-reset"
+                size={16}
+                color="#ffffff"
+              />
               <Text style={styles.lockButtonText}>Lock / Switch</Text>
             </TouchableOpacity>
           </View>
@@ -344,8 +361,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {terminalCheckLoading
               ? "CHECKING TERMINAL..."
               : isTerminalBlocked
-              ? "TERMINAL RESTRICTED"
-              : `${terminal?.terminalCode || "HQPC1"} • ${terminal?.locationCode || "HQ"} READY`}
+                ? "TERMINAL RESTRICTED"
+                : `${terminal?.terminalCode || "HQPC1"} • ${terminal?.locationCode || "HQ"} READY`}
           </Text>
         </View>
       </View>
@@ -376,7 +393,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     isTerminalBlocked && styles.pillLabelTextBlocked,
                   ]}
                 >
-                  {isTerminalBlocked ? "SECURITY RESTRICTION" : "TERMINAL ACCESS"}
+                  {isTerminalBlocked
+                    ? "SECURITY RESTRICTION"
+                    : "TERMINAL ACCESS"}
                 </Text>
               </View>
             </View>
@@ -388,16 +407,61 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 : "Select input & tap the touch numpad to sign in"}
             </Text>
 
+            {/* 30-Day Advance License Expiry Warning Banner */}
+            {licenseWarning ? (
+              <View style={styles.warningBox}>
+                <MaterialCommunityIcons
+                  name="bell-ring-outline"
+                  size={18}
+                  color="#b45309"
+                  style={{ marginRight: 6, marginTop: 2 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.warningText}>
+                    {licenseWarning.includes("https://uniprosg.com")
+                      ? licenseWarning.split("https://uniprosg.com")[0]
+                      : licenseWarning}
+                  </Text>
+                  {licenseWarning.includes("https://uniprosg.com") && (
+                    <TouchableOpacity
+                      onPress={() => Linking.openURL("https://uniprosg.com")}
+                      style={{ marginTop: 4 }}
+                    >
+                      <Text style={styles.warningLinkText}>
+                        https://uniprosg.com
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ) : null}
+
             {/* Error Banner */}
             {errorMessage ? (
               <View style={styles.errorBox}>
                 <MaterialCommunityIcons
                   name="alert-circle-outline"
-                  size={16}
+                  size={18}
                   color="#b91c1c"
-                  style={{ marginRight: 6 }}
+                  style={{ marginRight: 6, marginTop: 2 }}
                 />
-                <Text style={styles.errorText}>{errorMessage}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.errorText}>
+                    {errorMessage.includes("https://uniprosg.com")
+                      ? errorMessage.split("https://uniprosg.com")[0]
+                      : errorMessage}
+                  </Text>
+                  {errorMessage.includes("https://uniprosg.com") && (
+                    <TouchableOpacity
+                      onPress={() => Linking.openURL("https://uniprosg.com")}
+                      style={{ marginTop: 4 }}
+                    >
+                      <Text style={styles.errorLinkText}>
+                        https://uniprosg.com
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             ) : null}
 
@@ -407,7 +471,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <Text style={styles.inputLabel}>Staff Code / Username</Text>
                 {focusedField === "username" && (
                   <View style={styles.activeFieldTag}>
-                    <Text style={styles.activeFieldTagText}>● NUMPAD TARGET</Text>
+                    <Text style={styles.activeFieldTagText}>
+                      ● NUMPAD TARGET
+                    </Text>
                   </View>
                 )}
               </View>
@@ -435,7 +501,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     setErrorMessage(null);
                   }}
                   onFocus={() => setFocusedField("username")}
-                  placeholder="e.g. AMITH or MAYIL"
+                  placeholder="e.g. JAVITH"
                   placeholderTextColor="#94a3b8"
                   autoCapitalize="characters"
                   autoCorrect={false}
@@ -462,7 +528,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <Text style={styles.inputLabel}>Security PIN / Password</Text>
                 {focusedField === "password" && (
                   <View style={styles.activeFieldTag}>
-                    <Text style={styles.activeFieldTagText}>● NUMPAD TARGET</Text>
+                    <Text style={styles.activeFieldTagText}>
+                      ● NUMPAD TARGET
+                    </Text>
                   </View>
                 )}
               </View>
@@ -723,7 +791,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <Text
                   style={[
                     styles.targetSwitchText,
-                    focusedField === "username" && styles.targetSwitchTextActive,
+                    focusedField === "username" &&
+                      styles.targetSwitchTextActive,
                   ]}
                 >
                   Type Staff Code
@@ -740,7 +809,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <Text
                   style={[
                     styles.targetSwitchText,
-                    focusedField === "password" && styles.targetSwitchTextActive,
+                    focusedField === "password" &&
+                      styles.targetSwitchTextActive,
                   ]}
                 >
                   Type PIN
@@ -954,7 +1024,41 @@ const styles = StyleSheet.create({
     color: "#b91c1c",
     fontSize: 11.5,
     fontWeight: "600",
-    flex: 1,
+    fontFamily: FONT_FAMILY,
+    lineHeight: 16,
+  },
+  errorLinkText: {
+    color: "#1d4ed8",
+    fontSize: 11.5,
+    fontWeight: "700",
+    textDecorationLine: "underline",
+    fontFamily: FONT_FAMILY,
+  },
+
+  // Advance License Warning Banner
+  warningBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fefce8",
+    borderWidth: 1,
+    borderColor: "#fde047",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  warningText: {
+    color: "#854d0e",
+    fontSize: 11.5,
+    fontWeight: "600",
+    fontFamily: FONT_FAMILY,
+    lineHeight: 16,
+  },
+  warningLinkText: {
+    color: "#1d4ed8",
+    fontSize: 11.5,
+    fontWeight: "700",
+    textDecorationLine: "underline",
     fontFamily: FONT_FAMILY,
   },
 
