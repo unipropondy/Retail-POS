@@ -128,7 +128,7 @@ export default function App() {
           terminalCode={currentTerminal?.terminalCode}
         />
       )}
-      <StatusBar style={currentUser ? "light" : "dark"} />
+      <StatusBar style="dark" />
     </View>
   );
 }
@@ -136,10 +136,11 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#f4f6f8",
   },
   centerLoader: {
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#f4f6f8",
   },
 });
