@@ -111,14 +111,26 @@ interface PosBillingProps {
 
 // Visual category icon mappings
 function getCategoryIcon(
-  groupCode: string
+  groupCode: string,
 ): keyof typeof MaterialCommunityIcons.glyphMap {
   const code = (groupCode || "").toUpperCase().trim();
-  if (code.includes("VEG") || code.includes("FRUIT") || code.includes("PRODUCE"))
+  if (
+    code.includes("VEG") ||
+    code.includes("FRUIT") ||
+    code.includes("PRODUCE")
+  )
     return "food-apple-outline";
-  if (code.includes("BEER") || code.includes("ALCOHOL") || code.includes("WINE"))
+  if (
+    code.includes("BEER") ||
+    code.includes("ALCOHOL") ||
+    code.includes("WINE")
+  )
     return "glass-mug-variant";
-  if (code.includes("GROCERY") || code.includes("RICE") || code.includes("SPICE"))
+  if (
+    code.includes("GROCERY") ||
+    code.includes("RICE") ||
+    code.includes("SPICE")
+  )
     return "basket-outline";
   if (
     code.includes("DRINK") ||
@@ -130,7 +142,11 @@ function getCategoryIcon(
     return "coffee-outline";
   if (code.includes("SNACK") || code.includes("SWEET") || code.includes("CHIP"))
     return "cookie-outline";
-  if (code.includes("SOAP") || code.includes("DETERGENT") || code.includes("CLEAN"))
+  if (
+    code.includes("SOAP") ||
+    code.includes("DETERGENT") ||
+    code.includes("CLEAN")
+  )
     return "spray-bottle";
   if (code.includes("FROZEN") || code.includes("ICE")) return "snowflake";
   if (code.includes("PHONE") || code.includes("ACC") || code.includes("TOYS"))
@@ -138,44 +154,7 @@ function getCategoryIcon(
   return "tag-outline";
 }
 
-// Fallback seed catalog if database tables are empty
-const FALLBACK_GROUPS: TouchGroup[] = [
-  { GroupCode: "HOT DRINKS", SortCode: 1 },
-  { GroupCode: "COLD DRINK", SortCode: 2 },
-  { GroupCode: "SNACKS", SortCode: 3 },
-  { GroupCode: "SWEETS", SortCode: 4 },
-  { GroupCode: "VEGETABLES 1", SortCode: 5 },
-  { GroupCode: "VEGETABLES 2", SortCode: 6 },
-  { GroupCode: "FRUITS", SortCode: 7 },
-  { GroupCode: "SOAPS DETERGENT", SortCode: 8 },
-  { GroupCode: "RICE ATTA", SortCode: 9 },
-  { GroupCode: "OTHERS", SortCode: 10 },
-  { GroupCode: "NON VEG", SortCode: 11 },
-];
 
-const FALLBACK_ITEMS: TouchItem[] = [
-  { GroupCode: "HOT DRINKS", InventoryCode: "100062", SortOrder: 1, Description: "MASALA TEA", SellingPrice: 1.0, RetailPrice: 1.0, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100472", SortOrder: 2, Description: "COFFEE BIG CUP", SellingPrice: 1.5, RetailPrice: 1.5, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100058", SortOrder: 3, Description: "GINGER TEA", SellingPrice: 1.0, RetailPrice: 1.0, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100059", SortOrder: 4, Description: "ELACHI TEA", SellingPrice: 1.0, RetailPrice: 1.0, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100060", SortOrder: 5, Description: "MINI TEA", SellingPrice: 0.8, RetailPrice: 0.8, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100061", SortOrder: 6, Description: "MINI COFFEE", SellingPrice: 1.0, RetailPrice: 1.0, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100063", SortOrder: 7, Description: "FRESH MILK", SellingPrice: 1.0, RetailPrice: 1.0, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100064", SortOrder: 8, Description: "TEA-TAKE AWAY", SellingPrice: 1.0, RetailPrice: 1.0, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100065", SortOrder: 9, Description: "COFFEE TAKE AWA", SellingPrice: 1.3, RetailPrice: 1.3, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100066", SortOrder: 10, Description: "TEA-BIG CUP", SellingPrice: 1.2, RetailPrice: 1.2, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100067", SortOrder: 11, Description: "BOOST", SellingPrice: 1.5, RetailPrice: 1.5, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100068", SortOrder: 12, Description: "HORLICKS", SellingPrice: 1.5, RetailPrice: 1.5, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100069", SortOrder: 13, Description: "MALTOVA", SellingPrice: 1.8, RetailPrice: 1.8, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100070", SortOrder: 14, Description: "BOURNVITA", SellingPrice: 1.5, RetailPrice: 1.5, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100071", SortOrder: 15, Description: "ROSE MILK", SellingPrice: 1.5, RetailPrice: 1.5, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100072", SortOrder: 16, Description: "SUKKU COFFEE", SellingPrice: 1.3, RetailPrice: 1.3, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100073", SortOrder: 17, Description: "BRU COFFEE", SellingPrice: 1.3, RetailPrice: 1.3, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100074", SortOrder: 18, Description: "NES COFFEE", SellingPrice: 1.0, RetailPrice: 1.0, UOM: "CUP" },
-  { GroupCode: "HOT DRINKS", InventoryCode: "100075", SortOrder: 19, Description: "BADAM MILK", SellingPrice: 2.5, RetailPrice: 2.5, UOM: "CUP" },
-  { GroupCode: "COLD DRINK", InventoryCode: "105543", SortOrder: 1, Description: "HIGH COMMISSIONER 200ML", SellingPrice: 12.5, RetailPrice: 13.0, UOM: "BTL" },
-  { GroupCode: "SNACKS", InventoryCode: "100080", SortOrder: 1, Description: "EGG PUPS", SellingPrice: 1.5, RetailPrice: 1.5, UOM: "PCS" },
-];
 
 export default function PosBillingScreen({
   onLogout,
@@ -196,55 +175,10 @@ export default function PosBillingScreen({
   const [selectedPayMode, setSelectedPayMode] = useState<string>("CASH");
   const [showMorePayModes, setShowMorePayModes] = useState<boolean>(false);
 
-  // Cart State (Initialized with demo matching Image 2)
-  const [cart, setCart] = useState<CartItem[]>([
-    {
-      id: "c1",
-      code: "100062",
-      description: "MASALA TEA",
-      qty: 1,
-      price: 1.0,
-      disc: 0.0,
-      amount: 1.0,
-      gst: 0.0,
-      uom: "CUP",
-    },
-    {
-      id: "c2",
-      code: "100472",
-      description: "COFFEE BIG CUP",
-      qty: 1,
-      price: 1.5,
-      disc: 0.0,
-      amount: 1.5,
-      gst: 0.0,
-      uom: "CUP",
-    },
-    {
-      id: "c3",
-      code: "105543",
-      description: "HIGH COMMISSIONER 200ML",
-      qty: 1,
-      price: 12.5,
-      disc: 0.0,
-      amount: 12.5,
-      gst: 0.0,
-      uom: "BTL",
-    },
-    {
-      id: "c4",
-      code: "100058",
-      description: "GINGER TEA",
-      qty: 1,
-      price: 1.0,
-      disc: 0.0,
-      amount: 1.0,
-      gst: 0.0,
-      uom: "CUP",
-    },
-  ]);
+  // Cart State (Initialized empty)
+  const [cart, setCart] = useState<CartItem[]>([]);
 
-  const [selectedCartIndex, setSelectedCartIndex] = useState<number>(3);
+  const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1);
 
   // Active Item for Top Bar Banner & Math Display
   const [activeItem, setActiveItem] = useState<{
@@ -253,9 +187,9 @@ export default function PosBillingScreen({
     price: number;
     stock: number;
   }>({
-    name: "GINGER TEA",
-    qty: 1,
-    price: 1.0,
+    name: "READY TO SCAN / SELECT ITEM",
+    qty: 0,
+    price: 0.0,
     stock: 0,
   });
 
@@ -275,7 +209,9 @@ export default function PosBillingScreen({
   // Modals
   const [showPriceCheckModal, setShowPriceCheckModal] = useState(false);
   const [priceCheckQuery, setPriceCheckQuery] = useState("");
-  const [priceCheckResult, setPriceCheckResult] = useState<TouchItem | null>(null);
+  const [priceCheckResult, setPriceCheckResult] = useState<TouchItem | null>(
+    null,
+  );
 
   const [showPriceChangeModal, setShowPriceChangeModal] = useState(false);
   const [overridePrice, setOverridePrice] = useState("");
@@ -386,14 +322,14 @@ export default function PosBillingScreen({
         setSelectedGroup(first);
         fetchTouchItems(first);
       } else {
-        setGroups(FALLBACK_GROUPS);
-        setSelectedGroup(FALLBACK_GROUPS[0].GroupCode);
-        setItems(FALLBACK_ITEMS);
+        setGroups([]);
+        setSelectedGroup("");
+        setItems([]);
       }
     } catch {
-      setGroups(FALLBACK_GROUPS);
-      setSelectedGroup(FALLBACK_GROUPS[0].GroupCode);
-      setItems(FALLBACK_ITEMS);
+      setGroups([]);
+      setSelectedGroup("");
+      setItems([]);
     } finally {
       setLoadingGroups(false);
     }
@@ -410,16 +346,10 @@ export default function PosBillingScreen({
       if (res.ok && data.success && data.items && data.items.length > 0) {
         setItems(data.items);
       } else {
-        const filtered = FALLBACK_ITEMS.filter((it) =>
-          groupCode ? it.GroupCode.toUpperCase() === groupCode.toUpperCase() : true
-        );
-        setItems(filtered.length > 0 ? filtered : FALLBACK_ITEMS);
+        setItems([]);
       }
     } catch {
-      const filtered = FALLBACK_ITEMS.filter((it) =>
-        groupCode ? it.GroupCode.toUpperCase() === groupCode.toUpperCase() : true
-      );
-      setItems(filtered.length > 0 ? filtered : FALLBACK_ITEMS);
+      setItems([]);
     } finally {
       setLoadingItems(false);
     }
@@ -438,7 +368,7 @@ export default function PosBillingScreen({
     let list = items;
     if (selectedGroup) {
       list = list.filter(
-        (it) => it.GroupCode.toUpperCase() === selectedGroup.toUpperCase()
+        (it) => it.GroupCode.toUpperCase() === selectedGroup.toUpperCase(),
       );
     }
     if (skuDesc.trim()) {
@@ -455,11 +385,14 @@ export default function PosBillingScreen({
   // Group pagination (5 groups per page for touch without scrolling)
   const [groupPageIndex, setGroupPageIndex] = useState<number>(0);
   const GROUPS_PER_PAGE = 5;
-  const totalGroupPages = Math.max(1, Math.ceil(groups.length / GROUPS_PER_PAGE));
+  const totalGroupPages = Math.max(
+    1,
+    Math.ceil(groups.length / GROUPS_PER_PAGE),
+  );
   const visibleGroups = useMemo(() => {
     return groups.slice(
       groupPageIndex * GROUPS_PER_PAGE,
-      (groupPageIndex + 1) * GROUPS_PER_PAGE
+      (groupPageIndex + 1) * GROUPS_PER_PAGE,
     );
   }, [groups, groupPageIndex]);
 
@@ -468,12 +401,12 @@ export default function PosBillingScreen({
   const ITEMS_PER_PAGE = 9;
   const totalItemPages = Math.max(
     1,
-    Math.ceil(filteredProducts.length / ITEMS_PER_PAGE)
+    Math.ceil(filteredProducts.length / ITEMS_PER_PAGE),
   );
   const visibleProducts = useMemo(() => {
     return filteredProducts.slice(
       itemPageIndex * ITEMS_PER_PAGE,
-      (itemPageIndex + 1) * ITEMS_PER_PAGE
+      (itemPageIndex + 1) * ITEMS_PER_PAGE,
     );
   }, [filteredProducts, itemPageIndex]);
 
@@ -574,10 +507,12 @@ export default function PosBillingScreen({
                 qty: c.qty + qtyToAdd,
                 disc: c.disc + discToAdd,
                 amount: parseFloat(
-                  ((c.qty + qtyToAdd) * c.price - (c.disc + discToAdd)).toFixed(2)
+                  ((c.qty + qtyToAdd) * c.price - (c.disc + discToAdd)).toFixed(
+                    2,
+                  ),
                 ),
               }
-            : c
+            : c,
         );
         setSelectedCartIndex(existingIdx);
         return updated;
@@ -589,7 +524,9 @@ export default function PosBillingScreen({
           qty: qtyToAdd,
           price: item.SellingPrice,
           disc: discToAdd,
-          amount: parseFloat((qtyToAdd * item.SellingPrice - discToAdd).toFixed(2)),
+          amount: parseFloat(
+            (qtyToAdd * item.SellingPrice - discToAdd).toFixed(2),
+          ),
           gst: 0.0,
           uom: item.UOM || "PCS",
         };
@@ -614,30 +551,33 @@ export default function PosBillingScreen({
       }
     }
     if (cart.length === 0) return;
-    const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    const targetIdx =
+      selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
 
-    setCart((prev) =>
-      prev
-        .map((c, i) => {
-          if (i === targetIdx) {
-            const nextQty = c.qty + delta;
-            if (nextQty <= 0) return null;
-            return {
-              ...c,
-              qty: nextQty,
-              amount: parseFloat((nextQty * c.price - c.disc).toFixed(2)),
-            };
-          }
-          return c;
-        })
-        .filter(Boolean) as CartItem[]
+    setCart(
+      (prev) =>
+        prev
+          .map((c, i) => {
+            if (i === targetIdx) {
+              const nextQty = c.qty + delta;
+              if (nextQty <= 0) return null;
+              return {
+                ...c,
+                qty: nextQty,
+                amount: parseFloat((nextQty * c.price - c.disc).toFixed(2)),
+              };
+            }
+            return c;
+          })
+          .filter(Boolean) as CartItem[],
     );
   };
 
   // Delete selected item from cart
   const handleDeleteItem = () => {
     if (cart.length === 0) return;
-    const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    const targetIdx =
+      selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
     setCart((prev) => prev.filter((_, i) => i !== targetIdx));
     setSelectedCartIndex(-1);
   };
@@ -663,9 +603,14 @@ export default function PosBillingScreen({
     // Condition 1: Check if HOLDBILL is enabled (App.config HOLDBILL = 0 disables parking)
     if (!isEnabled("HOLDBILL")) {
       if (Platform.OS === "web") {
-        window.alert("Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).");
+        window.alert(
+          "Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).",
+        );
       } else {
-        Alert.alert("Feature Disabled", "Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).");
+        Alert.alert(
+          "Feature Disabled",
+          "Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).",
+        );
       }
       return;
     }
@@ -675,9 +620,14 @@ export default function PosBillingScreen({
     // Condition 2: Check AllowHoldOnlyTwobills restriction
     if (isEnabled("AllowHoldOnlyTwobills") && heldBills.length >= 2) {
       if (Platform.OS === "web") {
-        window.alert("Maximum 2 held bills allowed per System Configuration (AllowHoldOnlyTwobills = 1). Please release a bill first.");
+        window.alert(
+          "Maximum 2 held bills allowed per System Configuration (AllowHoldOnlyTwobills = 1). Please release a bill first.",
+        );
       } else {
-        Alert.alert("Hold Limit Reached", "Maximum 2 held bills allowed per System Configuration (AllowHoldOnlyTwobills = 1). Please release a bill first.");
+        Alert.alert(
+          "Hold Limit Reached",
+          "Maximum 2 held bills allowed per System Configuration (AllowHoldOnlyTwobills = 1). Please release a bill first.",
+        );
       }
       return;
     }
@@ -713,7 +663,7 @@ export default function PosBillingScreen({
     const match = items.find(
       (it) =>
         it.InventoryCode.toLowerCase() === searchVal ||
-        it.Description.toLowerCase().includes(searchVal)
+        it.Description.toLowerCase().includes(searchVal),
     );
 
     if (match) {
@@ -782,7 +732,11 @@ export default function PosBillingScreen({
   // Price Change override
   const handleApplyPriceChange = () => {
     const newPrice = parseFloat(overridePrice);
-    if (!isNaN(newPrice) && selectedCartIndex >= 0 && selectedCartIndex < cart.length) {
+    if (
+      !isNaN(newPrice) &&
+      selectedCartIndex >= 0 &&
+      selectedCartIndex < cart.length
+    ) {
       setCart((prev) =>
         prev.map((c, i) =>
           i === selectedCartIndex
@@ -791,8 +745,8 @@ export default function PosBillingScreen({
                 price: newPrice,
                 amount: parseFloat((c.qty * newPrice - c.disc).toFixed(2)),
               }
-            : c
-        )
+            : c,
+        ),
       );
       setShowPriceChangeModal(false);
       setOverridePrice("");
@@ -831,12 +785,7 @@ export default function PosBillingScreen({
   const activeFontFamily = currentFont.fontFamily;
 
   return (
-    <View
-      style={[
-        styles.screen,
-        { backgroundColor: currentTheme.bg },
-      ]}
-    >
+    <View style={[styles.screen, { backgroundColor: currentTheme.bg }]}>
       {/* Hide native scrollbar arrow buttons and track on web while preserving smooth scrolling */}
       {Platform.OS === "web" && (
         <style
@@ -870,7 +819,11 @@ export default function PosBillingScreen({
           onPress={() => setShowThemeModal(true)}
           activeOpacity={0.8}
         >
-          <MaterialCommunityIcons name="cart-variant" size={20} color="#ffffff" />
+          <MaterialCommunityIcons
+            name="cart-variant"
+            size={20}
+            color="#ffffff"
+          />
           <Text style={styles.brandBadgeText}>GM</Text>
         </TouchableOpacity>
 
@@ -939,7 +892,11 @@ export default function PosBillingScreen({
           style={styles.keyboardToggleBtn}
           onPress={() => skuInputRef.current?.focus()}
         >
-          <MaterialCommunityIcons name="keyboard-outline" size={20} color="#ffffff" />
+          <MaterialCommunityIcons
+            name="keyboard-outline"
+            size={20}
+            color="#ffffff"
+          />
         </TouchableOpacity>
 
         {/* System App.config Manager Button */}
@@ -1025,11 +982,17 @@ export default function PosBillingScreen({
       {/* License Expired Live Alert Banner */}
       {licenseExpired && (
         <View style={styles.posLicenseExpiredBanner}>
-          <MaterialCommunityIcons name="alert-octagon" size={18} color="#ffffff" />
+          <MaterialCommunityIcons
+            name="alert-octagon"
+            size={18}
+            color="#ffffff"
+          />
           <Text style={styles.posLicenseExpiredText}>
             License expired. You cannot add items.
           </Text>
-          <TouchableOpacity onPress={() => Linking.openURL("https://uniprosg.com")}>
+          <TouchableOpacity
+            onPress={() => Linking.openURL("https://uniprosg.com")}
+          >
             <Text style={styles.posLicenseExpiredLink}>
               Please contact https://uniprosg.com
             </Text>
@@ -1220,7 +1183,11 @@ export default function PosBillingScreen({
             >
               {cart.length === 0 ? (
                 <View style={styles.emptyTableState}>
-                  <MaterialCommunityIcons name="cart-outline" size={44} color="#94a3b8" />
+                  <MaterialCommunityIcons
+                    name="cart-outline"
+                    size={44}
+                    color="#94a3b8"
+                  />
                   <Text style={styles.emptyTableTitle}>No items in cart</Text>
                   <Text style={styles.emptyTableSubtitle}>
                     Scan SKU barcode or tap items on the right touch catalog.
@@ -1255,7 +1222,10 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdCode,
-                          { width: 90, fontSize: getNum("GridFontSize", 17) - 3 },
+                          {
+                            width: 90,
+                            fontSize: getNum("GridFontSize", 17) - 3,
+                          },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1278,7 +1248,11 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdQty,
-                          { width: 55, textAlign: "center", fontSize: getNum("GridFontSize", 17) - 3 },
+                          {
+                            width: 55,
+                            textAlign: "center",
+                            fontSize: getNum("GridFontSize", 17) - 3,
+                          },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1289,7 +1263,11 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdPrice,
-                          { width: 70, textAlign: "right", fontSize: getNum("GridFontSize", 17) - 3 },
+                          {
+                            width: 70,
+                            textAlign: "right",
+                            fontSize: getNum("GridFontSize", 17) - 3,
+                          },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1300,7 +1278,11 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdDisc,
-                          { width: 60, textAlign: "right", fontSize: getNum("GridFontSize", 17) - 3 },
+                          {
+                            width: 60,
+                            textAlign: "right",
+                            fontSize: getNum("GridFontSize", 17) - 3,
+                          },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1311,7 +1293,11 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdAmount,
-                          { width: 80, textAlign: "right", fontSize: getNum("GridFontSize", 17) - 3 },
+                          {
+                            width: 80,
+                            textAlign: "right",
+                            fontSize: getNum("GridFontSize", 17) - 3,
+                          },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1322,7 +1308,12 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdGst,
-                          { width: 55, textAlign: "right", paddingRight: 6, fontSize: getNum("GridFontSize", 17) - 4 },
+                          {
+                            width: 55,
+                            textAlign: "right",
+                            paddingRight: 6,
+                            fontSize: getNum("GridFontSize", 17) - 4,
+                          },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1338,7 +1329,9 @@ export default function PosBillingScreen({
             <View style={styles.footerSummaryStrip}>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>TOTAL</Text>
-                <Text style={styles.summaryChipVal}>${subTotal.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${subTotal.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>ITEMS</Text>
@@ -1346,19 +1339,27 @@ export default function PosBillingScreen({
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>DISC</Text>
-                <Text style={styles.summaryChipVal}>${totalDiscount.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${totalDiscount.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>SUBTOTAL</Text>
-                <Text style={styles.summaryChipVal}>${subTotal.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${subTotal.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>TAX</Text>
-                <Text style={styles.summaryChipVal}>${taxAmount.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${taxAmount.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>ROUND OFF</Text>
-                <Text style={styles.summaryChipVal}>${roundOff.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${roundOff.toFixed(2)}
+                </Text>
               </View>
             </View>
           </View>
@@ -1590,7 +1591,9 @@ export default function PosBillingScreen({
                 <MaterialCommunityIcons
                   name="contactless-payment"
                   size={16}
-                  color={selectedPayMode === "FLASH PAY" ? "#ffffff" : "#38bdf8"}
+                  color={
+                    selectedPayMode === "FLASH PAY" ? "#ffffff" : "#38bdf8"
+                  }
                   style={styles.posBtnIcon}
                 />
                 <Text
@@ -1627,10 +1630,10 @@ export default function PosBillingScreen({
                       selectedPayMode === "CASH"
                         ? "cash"
                         : selectedPayMode === "NETS"
-                        ? "credit-card"
-                        : selectedPayMode === "PAYNOW"
-                        ? "qrcode"
-                        : "wallet-outline"
+                          ? "credit-card"
+                          : selectedPayMode === "PAYNOW"
+                            ? "qrcode"
+                            : "wallet-outline"
                     }
                     size={12}
                     color="#86efac"
@@ -1829,7 +1832,8 @@ export default function PosBillingScreen({
               ) : (
                 visibleGroups.map((group) => {
                   const isSelected =
-                    selectedGroup.toUpperCase() === group.GroupCode.toUpperCase();
+                    selectedGroup.toUpperCase() ===
+                    group.GroupCode.toUpperCase();
                   const iconName = getCategoryIcon(group.GroupCode);
 
                   return (
@@ -1879,7 +1883,7 @@ export default function PosBillingScreen({
               disabled={groupPageIndex >= totalGroupPages - 1}
               onPress={() =>
                 setGroupPageIndex((prev) =>
-                  Math.min(totalGroupPages - 1, prev + 1)
+                  Math.min(totalGroupPages - 1, prev + 1),
                 )
               }
               activeOpacity={0.7}
@@ -1888,9 +1892,7 @@ export default function PosBillingScreen({
                 name="chevron-down"
                 size={24}
                 color={
-                  groupPageIndex >= totalGroupPages - 1
-                    ? "#cbd5e1"
-                    : "#155d36"
+                  groupPageIndex >= totalGroupPages - 1 ? "#cbd5e1" : "#155d36"
                 }
               />
             </TouchableOpacity>
@@ -1912,7 +1914,9 @@ export default function PosBillingScreen({
                   size={38}
                   color="#94a3b8"
                 />
-                <Text style={styles.emptyCatalogTitle}>No items configured</Text>
+                <Text style={styles.emptyCatalogTitle}>
+                  No items configured
+                </Text>
                 <Text style={styles.emptyCatalogSubtitle}>
                   No products found in group "{selectedGroup}"
                 </Text>
@@ -2004,7 +2008,7 @@ export default function PosBillingScreen({
                     disabled={itemPageIndex >= totalItemPages - 1}
                     onPress={() =>
                       setItemPageIndex((prev) =>
-                        Math.min(totalItemPages - 1, prev + 1)
+                        Math.min(totalItemPages - 1, prev + 1),
                       )
                     }
                     activeOpacity={0.8}
@@ -2049,7 +2053,11 @@ export default function PosBillingScreen({
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>Price Check & Search</Text>
               <TouchableOpacity onPress={() => setShowPriceCheckModal(false)}>
-                <MaterialCommunityIcons name="close" size={20} color="#475569" />
+                <MaterialCommunityIcons
+                  name="close"
+                  size={20}
+                  color="#475569"
+                />
               </TouchableOpacity>
             </View>
 
@@ -2063,8 +2071,11 @@ export default function PosBillingScreen({
                   setPriceCheckQuery(text);
                   const found = items.find(
                     (it) =>
-                      it.InventoryCode.toLowerCase() === text.trim().toLowerCase() ||
-                      it.Description.toLowerCase().includes(text.trim().toLowerCase())
+                      it.InventoryCode.toLowerCase() ===
+                        text.trim().toLowerCase() ||
+                      it.Description.toLowerCase().includes(
+                        text.trim().toLowerCase(),
+                      ),
                   );
                   setPriceCheckResult(found || null);
                 }}
@@ -2077,7 +2088,8 @@ export default function PosBillingScreen({
                   {priceCheckResult.Description}
                 </Text>
                 <Text style={styles.priceResultCode}>
-                  Code: {priceCheckResult.InventoryCode} • UOM: {priceCheckResult.UOM}
+                  Code: {priceCheckResult.InventoryCode} • UOM:{" "}
+                  {priceCheckResult.UOM}
                 </Text>
                 <Text style={styles.priceResultAmount}>
                   Selling Price: ${priceCheckResult.SellingPrice.toFixed(2)}
@@ -2115,7 +2127,11 @@ export default function PosBillingScreen({
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>Price Change Override</Text>
               <TouchableOpacity onPress={() => setShowPriceChangeModal(false)}>
-                <MaterialCommunityIcons name="close" size={20} color="#475569" />
+                <MaterialCommunityIcons
+                  name="close"
+                  size={20}
+                  color="#475569"
+                />
               </TouchableOpacity>
             </View>
 
@@ -2191,7 +2207,12 @@ export default function PosBillingScreen({
                 <Text style={[styles.receiptRowLabel, { fontWeight: "700" }]}>
                   Balance Due
                 </Text>
-                <Text style={[styles.receiptRowVal, { color: "#dc2626", fontWeight: "700" }]}>
+                <Text
+                  style={[
+                    styles.receiptRowVal,
+                    { color: "#dc2626", fontWeight: "700" },
+                  ]}
+                >
                   ${receiptSummary?.balance.toFixed(2)}
                 </Text>
               </View>
@@ -2207,14 +2228,23 @@ export default function PosBillingScreen({
                     const tpl = config.ReceiptTemplate || "Template2";
                     const store = config.CompanyName || "SUPERMART";
                     if (Platform.OS === "web") {
-                      window.alert(`🖨️ [${printer}] Spooling receipt to thermal printer using [${tpl}] for ${store}...`);
+                      window.alert(
+                        `🖨️ [${printer}] Spooling receipt to thermal printer using [${tpl}] for ${store}...`,
+                      );
                     } else {
-                      Alert.alert("Printing Receipt", `Spooling receipt to ${printer} using ${tpl}...`);
+                      Alert.alert(
+                        "Printing Receipt",
+                        `Spooling receipt to ${printer} using ${tpl}...`,
+                      );
                     }
                     handleFinishSale();
                   }}
                 >
-                  <MaterialCommunityIcons name="printer" size={18} color="#334155" />
+                  <MaterialCommunityIcons
+                    name="printer"
+                    size={18}
+                    color="#334155"
+                  />
                   <Text style={styles.modalSecondaryBtnText}>
                     Print ({config.ReceiptTemplate || "Tpl2"})
                   </Text>
@@ -2246,7 +2276,11 @@ export default function PosBillingScreen({
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>Select Payment Mode</Text>
               <TouchableOpacity onPress={() => setShowMorePayModes(false)}>
-                <MaterialCommunityIcons name="close" size={20} color="#475569" />
+                <MaterialCommunityIcons
+                  name="close"
+                  size={20}
+                  color="#475569"
+                />
               </TouchableOpacity>
             </View>
 
@@ -2256,8 +2290,8 @@ export default function PosBillingScreen({
                   key={pm.PayMode}
                   style={[
                     styles.payModeModalBtn,
-                    selectedPayMode.toUpperCase() === pm.PayMode.toUpperCase() &&
-                      styles.payModeModalBtnActive,
+                    selectedPayMode.toUpperCase() ===
+                      pm.PayMode.toUpperCase() && styles.payModeModalBtnActive,
                   ]}
                   onPress={() => {
                     setSelectedPayMode(pm.PayMode);
@@ -2335,7 +2369,8 @@ export default function PosBillingScreen({
                 paddingHorizontal: 8,
               }}
             >
-              Your software license has expired. You cannot add items to the bill.
+              Your software license has expired. You cannot add items to the
+              bill.
             </Text>
 
             <TouchableOpacity
