@@ -290,6 +290,54 @@ module.exports = function (jwtSecret) {
   });
 
   // ----------------------------------------------------------------------------
+  // GET /api/auth/cashiers
+  // Returns active cashier/admin users from tblMausermaster for quick sign-in presets
+  // ----------------------------------------------------------------------------
+  router.get("/cashiers", async (req, res) => {
+    try {
+      const pool = await getPool();
+
+      if (!pool) {
+        return res.status(503).json({
+          success: false,
+          cashiers: [],
+          message: "Database unreachable",
+        });
+      }
+
+      const result = await pool.request().query(`
+        SELECT 
+          RTRIM(LTRIM(UserCode)) AS UserCode,
+          RTRIM(LTRIM(UserName)) AS UserName,
+          IsAdmin,
+          IsCashier
+        FROM tblMausermaster
+        WHERE (IsCashier = 1 OR IsAdmin = 1)
+        ORDER BY UserCode ASC
+      `);
+
+      const cashiers = (result.recordset || []).map((row) => ({
+        userCode: row.UserCode,
+        userName: row.UserName,
+        isAdmin: row.IsAdmin === 1 || row.IsAdmin === true,
+        isCashier: row.IsCashier === 1 || row.IsCashier === true,
+      }));
+
+      return res.status(200).json({
+        success: true,
+        cashiers,
+      });
+    } catch (error) {
+      console.error("❌ [STAFF PRESETS ERROR]:", error.message);
+      return res.status(500).json({
+        success: false,
+        cashiers: [],
+        message: "Error fetching cashiers: " + error.message,
+      });
+    }
+  });
+
+  // ----------------------------------------------------------------------------
   // POST /api/auth/login
   // 1. Verifies that the PC ComputerName is registered in tblmaTerminal
   // 2. Authenticates Cashier or Admin against live tblMausermaster

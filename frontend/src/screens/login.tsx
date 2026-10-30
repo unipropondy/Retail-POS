@@ -9,7 +9,7 @@
 import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
-  Text,
+  Text as RNText,
   View,
   TextInput,
   TouchableOpacity,
@@ -18,6 +18,7 @@ import {
   Platform,
   Linking,
   Modal,
+  ScrollView,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import ThemeModal from "../components/ThemeModal";
@@ -109,13 +110,55 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [currentFont, setCurrentFont] = useState<FontOption>(FONTS[0]);
   const [showThemeModal, setShowThemeModal] = useState(false);
 
+  // Quick Staff Presets loaded dynamically from tblMausermaster
+  const [staffPresets, setStaffPresets] = useState<string[]>([]);
+
+  // Touch Keyboard input mode: Numeric (123) or Alphabet (ABC)
+  const [keyboardMode, setKeyboardMode] = useState<"123" | "ABC">("123");
+  const [isCaps, setIsCaps] = useState(true);
+
+  const activeFontFamily = currentFont.fontFamily;
+
+  // Global theme font-aware Text wrapper - dynamically propagates activeFontFamily globally across all elements
+  const Text = ({ style, ...props }: React.ComponentProps<typeof RNText>) => {
+    const flattened = StyleSheet.flatten(style);
+    const isMono = flattened?.fontFamily === FONT_MONO;
+    return (
+      <RNText
+        {...props}
+        style={[
+          style,
+          { fontFamily: isMono ? currentFont.monoFontFamily : activeFontFamily },
+        ]}
+      />
+    );
+  };
+
   // ----------------------------------------------------------------------------
   // Check Terminal Configuration & Load Preferences on Initial Load
   // ----------------------------------------------------------------------------
   useEffect(() => {
     checkTerminalStatus();
+    fetchCashierPresets();
     loadPreferences();
   }, []);
+
+  const fetchCashierPresets = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/auth/cashiers`);
+      const data = await response.json();
+      if (response.ok && data.success && Array.isArray(data.cashiers)) {
+        const codes = data.cashiers
+          .map((c: any) => c.userCode || c.userName)
+          .filter(Boolean);
+        setStaffPresets(codes);
+      } else {
+        setStaffPresets([]);
+      }
+    } catch {
+      setStaffPresets([]);
+    }
+  };
 
   const loadPreferences = async () => {
     const theme = await getSavedTheme();
@@ -193,8 +236,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     if (key === "ENTER") {
       if (focusedField === "username" && username.trim().length > 0) {
         setFocusedField("password");
+        setKeyboardMode("123");
       } else {
         handleLogin();
+      }
+      return;
+    }
+
+    if (key === "SPACE") {
+      if (focusedField === "username") {
+        setUsername((prev) => prev + " ");
+      } else {
+        setPassword((prev) => prev + " ");
       }
       return;
     }
@@ -374,7 +427,35 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   // ----------------------------------------------------------------------------
   // VIEW: GREENMART MODERN CASHIER LOGIN WITH TOUCH NUMPAD (Dynamic Theme & Font)
   // ----------------------------------------------------------------------------
-  const activeFontFamily = currentFont.fontFamily;
+
+  const renderMessageWithInlineLink = (
+    text: string,
+    textStyle: any,
+    linkStyle: any
+  ) => {
+    const url = "https://uniprosg.com";
+    if (!text.includes(url)) {
+      return (
+        <Text style={[textStyle, { fontFamily: activeFontFamily }]}>
+          {text}
+        </Text>
+      );
+    }
+    const [before, ...afterParts] = text.split(url);
+    const after = afterParts.join(url);
+    return (
+      <Text style={[textStyle, { fontFamily: activeFontFamily }]}>
+        {before}
+        <Text
+          style={[linkStyle, { fontFamily: activeFontFamily }]}
+          onPress={() => Linking.openURL(url)}
+        >
+          {url}
+        </Text>
+        {after}
+      </Text>
+    );
+  };
 
   return (
     <SafeAreaView
@@ -518,8 +599,14 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         </View>
       </View>
 
-      {/* Main Container: Dual Column Login Card + Touch Numpad */}
-      <View style={styles.centerContainer}>
+      {/* Main Container: Dual Column Login Card + Touch Numpad (Safe Scrollable/Fixed Viewport) */}
+      <ScrollView
+        contentContainerStyle={styles.centerContainer}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+        keyboardShouldPersistTaps="handled"
+        style={{ flex: 1 }}
+      >
         <View style={styles.loginCardDual}>
           {/* ================================================================= */}
           {/* LEFT COLUMN: Cashier Credentials Form                             */}
@@ -567,41 +654,31 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             >
               Cashier Sign In
             </Text>
-            <Text
-              style={[
-                styles.loginSubtitle,
-                { color: currentTheme.textMuted, fontFamily: activeFontFamily },
-              ]}
-            >
-              {isTerminalBlocked
-                ? "This computer is not authorized for billing"
-                : "Select input & tap the touch numpad to sign in"}
-            </Text>
+            {isTerminalBlocked ? (
+              <Text
+                style={[
+                  styles.loginSubtitle,
+                  { color: "#dc2626", fontFamily: activeFontFamily },
+                ]}
+              >
+                This computer is not authorized for billing
+              </Text>
+            ) : null}
 
             {/* 30-Day Advance License Expiry Warning Banner */}
             {licenseWarning ? (
               <View style={styles.warningBox}>
                 <MaterialCommunityIcons
                   name="bell-ring-outline"
-                  size={18}
+                  size={15}
                   color="#b45309"
-                  style={{ marginRight: 6, marginTop: 2 }}
+                  style={{ marginRight: 6, marginTop: 1 }}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.warningText}>
-                    {licenseWarning.includes("https://uniprosg.com")
-                      ? licenseWarning.split("https://uniprosg.com")[0]
-                      : licenseWarning}
-                  </Text>
-                  {licenseWarning.includes("https://uniprosg.com") && (
-                    <TouchableOpacity
-                      onPress={() => Linking.openURL("https://uniprosg.com")}
-                      style={{ marginTop: 4 }}
-                    >
-                      <Text style={styles.warningLinkText}>
-                        https://uniprosg.com
-                      </Text>
-                    </TouchableOpacity>
+                  {renderMessageWithInlineLink(
+                    licenseWarning,
+                    styles.warningText,
+                    styles.warningLinkText
                   )}
                 </View>
               </View>
@@ -612,25 +689,15 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <View style={styles.errorBox}>
                 <MaterialCommunityIcons
                   name="alert-circle-outline"
-                  size={18}
+                  size={15}
                   color="#b91c1c"
-                  style={{ marginRight: 6, marginTop: 2 }}
+                  style={{ marginRight: 6, marginTop: 1 }}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.errorText}>
-                    {errorMessage.includes("https://uniprosg.com")
-                      ? errorMessage.split("https://uniprosg.com")[0]
-                      : errorMessage}
-                  </Text>
-                  {errorMessage.includes("https://uniprosg.com") && (
-                    <TouchableOpacity
-                      onPress={() => Linking.openURL("https://uniprosg.com")}
-                      style={{ marginTop: 4 }}
-                    >
-                      <Text style={styles.errorLinkText}>
-                        https://uniprosg.com
-                      </Text>
-                    </TouchableOpacity>
+                  {renderMessageWithInlineLink(
+                    errorMessage,
+                    styles.errorText,
+                    styles.errorLinkText
                   )}
                 </View>
               </View>
@@ -671,7 +738,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
               <TouchableOpacity
                 activeOpacity={1}
-                onPress={() => setFocusedField("username")}
+                onPress={() => {
+                  setFocusedField("username");
+                  setKeyboardMode("ABC");
+                }}
                 style={[
                   styles.textInputBox,
                   focusedField === "username" && [
@@ -697,7 +767,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     setUsername(text);
                     setErrorMessage(null);
                   }}
-                  onFocus={() => setFocusedField("username")}
+                  onFocus={() => {
+                    setFocusedField("username");
+                    setKeyboardMode("ABC");
+                  }}
                   placeholder="e.g. JAVITH"
                   placeholderTextColor="#94a3b8"
                   autoCapitalize="characters"
@@ -754,7 +827,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
               <TouchableOpacity
                 activeOpacity={1}
-                onPress={() => setFocusedField("password")}
+                onPress={() => {
+                  setFocusedField("password");
+                  setKeyboardMode("123");
+                }}
                 style={[
                   styles.textInputBox,
                   focusedField === "password" && [
@@ -780,7 +856,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     setPassword(text);
                     setErrorMessage(null);
                   }}
-                  onFocus={() => setFocusedField("password")}
+                  onFocus={() => {
+                    setFocusedField("password");
+                    setKeyboardMode("123");
+                  }}
                   placeholder="Enter PIN / Password"
                   placeholderTextColor="#94a3b8"
                   secureTextEntry={!showPassword}
@@ -801,51 +880,63 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </TouchableOpacity>
             </View>
 
-            {/* Quick Staff Presets */}
-            <View style={styles.presetSection}>
-              <Text
-                style={[
-                  styles.presetTitle,
-                  { color: currentTheme.textMuted, fontFamily: activeFontFamily },
-                ]}
-              >
-                Quick Staff Presets:
-              </Text>
-              <View style={styles.presetRow}>
-                {["AMITH", "MAYIL", "ADMIN"].map((staff) => (
-                  <TouchableOpacity
-                    key={staff}
-                    style={[
-                      styles.presetChip,
-                      {
-                        backgroundColor: currentTheme.primary + "12",
-                        borderColor: currentTheme.primary + "35",
-                      },
-                    ]}
-                    onPress={() => {
-                      setUsername(staff);
-                      setFocusedField("password");
-                      setErrorMessage(null);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <MaterialCommunityIcons
-                      name="account"
-                      size={12}
-                      color={currentTheme.primary}
-                    />
-                    <Text
-                      style={[
-                        styles.presetChipText,
-                        { color: currentTheme.primary, fontFamily: activeFontFamily },
-                      ]}
-                    >
-                      {staff}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+            {/* Quick Staff Presets (Live from tblMausermaster) */}
+            {staffPresets.length > 0 && (
+              <View style={styles.presetSection}>
+                <Text
+                  style={[
+                    styles.presetTitle,
+                    { color: currentTheme.textMuted, fontFamily: activeFontFamily },
+                  ]}
+                >
+                  Quick Staff Presets:
+                </Text>
+                <View style={styles.presetRow}>
+                  {staffPresets.map((staff) => {
+                    const isSelected = username.toUpperCase() === staff.toUpperCase();
+                    return (
+                      <TouchableOpacity
+                        key={staff}
+                        style={[
+                          styles.presetChip,
+                          {
+                            backgroundColor: isSelected
+                              ? currentTheme.primary
+                              : currentTheme.primary + "12",
+                            borderColor: isSelected
+                              ? currentTheme.primary
+                              : currentTheme.primary + "35",
+                          },
+                        ]}
+                        onPress={() => {
+                          setUsername(staff);
+                          setFocusedField("password");
+                          setErrorMessage(null);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <MaterialCommunityIcons
+                          name="account"
+                          size={12}
+                          color={isSelected ? "#ffffff" : currentTheme.primary}
+                        />
+                        <Text
+                          style={[
+                            styles.presetChipText,
+                            {
+                              color: isSelected ? "#ffffff" : currentTheme.primary,
+                              fontFamily: activeFontFamily,
+                            },
+                          ]}
+                        >
+                          {staff}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
-            </View>
+            )}
 
             {/* Primary Action Button */}
             <TouchableOpacity
@@ -881,23 +972,17 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 </View>
               )}
             </TouchableOpacity>
-
-            <View style={styles.signatureRow}>
-              <Text style={styles.signatureText}>
-                © 2026 Unipro Softwares SG Pte Ltd
-              </Text>
-            </View>
           </View>
 
           {/* ================================================================= */}
           {/* RIGHT COLUMN: Dedicated High-Density Touch Numpad                */}
           {/* ================================================================= */}
           <View style={styles.numpadCol}>
-            {/* Numpad Header */}
+            {/* Numpad Header with 123 / ABC Mode Switcher */}
             <View style={styles.numpadHeader}>
               <View style={styles.numpadTitleRow}>
                 <MaterialCommunityIcons
-                  name="dialpad"
+                  name={keyboardMode === "123" ? "dialpad" : "keyboard-outline"}
                   size={18}
                   color={currentTheme.primary}
                   style={{ marginRight: 6 }}
@@ -908,8 +993,53 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     { color: currentTheme.textDark, fontFamily: activeFontFamily },
                   ]}
                 >
-                  TOUCH NUMPAD
+                  {keyboardMode === "123" ? "NUMPAD" : "KEYBOARD"}
                 </Text>
+              </View>
+
+              {/* Keyboard Mode Switcher: [ 123 ] [ ABC ] */}
+              <View style={styles.modeSwitchPill}>
+                <TouchableOpacity
+                  style={[
+                    styles.modeSwitchOption,
+                    keyboardMode === "123" && [
+                      styles.modeSwitchOptionActive,
+                      { backgroundColor: currentTheme.primary },
+                    ],
+                  ]}
+                  onPress={() => setKeyboardMode("123")}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.modeSwitchText,
+                      keyboardMode === "123" && styles.modeSwitchTextActive,
+                    ]}
+                  >
+                    123
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modeSwitchOption,
+                    keyboardMode === "ABC" && [
+                      styles.modeSwitchOptionActive,
+                      { backgroundColor: currentTheme.primary },
+                    ],
+                  ]}
+                  onPress={() => setKeyboardMode("ABC")}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.modeSwitchText,
+                      keyboardMode === "ABC" && styles.modeSwitchTextActive,
+                    ]}
+                  >
+                    ABC
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               <View
@@ -932,104 +1062,244 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </View>
             </View>
 
-            {/* 4x3 Numpad Keypad */}
-            <View style={styles.keypadGrid}>
-              {/* Row 1 */}
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("1")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>1</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("2")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>2</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("3")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>3</Text>
-              </TouchableOpacity>
+            {/* Keyboard Mode: 123 (Numpad) vs ABC (Alphabet) */}
+            {keyboardMode === "123" ? (
+              /* 4x3 Numpad Keypad */
+              <View style={styles.keypadGrid}>
+                {/* Row 1 */}
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("1")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>1</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("2")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>2</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("3")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>3</Text>
+                </TouchableOpacity>
 
-              {/* Row 2 */}
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("4")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>4</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("5")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>5</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("6")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>6</Text>
-              </TouchableOpacity>
+                {/* Row 2 */}
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("4")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>4</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("5")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>5</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("6")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>6</Text>
+                </TouchableOpacity>
 
-              {/* Row 3 */}
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("7")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>7</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("8")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>8</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("9")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>9</Text>
-              </TouchableOpacity>
+                {/* Row 3 */}
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("7")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>7</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("8")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>8</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("9")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>9</Text>
+                </TouchableOpacity>
 
-              {/* Row 4 */}
-              <TouchableOpacity
-                style={[styles.keypadBtn, styles.keypadBtnClear]}
-                onPress={() => handleNumpadKey("CLEAR")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadClearText}>C</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.keypadBtn}
-                onPress={() => handleNumpadKey("0")}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.keypadNum}>0</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.keypadBtn, styles.keypadBtnBackspace]}
-                onPress={() => handleNumpadKey("BACKSPACE")}
-                activeOpacity={0.7}
-              >
-                <MaterialCommunityIcons
-                  name="backspace-outline"
-                  size={20}
-                  color="#475569"
-                />
-              </TouchableOpacity>
-            </View>
+                {/* Row 4 */}
+                <TouchableOpacity
+                  style={[styles.keypadBtn, styles.keypadBtnClear]}
+                  onPress={() => handleNumpadKey("CLEAR")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadClearText}>C</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.keypadBtn}
+                  onPress={() => handleNumpadKey("0")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.keypadNum}>0</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.keypadBtn, styles.keypadBtnBackspace]}
+                  onPress={() => handleNumpadKey("BACKSPACE")}
+                  activeOpacity={0.7}
+                >
+                  <MaterialCommunityIcons
+                    name="backspace-outline"
+                    size={20}
+                    color="#475569"
+                  />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              /* QWERTY Alphabet + Numbers Touch Keypad */
+              <View style={styles.alphaGrid}>
+                {/* Row 0: 1 2 3 4 5 6 7 8 9 0 */}
+                <View style={styles.alphaRow}>
+                  {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((num) => (
+                    <TouchableOpacity
+                      key={num}
+                      style={[styles.alphaKey, styles.alphaNumKey]}
+                      onPress={() => handleNumpadKey(num)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.alphaKeyText, styles.alphaNumKeyText]}>{num}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Row 1: Q W E R T Y U I O P */}
+                <View style={styles.alphaRow}>
+                  {["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"].map((ch) => {
+                    const displayChar = isCaps ? ch.toUpperCase() : ch.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={ch}
+                        style={styles.alphaKey}
+                        onPress={() => handleNumpadKey(displayChar)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.alphaKeyText}>{displayChar}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Row 2: A S D F G H J K L */}
+                <View style={[styles.alphaRow, { paddingHorizontal: 8 }]}>
+                  {["A", "S", "D", "F", "G", "H", "J", "K", "L"].map((ch) => {
+                    const displayChar = isCaps ? ch.toUpperCase() : ch.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={ch}
+                        style={styles.alphaKey}
+                        onPress={() => handleNumpadKey(displayChar)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.alphaKeyText}>{displayChar}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Row 3: [Caps Lock] + Z X C V B N M + [⌫] */}
+                <View style={styles.alphaRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.alphaKey,
+                      styles.alphaKeySpecial,
+                      { flex: 1.4 },
+                      isCaps && {
+                        backgroundColor: currentTheme.primary + "18",
+                        borderColor: currentTheme.primary,
+                      },
+                    ]}
+                    onPress={() => setIsCaps((prev) => !prev)}
+                    activeOpacity={0.7}
+                  >
+                    <MaterialCommunityIcons
+                      name={isCaps ? "arrow-up-bold" : "arrow-up-bold-outline"}
+                      size={18}
+                      color={isCaps ? currentTheme.primary : "#475569"}
+                    />
+                  </TouchableOpacity>
+
+                  {["Z", "X", "C", "V", "B", "N", "M"].map((ch) => {
+                    const displayChar = isCaps ? ch.toUpperCase() : ch.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={ch}
+                        style={styles.alphaKey}
+                        onPress={() => handleNumpadKey(displayChar)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.alphaKeyText}>{displayChar}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                  <TouchableOpacity
+                    style={[styles.alphaKey, styles.alphaKeySpecial, { flex: 1.4 }]}
+                    onPress={() => handleNumpadKey("BACKSPACE")}
+                    activeOpacity={0.7}
+                  >
+                    <MaterialCommunityIcons
+                      name="backspace-outline"
+                      size={18}
+                      color="#475569"
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Row 4: 123 Switch, Space, Clear */}
+                <View style={styles.alphaRow}>
+                  <TouchableOpacity
+                    style={[styles.alphaKey, styles.alphaKeySpecial, { flex: 1.5 }]}
+                    onPress={() => setKeyboardMode("123")}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.alphaKeyText, { fontSize: 13, color: currentTheme.primary }]}>
+                      123
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.alphaKey, { flex: 3.5 }]}
+                    onPress={() => handleNumpadKey("SPACE")}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.alphaKeyText, { fontSize: 11, color: "#64748b" }]}>
+                      SPACE
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.alphaKey,
+                      styles.alphaKeySpecial,
+                      { flex: 1.5, backgroundColor: "#fef2f2", borderColor: "#fecaca" },
+                    ]}
+                    onPress={() => handleNumpadKey("CLEAR")}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.alphaKeyText, { fontSize: 12, color: "#dc2626" }]}>
+                      CLEAR
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
 
             {/* Enter / Next Action Key */}
             <TouchableOpacity
@@ -1055,66 +1325,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 {focusedField === "username" ? "NEXT (PIN) ➔" : "SIGN IN ↵"}
               </Text>
             </TouchableOpacity>
-
-            {/* Switch target toggle */}
-            <View style={styles.targetSwitcherRow}>
-              <TouchableOpacity
-                style={[
-                  styles.targetSwitchBtn,
-                  focusedField === "username" && [
-                    styles.targetSwitchBtnActive,
-                    {
-                      backgroundColor: currentTheme.primary + "18",
-                      borderColor: currentTheme.primary,
-                    },
-                  ],
-                ]}
-                onPress={() => setFocusedField("username")}
-              >
-                <Text
-                  style={[
-                    styles.targetSwitchText,
-                    { fontFamily: activeFontFamily },
-                    focusedField === "username" && [
-                      styles.targetSwitchTextActive,
-                      { color: currentTheme.primary },
-                    ],
-                  ]}
-                >
-                  Type Staff Code
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.targetSwitchBtn,
-                  focusedField === "password" && [
-                    styles.targetSwitchBtnActive,
-                    {
-                      backgroundColor: currentTheme.primary + "18",
-                      borderColor: currentTheme.primary,
-                    },
-                  ],
-                ]}
-                onPress={() => setFocusedField("password")}
-              >
-                <Text
-                  style={[
-                    styles.targetSwitchText,
-                    { fontFamily: activeFontFamily },
-                    focusedField === "password" && [
-                      styles.targetSwitchTextActive,
-                      { color: currentTheme.primary },
-                    ],
-                  ]}
-                >
-                  Type PIN
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
-      </View>
+
+        {/* Global Copyright Signature centered under Card */}
+        <View style={styles.signatureRow}>
+          <Text style={styles.signatureText}>
+            © 2026 Unipro Softwares SG Pte Ltd
+          </Text>
+        </View>
+      </ScrollView>
 
       {/* Theme & Font Customizer Modal */}
       <ThemeModal
@@ -1266,17 +1486,17 @@ const styles = StyleSheet.create({
 
   // Main centered container
   centerContainer: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 8,
   },
 
   // Dual-Column Login Card (Form + Touch Numpad)
   loginCardDual: {
     width: "100%",
-    maxWidth: 780,
+    maxWidth: 1000,
     backgroundColor: "#ffffff",
     borderRadius: 14,
     borderWidth: 1,
@@ -1292,14 +1512,15 @@ const styles = StyleSheet.create({
 
   // Left Column: Credentials Form
   credentialsCol: {
-    flex: 1.2,
-    padding: 24,
+    flex: 1.15,
+    paddingVertical: 22,
+    paddingHorizontal: 24,
     borderRightWidth: 1,
     borderRightColor: "#f1f5f9",
     justifyContent: "space-between",
   },
   badgeRow: {
-    marginBottom: 8,
+    marginBottom: 7,
   },
   pillLabel: {
     alignSelf: "flex-start",
@@ -1319,7 +1540,7 @@ const styles = StyleSheet.create({
   },
   pillLabelText: {
     color: "#155d36",
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: "800",
     letterSpacing: 0.8,
     fontFamily: FONT_FAMILY,
@@ -1331,13 +1552,13 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "800",
     color: "#0f172a",
-    marginBottom: 4,
+    marginBottom: 8,
     fontFamily: FONT_FAMILY,
   },
   loginSubtitle: {
-    fontSize: 12,
+    fontSize: 11.5,
     color: "#64748b",
-    marginBottom: 16,
+    marginBottom: 6,
     fontFamily: FONT_FAMILY,
   },
 
@@ -1348,21 +1569,21 @@ const styles = StyleSheet.create({
     backgroundColor: "#fef2f2",
     borderWidth: 1,
     borderColor: "#fca5a5",
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginBottom: 12,
+    borderRadius: 7,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    marginBottom: 6,
   },
   errorText: {
     color: "#b91c1c",
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: "600",
     fontFamily: FONT_FAMILY,
-    lineHeight: 16,
+    lineHeight: 15,
   },
   errorLinkText: {
     color: "#1d4ed8",
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: "700",
     textDecorationLine: "underline",
     fontFamily: FONT_FAMILY,
@@ -1375,21 +1596,21 @@ const styles = StyleSheet.create({
     backgroundColor: "#fefce8",
     borderWidth: 1,
     borderColor: "#fde047",
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginBottom: 12,
+    borderRadius: 7,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    marginBottom: 6,
   },
   warningText: {
     color: "#854d0e",
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: "600",
     fontFamily: FONT_FAMILY,
-    lineHeight: 16,
+    lineHeight: 15,
   },
   warningLinkText: {
     color: "#1d4ed8",
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: "700",
     textDecorationLine: "underline",
     fontFamily: FONT_FAMILY,
@@ -1403,7 +1624,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 5,
+    marginBottom: 4,
   },
   inputLabel: {
     fontSize: 11.5,
@@ -1413,14 +1634,14 @@ const styles = StyleSheet.create({
   },
   activeFieldTag: {
     backgroundColor: "#f0fdf4",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: "#86efac",
   },
   activeFieldTagText: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontWeight: "800",
     color: "#155d36",
     fontFamily: FONT_FAMILY,
@@ -1432,8 +1653,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1.5,
     borderColor: "#cbd5e1",
-    paddingHorizontal: 10,
-    height: 44,
+    paddingHorizontal: 12,
+    height: 50,
   },
   textInputBoxActive: {
     borderColor: "#155d36",
@@ -1449,15 +1670,15 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    height: 42,
-    fontSize: 14,
+    height: 46,
+    fontSize: 15,
     fontWeight: "700",
     color: "#0f172a",
     fontFamily: FONT_FAMILY,
     outlineStyle: "none" as any,
   },
   fieldActionBtn: {
-    padding: 6,
+    padding: 5,
   },
   inputDisabled: {
     backgroundColor: "#f1f5f9",
@@ -1466,17 +1687,18 @@ const styles = StyleSheet.create({
 
   // Presets
   presetSection: {
-    marginVertical: 6,
+    marginVertical: 5,
   },
   presetTitle: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: "700",
     color: "#64748b",
-    marginBottom: 6,
+    marginBottom: 4,
     fontFamily: FONT_FAMILY,
   },
   presetRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 6,
   },
   presetChip: {
@@ -1487,11 +1709,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#bbf7d0",
     borderRadius: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 5,
   },
   presetChipText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: "700",
     color: "#155d36",
     fontFamily: FONT_FAMILY,
@@ -1501,14 +1723,14 @@ const styles = StyleSheet.create({
   primaryButton: {
     backgroundColor: "#155d36",
     borderRadius: 8,
-    height: 46,
+    height: 52,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 8,
+    marginTop: 10,
     shadowColor: "#155d36",
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
-    shadowRadius: 5,
+    shadowRadius: 4,
     elevation: 3,
   },
   primaryButtonContent: {
@@ -1529,12 +1751,12 @@ const styles = StyleSheet.create({
 
   // Signature
   signatureRow: {
-    marginTop: 10,
+    marginTop: 8,
     alignItems: "center",
   },
   signatureText: {
     color: "#94a3b8",
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: "600",
     fontFamily: FONT_FAMILY,
   },
@@ -1543,9 +1765,10 @@ const styles = StyleSheet.create({
   // Right Column: Dedicated High-Density Touch Numpad
   // ===========================================================================
   numpadCol: {
-    flex: 1,
+    flex: 1.25,
     backgroundColor: "#f8fafc",
-    padding: 20,
+    paddingVertical: 22,
+    paddingHorizontal: 24,
     justifyContent: "space-between",
   },
   numpadHeader: {
@@ -1553,7 +1776,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 10,
-    paddingBottom: 8,
+    paddingBottom: 7,
     borderBottomWidth: 1,
     borderBottomColor: "#e2e8f0",
   },
@@ -1570,17 +1793,92 @@ const styles = StyleSheet.create({
   },
   targetIndicatorBadge: {
     backgroundColor: "#f0fdf4",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderRadius: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
     borderWidth: 1,
     borderColor: "#86efac",
   },
   targetIndicatorText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: "800",
     color: "#155d36",
     fontFamily: FONT_FAMILY,
+  },
+
+  modeSwitchPill: {
+    flexDirection: "row",
+    backgroundColor: "#e2e8f0",
+    borderRadius: 7,
+    padding: 2.5,
+    gap: 3,
+  },
+  modeSwitchOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 4.5,
+    borderRadius: 5,
+  },
+  modeSwitchOptionActive: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  modeSwitchText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#475569",
+    fontFamily: FONT_FAMILY,
+    letterSpacing: 0.5,
+  },
+  modeSwitchTextActive: {
+    color: "#ffffff",
+  },
+  alphaGrid: {
+    flexDirection: "column",
+    justifyContent: "space-between",
+  },
+  alphaRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
+  alphaKey: {
+    flex: 1,
+    height: 45,
+    backgroundColor: "#ffffff",
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  alphaKeyText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0f172a",
+    fontFamily: FONT_FAMILY,
+  },
+  alphaKeySpecial: {
+    backgroundColor: "#f1f5f9",
+    borderColor: "#cbd5e1",
+  },
+  alphaNumKey: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#cbd5e1",
+  },
+  alphaNumKeyText: {
+    fontFamily: FONT_MONO,
+    fontSize: 14.5,
+    fontWeight: "800",
+    color: "#0f172a",
   },
 
   // 4x3 Grid
@@ -1592,7 +1890,7 @@ const styles = StyleSheet.create({
   },
   keypadBtn: {
     width: "31.5%",
-    height: 48,
+    height: 58,
     backgroundColor: "#ffffff",
     borderRadius: 8,
     borderWidth: 1,
@@ -1606,7 +1904,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   keypadNum: {
-    fontSize: 18,
+    fontSize: 18.5,
     fontWeight: "800",
     color: "#0f172a",
     fontFamily: FONT_MONO,
@@ -1616,7 +1914,7 @@ const styles = StyleSheet.create({
     borderColor: "#fecaca",
   },
   keypadClearText: {
-    fontSize: 16,
+    fontSize: 14.5,
     fontWeight: "800",
     color: "#dc2626",
     fontFamily: FONT_FAMILY,
@@ -1627,7 +1925,7 @@ const styles = StyleSheet.create({
 
   // Enter Key
   keypadEnterBtn: {
-    height: 44,
+    height: 52,
     backgroundColor: "#155d36",
     borderRadius: 8,
     flexDirection: "row",
@@ -1642,42 +1940,12 @@ const styles = StyleSheet.create({
   },
   keypadEnterText: {
     color: "#ffffff",
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: "800",
     letterSpacing: 0.5,
     fontFamily: FONT_FAMILY,
   },
 
-  // Target Switcher Row
-  targetSwitcherRow: {
-    flexDirection: "row",
-    gap: 6,
-    marginTop: 8,
-  },
-  targetSwitchBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  targetSwitchBtnActive: {
-    backgroundColor: "#f0fdf4",
-    borderColor: "#155d36",
-  },
-  targetSwitchText: {
-    fontSize: 10.5,
-    fontWeight: "700",
-    color: "#64748b",
-    fontFamily: FONT_FAMILY,
-  },
-  targetSwitchTextActive: {
-    color: "#155d36",
-    fontWeight: "800",
-  },
 
   // Welcome Screen Styling (GreenMart theme)
   welcomeBody: {

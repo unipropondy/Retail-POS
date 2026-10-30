@@ -24,7 +24,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   StyleSheet,
   View,
-  Text,
+  Text as RNText,
   TextInput,
   TouchableOpacity,
   ScrollView,
@@ -784,6 +784,21 @@ export default function PosBillingScreen({
 
   const activeFontFamily = currentFont.fontFamily;
 
+  // Global theme font-aware Text wrapper - dynamically propagates activeFontFamily globally across all elements (including cart items, grid, buttons, and metrics)
+  const Text = ({ style, ...props }: React.ComponentProps<typeof RNText>) => {
+    const flattened = StyleSheet.flatten(style);
+    const isMono = flattened?.fontFamily === FONT_MONO;
+    return (
+      <RNText
+        {...props}
+        style={[
+          style,
+          { fontFamily: isMono ? currentFont.monoFontFamily : activeFontFamily },
+        ]}
+      />
+    );
+  };
+
   return (
     <View style={[styles.screen, { backgroundColor: currentTheme.bg }]}>
       {/* Hide native scrollbar arrow buttons and track on web while preserving smooth scrolling */}
@@ -866,7 +881,7 @@ export default function PosBillingScreen({
 
         {/* Plus / Minus Quick Buttons */}
         <TouchableOpacity
-          style={styles.qtyBtnPlus}
+          style={[styles.qtyBtnPlus, { backgroundColor: currentTheme.primary }]}
           onPress={() => handleQtyChange(1)}
         >
           <MaterialCommunityIcons name="plus" size={20} color="#ffffff" />
@@ -1892,7 +1907,9 @@ export default function PosBillingScreen({
                 name="chevron-down"
                 size={24}
                 color={
-                  groupPageIndex >= totalGroupPages - 1 ? "#cbd5e1" : "#155d36"
+                  groupPageIndex >= totalGroupPages - 1
+                    ? "#cbd5e1"
+                    : currentTheme.primary
                 }
               />
             </TouchableOpacity>
@@ -1953,7 +1970,12 @@ export default function PosBillingScreen({
 
                         {/* Price Row */}
                         <View style={styles.touchTileBottomRow}>
-                          <Text style={styles.touchTilePrice}>
+                          <Text
+                            style={[
+                              styles.touchTilePrice,
+                              { color: currentTheme.primary },
+                            ]}
+                          >
                             ${prod.SellingPrice.toFixed(2)}
                           </Text>
                         </View>
@@ -1967,7 +1989,9 @@ export default function PosBillingScreen({
                   <TouchableOpacity
                     style={[
                       styles.itemNavArrowBtn,
-                      itemPageIndex === 0 && styles.itemNavArrowBtnDisabled,
+                      itemPageIndex === 0
+                        ? styles.itemNavArrowBtnDisabled
+                        : { backgroundColor: currentTheme.primary },
                     ]}
                     disabled={itemPageIndex === 0}
                     onPress={() =>
@@ -2002,8 +2026,9 @@ export default function PosBillingScreen({
                   <TouchableOpacity
                     style={[
                       styles.itemNavArrowBtn,
-                      itemPageIndex >= totalItemPages - 1 &&
-                        styles.itemNavArrowBtnDisabled,
+                      itemPageIndex >= totalItemPages - 1
+                        ? styles.itemNavArrowBtnDisabled
+                        : { backgroundColor: currentTheme.primary },
                     ]}
                     disabled={itemPageIndex >= totalItemPages - 1}
                     onPress={() =>
