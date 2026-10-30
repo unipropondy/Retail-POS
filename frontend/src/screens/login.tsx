@@ -17,9 +17,13 @@ import {
   ActivityIndicator,
   Platform,
   Linking,
+  Modal,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import ThemeModal from "../components/ThemeModal";
+import { useAppConfig } from "../config/ConfigContext";
+import { getBackendBaseUrl } from "../config/appConfig";
+import AppConfigScreen from "./AppConfigScreen";
 import {
   THEMES,
   FONTS,
@@ -31,8 +35,8 @@ import {
   saveFontPreference,
 } from "../utils/theme";
 
-// Backend API URL - connects to our Express server
-const API_URL = "http://localhost:5000";
+// Backend API URL - dynamically resolves for Web & Android
+const API_URL = getBackendBaseUrl();
 
 // Enterprise POS Typography Stack
 const FONT_FAMILY = Platform.select({
@@ -92,6 +96,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
+
+  // Centralized App.config Integration
+  const { config, isEnabled } = useAppConfig();
+  const [showConfigModal, setShowConfigModal] = useState(false);
 
   // Authenticated cashier profile (for welcome screen fallback)
   const [activeUser, setActiveUser] = useState<CashierProfile | null>(null);
@@ -404,8 +412,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 styles.brandTitle,
                 { color: currentTheme.textDark, fontFamily: activeFontFamily },
               ]}
+              numberOfLines={1}
             >
-              KALAISMR
+              {config.CompanyName || "ALL INDIA SUPERMART PTE LTD"}
             </Text>
             <Text
               style={[
@@ -413,7 +422,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 { color: currentTheme.accent, fontFamily: activeFontFamily },
               ]}
             >
-              SUPERMARKET POS
+              RETAIL POS SYSTEM
             </Text>
           </View>
         </View>
@@ -451,6 +460,34 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   : `${terminal?.terminalCode || "HQPC1"} • ${terminal?.locationCode || "HQ"} READY`}
             </Text>
           </View>
+
+          {/* System App.config Trigger Button */}
+          <TouchableOpacity
+            style={[
+              styles.themeToggleBtn,
+              {
+                backgroundColor: currentTheme.isDark ? "#334155" : "#f1f5f9",
+                borderColor: currentTheme.borderColor,
+                marginRight: 8,
+              },
+            ]}
+            onPress={() => setShowConfigModal(true)}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons
+              name="cog-outline"
+              size={18}
+              color={currentTheme.primary}
+            />
+            <Text
+              style={[
+                styles.themeToggleBtnText,
+                { color: currentTheme.textDark, fontFamily: activeFontFamily },
+              ]}
+            >
+              Config
+            </Text>
+          </TouchableOpacity>
 
           {/* Theme & Font Customizer Trigger Button */}
           <TouchableOpacity
@@ -1088,6 +1125,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         onSelectTheme={handleSelectTheme}
         onSelectFont={handleSelectFont}
       />
+
+      {/* App Configuration Management Modal */}
+      <Modal
+        visible={showConfigModal}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setShowConfigModal(false)}
+      >
+        <AppConfigScreen onClose={() => setShowConfigModal(false)} />
+      </Modal>
     </SafeAreaView>
   );
 }

@@ -11,6 +11,7 @@
 const express = require('express');
 const router = express.Router();
 const { sql, getPool } = require('../config/db');
+const configService = require('../config/configService');
 
 // ------------------------------------------------------------------------------
 // GET /api/inventory/touch-groups
@@ -67,9 +68,10 @@ router.get('/touch-items', async (req, res) => {
     }
 
     const { groupCode } = req.query;
+    const maxItems = configService.getNumber('itemListMaxData', 40);
 
     let query = `
-      SELECT 
+      SELECT TOP (${maxItems})
         RTRIM(LTRIM(ts.GroupCode)) AS GroupCode,
         RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
         ts.SortOrder,

@@ -33,9 +33,13 @@ import {
   Modal,
   Image,
   Linking,
+  Alert,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import ThemeModal from "../components/ThemeModal";
+import { useAppConfig } from "../config/ConfigContext";
+import { getBackendBaseUrl } from "../config/appConfig";
+import AppConfigScreen from "./AppConfigScreen";
 import {
   THEMES,
   FONTS,
@@ -47,7 +51,7 @@ import {
   saveFontPreference,
 } from "../utils/theme";
 
-const API_URL = "http://localhost:5000";
+const API_URL = getBackendBaseUrl();
 
 // Enterprise POS Typography Stack
 const FONT_FAMILY = Platform.select({
@@ -283,6 +287,10 @@ export default function PosBillingScreen({
     balance: number;
     payMode: string;
   } | null>(null);
+
+  // Centralized VB.NET App.config Integration
+  const { config, isEnabled, getNum } = useAppConfig();
+  const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
 
   // License validation states (tblMaCompany ValidateDate)
   const [licenseExpired, setLicenseExpired] = useState(false);
@@ -524,6 +532,31 @@ export default function PosBillingScreen({
     const qtyToAdd = parseFloat(fastQty) || 1;
     const discToAdd = parseFloat(fastDisc) || 0;
 
+    // App.config Conditions: AbovePrice, Aboveqty, ISValueAbove validation alerts
+    const isValueAboveCheck = isEnabled("ISValueAbove");
+    const abovePriceLimit = getNum("AbovePrice", 2000);
+    const aboveQtyLimit = getNum("Aboveqty", 10);
+
+    if (isValueAboveCheck || abovePriceLimit > 0) {
+      if (item.SellingPrice > abovePriceLimit) {
+        const warnMsg = `Item Price ($${item.SellingPrice.toFixed(2)}) exceeds configured threshold ($${abovePriceLimit.toFixed(2)}) [AbovePrice]. Supervisor authorization required.`;
+        if (Platform.OS === "web") {
+          window.alert(`⚠️ High Value Warning: ${warnMsg}`);
+        } else {
+          Alert.alert("High Value Warning", warnMsg);
+        }
+      }
+    }
+
+    if (qtyToAdd > aboveQtyLimit) {
+      const warnMsg = `Quantity (${qtyToAdd}) exceeds configured limit (${aboveQtyLimit}) [Aboveqty]. Please verify bulk sale.`;
+      if (Platform.OS === "web") {
+        window.alert(`⚠️ High Quantity Warning: ${warnMsg}`);
+      } else {
+        Alert.alert("High Quantity Warning", warnMsg);
+      }
+    }
+
     setActiveItem({
       name: item.Description,
       qty: qtyToAdd,
@@ -625,9 +658,30 @@ export default function PosBillingScreen({
     setSkuDesc("");
   };
 
-  // Hold current bill (F6 Hold)
+  // Hold current bill (F6 Hold) - Enforces HOLDBILL and AllowHoldOnlyTwobills settings
   const handleHoldBill = () => {
+    // Condition 1: Check if HOLDBILL is enabled (App.config HOLDBILL = 0 disables parking)
+    if (!isEnabled("HOLDBILL")) {
+      if (Platform.OS === "web") {
+        window.alert("Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).");
+      } else {
+        Alert.alert("Feature Disabled", "Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).");
+      }
+      return;
+    }
+
     if (cart.length === 0) return;
+
+    // Condition 2: Check AllowHoldOnlyTwobills restriction
+    if (isEnabled("AllowHoldOnlyTwobills") && heldBills.length >= 2) {
+      if (Platform.OS === "web") {
+        window.alert("Maximum 2 held bills allowed per System Configuration (AllowHoldOnlyTwobills = 1). Please release a bill first.");
+      } else {
+        Alert.alert("Hold Limit Reached", "Maximum 2 held bills allowed per System Configuration (AllowHoldOnlyTwobills = 1). Please release a bill first.");
+      }
+      return;
+    }
+
     setHeldBills((prev) => [...prev, cart]);
     handleClearCart();
   };
@@ -872,6 +926,33 @@ export default function PosBillingScreen({
           onPress={() => skuInputRef.current?.focus()}
         >
           <MaterialCommunityIcons name="keyboard-outline" size={20} color="#ffffff" />
+        </TouchableOpacity>
+
+        {/* System App.config Manager Button */}
+        <TouchableOpacity
+          style={[
+            styles.posThemeBtn,
+            {
+              backgroundColor: currentTheme.isDark ? "#334155" : "#f1f5f9",
+              borderColor: currentTheme.borderColor,
+            },
+          ]}
+          onPress={() => setShowConfigModal(true)}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons
+            name="cog-outline"
+            size={18}
+            color={currentTheme.primary}
+          />
+          <Text
+            style={[
+              styles.posThemeBtnText,
+              { color: currentTheme.textDark, fontFamily: activeFontFamily },
+            ]}
+          >
+            Config
+          </Text>
         </TouchableOpacity>
 
         {/* Theme & Typography Customizer Button */}
@@ -1156,7 +1237,7 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdCode,
-                          { width: 90 },
+                          { width: 90, fontSize: getNum("GridFontSize", 17) - 3 },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1167,7 +1248,7 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdDescription,
-                          { flex: 1 },
+                          { flex: 1, fontSize: getNum("GridFontSize", 17) - 3 },
                           isSelected && styles.tdSelectedText,
                         ]}
                         numberOfLines={1}
@@ -1179,7 +1260,7 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdQty,
-                          { width: 55, textAlign: "center" },
+                          { width: 55, textAlign: "center", fontSize: getNum("GridFontSize", 17) - 3 },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1190,7 +1271,7 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdPrice,
-                          { width: 70, textAlign: "right" },
+                          { width: 70, textAlign: "right", fontSize: getNum("GridFontSize", 17) - 3 },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1201,7 +1282,7 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdDisc,
-                          { width: 60, textAlign: "right" },
+                          { width: 60, textAlign: "right", fontSize: getNum("GridFontSize", 17) - 3 },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1212,7 +1293,7 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdAmount,
-                          { width: 80, textAlign: "right" },
+                          { width: 80, textAlign: "right", fontSize: getNum("GridFontSize", 17) - 3 },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1223,7 +1304,7 @@ export default function PosBillingScreen({
                         style={[
                           styles.tdCell,
                           styles.tdGst,
-                          { width: 55, textAlign: "right", paddingRight: 6 },
+                          { width: 55, textAlign: "right", paddingRight: 6, fontSize: getNum("GridFontSize", 17) - 4 },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
@@ -1832,14 +1913,16 @@ export default function PosBillingScreen({
                         onPress={() => handleAddItem(prod)}
                         activeOpacity={0.85}
                       >
-                        {/* Image Placeholder Box */}
-                        <View style={styles.touchTilePlaceholder}>
-                          <MaterialCommunityIcons
-                            name={iconName}
-                            size={18}
-                            color="#64748b"
-                          />
-                        </View>
+                        {/* Image Placeholder Box - Controlled by EnableImageforTouchPad setting */}
+                        {isEnabled("EnableImageforTouchPad") && (
+                          <View style={styles.touchTilePlaceholder}>
+                            <MaterialCommunityIcons
+                              name={iconName}
+                              size={18}
+                              color="#64748b"
+                            />
+                          </View>
+                        )}
 
                         {/* Product Name (2 Lines for Full Readability) */}
                         <Text style={styles.touchTileTitle} numberOfLines={2}>
@@ -2097,13 +2180,28 @@ export default function PosBillingScreen({
             </View>
 
             <View style={styles.modalBtnRow}>
-              <TouchableOpacity
-                style={styles.modalSecondaryBtn}
-                onPress={handleFinishSale}
-              >
-                <MaterialCommunityIcons name="printer" size={18} color="#334155" />
-                <Text style={styles.modalSecondaryBtnText}>Print</Text>
-              </TouchableOpacity>
+              {/* Controlled by PrintReceipt setting (App.config PrintReceipt = 1) */}
+              {isEnabled("PrintReceipt") && (
+                <TouchableOpacity
+                  style={styles.modalSecondaryBtn}
+                  onPress={() => {
+                    const printer = config.ReceiptPrinter || "RECEIPT PRINTER";
+                    const tpl = config.ReceiptTemplate || "Template2";
+                    const store = config.CompanyName || "SUPERMART";
+                    if (Platform.OS === "web") {
+                      window.alert(`🖨️ [${printer}] Spooling receipt to thermal printer using [${tpl}] for ${store}...`);
+                    } else {
+                      Alert.alert("Printing Receipt", `Spooling receipt to ${printer} using ${tpl}...`);
+                    }
+                    handleFinishSale();
+                  }}
+                >
+                  <MaterialCommunityIcons name="printer" size={18} color="#334155" />
+                  <Text style={styles.modalSecondaryBtnText}>
+                    Print ({config.ReceiptTemplate || "Tpl2"})
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={styles.modalPrimaryBtn}
@@ -2286,6 +2384,16 @@ export default function PosBillingScreen({
         onSelectTheme={handleSelectTheme}
         onSelectFont={handleSelectFont}
       />
+
+      {/* App Configuration Management Modal */}
+      <Modal
+        visible={showConfigModal}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setShowConfigModal(false)}
+      >
+        <AppConfigScreen onClose={() => setShowConfigModal(false)} />
+      </Modal>
     </View>
   );
 }

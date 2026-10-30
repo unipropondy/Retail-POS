@@ -22,6 +22,7 @@ import LoginScreen, {
   TerminalProfile,
 } from "./src/screens/login";
 import PosBillingScreen from "./src/screens/pos_billing";
+import { ConfigProvider } from "./src/config/ConfigProvider";
 
 // Storage key used to store the serialized cashier and terminal session
 // Author: JAVITH, BAVANI 28-10-2026: Unique storage key for persistent cashier authentication
@@ -118,18 +119,20 @@ export default function App() {
   }
 
   return (
-    <View style={styles.container}>
-      {!currentUser ? (
-        <LoginScreen onLoginSuccess={handleLoginSuccess} />
-      ) : (
-        <PosBillingScreen
-          onLogout={handleLogout}
-          cashierName={currentUser.userName}
-          terminalCode={currentTerminal?.terminalCode}
-        />
-      )}
-      <StatusBar style="dark" />
-    </View>
+    <ConfigProvider>
+      <View style={styles.container}>
+        {!currentUser ? (
+          <LoginScreen onLoginSuccess={handleLoginSuccess} />
+        ) : (
+          <PosBillingScreen
+            onLogout={handleLogout}
+            cashierName={currentUser.userName}
+            terminalCode={currentTerminal?.terminalCode}
+          />
+        )}
+        <StatusBar style="dark" />
+      </View>
+    </ConfigProvider>
   );
 }
 

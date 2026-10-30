@@ -70,6 +70,10 @@ app.use("/api/inventory", inventoryRoutes);
 const paymodeRoutes = require("./routes/paymode");
 app.use("/api/paymode", paymodeRoutes);
 
+// [JAVITH, BAVANI - 30-10-2026]: Mount centralized App.config routes
+const configRoutes = require("./routes/configRoutes");
+app.use("/api/config", configRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================
