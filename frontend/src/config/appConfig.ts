@@ -55,16 +55,16 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   IncreasePriceByMemberType: 1,
   "ClientSettingsProvider.ServiceUri": "",
 
-  // 2. Database Settings
+  // 2. Database Settings (Sensitive server-only credentials sanitized for client security)
   Servername: "SCK-TG,5899",
   DBName: "RetailPOSERP",
-  UID: "ups",
-  PWD: "ups",
+  UID: "********",
+  PWD: "********",
   DSNName: "RetailPosERp",
   POSDB: "NEW",
-  DBConn: "server=26.63.60.58,5799;uid=ups;pwd=ups;database=RetailposERPKALAISMR",
-  DBHQConn: "server=SCK-TG,5899;uid=ups;pwd=ups;database=RetailPOSERP",
-  DBConnStandAlone: "server=26.79.167.123\\sql2008;uid=ups;pwd=ups;database=StandAlone",
+  DBConn: "********",
+  DBHQConn: "********",
+  DBConnStandAlone: "********",
 
   // 3. Printer & Receipt Settings
   ReceiptPrinter: "RECEIPT PRINTER",
@@ -109,27 +109,27 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   NETSDESK5000: 1,
   NETSDetailsInReceipt: 1,
 
-  // 6. Payment Settings (mSwipe / PayNow)
+  // 6. Payment Settings (mSwipe / PayNow - Secrets masked for client security)
   mSwipeURL: "https://gw.mswipelive.sg/",
   mSwipeclientcode: "6500000042",
   PaymentTimeoutSeconds: 60,
-  mSwipeAPIKey: "WQaIP4rT4bxj9nnz2PPtSFRy1jLiPOLk",
+  mSwipeAPIKey: "********",
   mSwipeAppName: "Mswipe",
   mSwipeChannelId: "MswipeTest",
   mSwipeDeviceId: "11281116200024",
   mSwipePNURL: "https://gw.mswipelive.sg/",
   mSwipePNclientcode: "6500000042",
   mSwipePNUserId: "96254222",
-  mSwipePNPwd: "254222",
+  mSwipePNPwd: "********",
 
-  // 7. YeahPay Settings
+  // 7. YeahPay Settings (Client-safe fallback)
   "YeahPay.AppId": "bin38m42efz4ta6f",
   "YeahPay.DeviceSn": "P30224BSJ0633",
-  "YeahPay.Secret": "HPIZLZA1SY2NTFHAUQ9HRSRJTWDULPUJ",
+  "YeahPay.Secret": "********",
   "YeahPay.SyncUrl": "https://business.yeahpay.sg/acceptance/acceptance-mis-pos/sync",
   "YeahPay.AsyncUrl": "https://business.yeahpay.sg/acceptance/acceptance-mis-pos/async",
   "YeahPay.ServerPublicKey": "-----BEGIN PUBLIC KEY-----",
-  "YeahPay.ClientPrivateKey": "-----BEGIN PRIVATE KEY-----",
+  "YeahPay.ClientPrivateKey": "********",
 
   // 8. Data Sync Settings
   DataSyncURL: "http://26.9.102.130:96/",

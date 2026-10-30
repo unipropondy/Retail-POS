@@ -113,7 +113,7 @@ export default function AppConfigScreen({ onClose }: AppConfigScreenProps) {
         .then((ok) => {
           if (ok) {
             setEditedValues({});
-            setSaveStatus({ type: "success", msg: "Reset to original VB.NET App.config defaults!" });
+            setSaveStatus({ type: "success", msg: "Reset to default settings!" });
           } else {
             setSaveStatus({ type: "error", msg: "Failed to reset configuration." });
           }
@@ -122,13 +122,13 @@ export default function AppConfigScreen({ onClose }: AppConfigScreenProps) {
     };
 
     if (Platform.OS === "web") {
-      if (window.confirm("Are you sure you want to restore all 89 settings to VB.NET App.config defaults?")) {
+      if (window.confirm("Are you sure you want to restore all settings to default values?")) {
         confirmReset();
       }
     } else {
       Alert.alert(
         "Confirm Reset",
-        "Restore all 89 settings back to original VB.NET App.config default values?",
+        "Restore all settings back to default values?",
         [
           { text: "Cancel", style: "cancel" },
           { text: "Reset", style: "destructive", onPress: confirmReset },
@@ -148,7 +148,7 @@ export default function AppConfigScreen({ onClose }: AppConfigScreenProps) {
           <View style={{ marginLeft: 10 }}>
             <Text style={styles.headerTitle}>System Configuration</Text>
             <Text style={styles.headerSubtitle}>
-              VB.NET App.config Migration ({items.length} Active Settings)
+              {items.length} Active System Settings
             </Text>
           </View>
         </View>

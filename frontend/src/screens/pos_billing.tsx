@@ -837,6 +837,20 @@ export default function PosBillingScreen({
         { backgroundColor: currentTheme.bg },
       ]}
     >
+      {/* Hide native scrollbar arrow buttons and track on web while preserving smooth scrolling */}
+      {Platform.OS === "web" && (
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+              ::-webkit-scrollbar { width: 0px !important; height: 0px !important; display: none !important; }
+              ::-webkit-scrollbar-button { width: 0px !important; height: 0px !important; display: none !important; }
+              ::-webkit-scrollbar-thumb { display: none !important; }
+              ::-webkit-scrollbar-track { display: none !important; }
+              * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+            `,
+          }}
+        />
+      )}
       {/* =========================================================================
           TOP BAR: Brand, Stock count, Active Item Banner, Math Calc (-1 x 1.50 = -1.50),
           Quick (+)/(-) buttons, Price Check, Keyboard toggle, Theme toggle, Terminal badge, Logout.
@@ -1198,8 +1212,12 @@ export default function PosBillingScreen({
               </Text>
             </View>
 
-            {/* Table Rows (Matching Image 2 color bands & active highlight) */}
-            <ScrollView style={styles.tableBodyScroll} showsVerticalScrollIndicator={true}>
+            {/* Table Rows (Clean Scroll without scrollbar buttons or track) */}
+            <ScrollView
+              style={styles.tableBodyScroll}
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+            >
               {cart.length === 0 ? (
                 <View style={styles.emptyTableState}>
                   <MaterialCommunityIcons name="cart-outline" size={44} color="#94a3b8" />
@@ -2752,6 +2770,12 @@ const styles = StyleSheet.create({
   },
   tableBodyScroll: {
     flex: 1,
+    ...(Platform.OS === "web"
+      ? {
+          scrollbarWidth: "none" as any,
+          msOverflowStyle: "none" as any,
+        }
+      : {}),
   },
   tableRow: {
     flexDirection: "row",
