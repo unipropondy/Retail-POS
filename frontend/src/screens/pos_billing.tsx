@@ -35,6 +35,17 @@ import {
   Linking,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import ThemeModal from "../components/ThemeModal";
+import {
+  THEMES,
+  FONTS,
+  ThemeConfig,
+  FontOption,
+  getSavedTheme,
+  getSavedFont,
+  saveThemePreference,
+  saveFontPreference,
+} from "../utils/theme";
 
 const API_URL = "http://localhost:5000";
 
@@ -278,8 +289,35 @@ export default function PosBillingScreen({
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
   const [showLicenseModal, setShowLicenseModal] = useState(false);
 
+  // Theme & Typography Customizer State
+  const [currentTheme, setCurrentTheme] = useState<ThemeConfig>(THEMES[0]);
+  const [currentFont, setCurrentFont] = useState<FontOption>(FONTS[0]);
+  const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
+
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
+
+  // Load saved theme & typography preferences on mount
+  useEffect(() => {
+    loadThemePreferences();
+  }, []);
+
+  const loadThemePreferences = async () => {
+    const theme = await getSavedTheme();
+    const font = await getSavedFont();
+    setCurrentTheme(theme);
+    setCurrentFont(font);
+  };
+
+  const handleSelectTheme = async (theme: ThemeConfig) => {
+    setCurrentTheme(theme);
+    await saveThemePreference(theme.id);
+  };
+
+  const handleSelectFont = async (font: FontOption) => {
+    setCurrentFont(font);
+    await saveFontPreference(font.id);
+  };
 
   // Check live license status from tblMaCompany
   const checkLicenseStatus = async (): Promise<boolean> => {
@@ -736,33 +774,70 @@ export default function PosBillingScreen({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [cart, heldBills, grandTotal, currentTender, selectedPayMode]);
 
+  const activeFontFamily = currentFont.fontFamily;
+
   return (
-    <View style={styles.screen}>
+    <View
+      style={[
+        styles.screen,
+        { backgroundColor: currentTheme.bg },
+      ]}
+    >
       {/* =========================================================================
           TOP BAR: Brand, Stock count, Active Item Banner, Math Calc (-1 x 1.50 = -1.50),
-          Quick (+)/(-) buttons, Price Check, Keyboard toggle, Terminal badge, Logout.
+          Quick (+)/(-) buttons, Price Check, Keyboard toggle, Theme toggle, Terminal badge, Logout.
       ========================================================================= */}
-      <View style={styles.topBar}>
+      <View
+        style={[
+          styles.topBar,
+          {
+            backgroundColor: currentTheme.surface,
+            borderColor: currentTheme.borderColor,
+          },
+        ]}
+      >
         {/* Brand Logo & Stock Count */}
-        <View style={styles.brandBadge}>
+        <TouchableOpacity
+          style={[styles.brandBadge, { backgroundColor: currentTheme.primary }]}
+          onPress={() => setShowThemeModal(true)}
+          activeOpacity={0.8}
+        >
           <MaterialCommunityIcons name="cart-variant" size={20} color="#ffffff" />
           <Text style={styles.brandBadgeText}>GM</Text>
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.stockBox}>
-          <Text style={styles.stockLabel}>Stock : {activeItem.stock}</Text>
+          <Text
+            style={[
+              styles.stockLabel,
+              { color: currentTheme.textDark, fontFamily: activeFontFamily },
+            ]}
+          >
+            Stock : {activeItem.stock}
+          </Text>
         </View>
 
         {/* Active Item Banner */}
         <View style={styles.activeBannerBox}>
-          <Text style={styles.activeBannerText} numberOfLines={1}>
+          <Text
+            style={[
+              styles.activeBannerText,
+              { color: currentTheme.primary, fontFamily: activeFontFamily },
+            ]}
+            numberOfLines={1}
+          >
             {activeItem.name}
           </Text>
         </View>
 
         {/* Math Calculation Display: 1 x 1.00 = 1.00 */}
         <View style={styles.mathCalcBox}>
-          <Text style={styles.mathCalcText}>
+          <Text
+            style={[
+              styles.mathCalcText,
+              { color: currentTheme.textDark, fontFamily: activeFontFamily },
+            ]}
+          >
             {activeItem.qty} x {activeItem.price.toFixed(2)} ={" "}
             {(activeItem.qty * activeItem.price).toFixed(2)}
           </Text>
@@ -799,9 +874,49 @@ export default function PosBillingScreen({
           <MaterialCommunityIcons name="keyboard-outline" size={20} color="#ffffff" />
         </TouchableOpacity>
 
+        {/* Theme & Typography Customizer Button */}
+        <TouchableOpacity
+          style={[
+            styles.posThemeBtn,
+            {
+              backgroundColor: currentTheme.isDark ? "#334155" : "#f1f5f9",
+              borderColor: currentTheme.borderColor,
+            },
+          ]}
+          onPress={() => setShowThemeModal(true)}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons
+            name="palette-outline"
+            size={18}
+            color={currentTheme.primary}
+          />
+          <Text
+            style={[
+              styles.posThemeBtnText,
+              { color: currentTheme.textDark, fontFamily: activeFontFamily },
+            ]}
+          >
+            Theme
+          </Text>
+        </TouchableOpacity>
+
         {/* Station Badge */}
-        <View style={styles.stationBadge}>
-          <Text style={styles.stationBadgeText}>
+        <View
+          style={[
+            styles.stationBadge,
+            {
+              backgroundColor: currentTheme.isDark ? "#1e293b" : "#f1f5f9",
+              borderColor: currentTheme.borderColor,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.stationBadgeText,
+              { color: currentTheme.textDark, fontFamily: activeFontFamily },
+            ]}
+          >
             {terminalCode || "HQPC1"} • {cashierName || "CASHIER"}
           </Text>
         </View>
@@ -894,16 +1009,112 @@ export default function PosBillingScreen({
         {/* ---------------- LEFT PANEL: Cart Ledger + Bottom Controls ---------------- */}
         <View style={styles.leftPanel}>
           {/* CART GRID TABLE (Referencing Image 2) */}
-          <View style={styles.tableCard}>
+          <View
+            style={[
+              styles.tableCard,
+              {
+                backgroundColor: currentTheme.surface,
+                borderColor: currentTheme.borderColor,
+              },
+            ]}
+          >
             {/* Table Header */}
-            <View style={styles.tableHeader}>
-              <Text style={[styles.thCell, { width: 90 }]}>Code</Text>
-              <Text style={[styles.thCell, { flex: 1 }]}>Description</Text>
-              <Text style={[styles.thCell, { width: 55, textAlign: "center" }]}>Qty</Text>
-              <Text style={[styles.thCell, { width: 70, textAlign: "right" }]}>Price</Text>
-              <Text style={[styles.thCell, { width: 60, textAlign: "right" }]}>Disc</Text>
-              <Text style={[styles.thCell, { width: 80, textAlign: "right" }]}>Amount</Text>
-              <Text style={[styles.thCell, { width: 55, textAlign: "right", paddingRight: 6 }]}>GST</Text>
+            <View
+              style={[
+                styles.tableHeader,
+                { backgroundColor: currentTheme.tableHeaderBg },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.thCell,
+                  {
+                    width: 90,
+                    color: currentTheme.tableHeaderColor,
+                    fontFamily: activeFontFamily,
+                  },
+                ]}
+              >
+                Code
+              </Text>
+              <Text
+                style={[
+                  styles.thCell,
+                  {
+                    flex: 1,
+                    color: currentTheme.tableHeaderColor,
+                    fontFamily: activeFontFamily,
+                  },
+                ]}
+              >
+                Description
+              </Text>
+              <Text
+                style={[
+                  styles.thCell,
+                  {
+                    width: 55,
+                    textAlign: "center",
+                    color: currentTheme.tableHeaderColor,
+                    fontFamily: activeFontFamily,
+                  },
+                ]}
+              >
+                Qty
+              </Text>
+              <Text
+                style={[
+                  styles.thCell,
+                  {
+                    width: 70,
+                    textAlign: "right",
+                    color: currentTheme.tableHeaderColor,
+                    fontFamily: activeFontFamily,
+                  },
+                ]}
+              >
+                Price
+              </Text>
+              <Text
+                style={[
+                  styles.thCell,
+                  {
+                    width: 60,
+                    textAlign: "right",
+                    color: currentTheme.tableHeaderColor,
+                    fontFamily: activeFontFamily,
+                  },
+                ]}
+              >
+                Disc
+              </Text>
+              <Text
+                style={[
+                  styles.thCell,
+                  {
+                    width: 80,
+                    textAlign: "right",
+                    color: currentTheme.tableHeaderColor,
+                    fontFamily: activeFontFamily,
+                  },
+                ]}
+              >
+                Amount
+              </Text>
+              <Text
+                style={[
+                  styles.thCell,
+                  {
+                    width: 55,
+                    textAlign: "right",
+                    paddingRight: 6,
+                    color: currentTheme.tableHeaderColor,
+                    fontFamily: activeFontFamily,
+                  },
+                ]}
+              >
+                GST
+              </Text>
             </View>
 
             {/* Table Rows (Matching Image 2 color bands & active highlight) */}
@@ -1296,7 +1507,13 @@ export default function PosBillingScreen({
 
             {/* 2. Modern Net Total to Pay Hero Card */}
             <TouchableOpacity
-              style={styles.netTotalBox}
+              style={[
+                styles.netTotalBox,
+                {
+                  backgroundColor: currentTheme.primary,
+                  borderColor: currentTheme.accent || currentTheme.primary,
+                },
+              ]}
               onPress={handleCheckout}
               activeOpacity={0.92}
             >
@@ -1462,7 +1679,14 @@ export default function PosBillingScreen({
                 <Text style={styles.numKeyText}>.</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.numKey, styles.enterKey]}
+                style={[
+                  styles.numKey,
+                  styles.enterKey,
+                  {
+                    backgroundColor: currentTheme.primary,
+                    borderColor: currentTheme.primary,
+                  },
+                ]}
                 onPress={() => handleNumpadKey("ENTER")}
               >
                 <MaterialCommunityIcons
@@ -1492,14 +1716,14 @@ export default function PosBillingScreen({
               <MaterialCommunityIcons
                 name="chevron-up"
                 size={24}
-                color={groupPageIndex === 0 ? "#cbd5e1" : "#155d36"}
+                color={groupPageIndex === 0 ? "#cbd5e1" : currentTheme.primary}
               />
             </TouchableOpacity>
 
             <View style={styles.railListContainer}>
               {loadingGroups ? (
                 <ActivityIndicator
-                  color="#155d36"
+                  color={currentTheme.primary}
                   size="small"
                   style={{ marginTop: 20 }}
                 />
@@ -1514,7 +1738,13 @@ export default function PosBillingScreen({
                       key={group.GroupCode}
                       style={[
                         styles.catRailBtn,
-                        isSelected && styles.catRailBtnActive,
+                        isSelected && [
+                          styles.catRailBtnActive,
+                          {
+                            backgroundColor: currentTheme.primary,
+                            borderColor: currentTheme.primary,
+                          },
+                        ],
                       ]}
                       onPress={() => handleSelectGroup(group.GroupCode)}
                       activeOpacity={0.85}
@@ -2046,6 +2276,16 @@ export default function PosBillingScreen({
           </View>
         </View>
       </Modal>
+
+      {/* Theme & Typography Customizer Modal */}
+      <ThemeModal
+        visible={showThemeModal}
+        onClose={() => setShowThemeModal(false)}
+        currentTheme={currentTheme}
+        currentFont={currentFont}
+        onSelectTheme={handleSelectTheme}
+        onSelectFont={handleSelectFont}
+      />
     </View>
   );
 }
@@ -2055,6 +2295,20 @@ export default function PosBillingScreen({
 // ==============================================================================
 
 const styles = StyleSheet.create({
+  posThemeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginRight: 6,
+    gap: 4,
+  },
+  posThemeBtnText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
   screen: {
     flex: 1,
     backgroundColor: "#f4f6f8",

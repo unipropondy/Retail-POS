@@ -19,6 +19,17 @@ import {
   Linking,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import ThemeModal from "../components/ThemeModal";
+import {
+  THEMES,
+  FONTS,
+  ThemeConfig,
+  FontOption,
+  getSavedTheme,
+  getSavedFont,
+  saveThemePreference,
+  saveFontPreference,
+} from "../utils/theme";
 
 // Backend API URL - connects to our Express server
 const API_URL = "http://localhost:5000";
@@ -85,12 +96,35 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   // Authenticated cashier profile (for welcome screen fallback)
   const [activeUser, setActiveUser] = useState<CashierProfile | null>(null);
 
+  // Theme & Font Settings State
+  const [currentTheme, setCurrentTheme] = useState<ThemeConfig>(THEMES[0]);
+  const [currentFont, setCurrentFont] = useState<FontOption>(FONTS[0]);
+  const [showThemeModal, setShowThemeModal] = useState(false);
+
   // ----------------------------------------------------------------------------
-  // Check Terminal Configuration on Initial Load (tblmaTerminal query)
+  // Check Terminal Configuration & Load Preferences on Initial Load
   // ----------------------------------------------------------------------------
   useEffect(() => {
     checkTerminalStatus();
+    loadPreferences();
   }, []);
+
+  const loadPreferences = async () => {
+    const theme = await getSavedTheme();
+    const font = await getSavedFont();
+    setCurrentTheme(theme);
+    setCurrentFont(font);
+  };
+
+  const handleSelectTheme = async (theme: ThemeConfig) => {
+    setCurrentTheme(theme);
+    await saveThemePreference(theme.id);
+  };
+
+  const handleSelectFont = async (font: FontOption) => {
+    setCurrentFont(font);
+    await saveFontPreference(font.id);
+  };
 
   const checkTerminalStatus = async () => {
     setTerminalCheckLoading(true);
@@ -330,14 +364,34 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   }
 
   // ----------------------------------------------------------------------------
-  // VIEW: GREENMART MODERN CASHIER LOGIN WITH TOUCH NUMPAD
+  // VIEW: GREENMART MODERN CASHIER LOGIN WITH TOUCH NUMPAD (Dynamic Theme & Font)
   // ----------------------------------------------------------------------------
+  const activeFontFamily = currentFont.fontFamily;
+
   return (
-    <SafeAreaView style={styles.pageContainer}>
+    <SafeAreaView
+      style={[
+        styles.pageContainer,
+        { backgroundColor: currentTheme.bg },
+      ]}
+    >
       {/* Top Header Bar */}
-      <View style={styles.topNav}>
+      <View
+        style={[
+          styles.topNav,
+          {
+            backgroundColor: currentTheme.surface,
+            borderBottomColor: currentTheme.borderColor,
+          },
+        ]}
+      >
         <View style={styles.brandRow}>
-          <View style={styles.brandIconBox}>
+          <View
+            style={[
+              styles.brandIconBox,
+              { backgroundColor: currentTheme.primary },
+            ]}
+          >
             <MaterialCommunityIcons
               name="storefront-outline"
               size={22}
@@ -345,25 +399,85 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             />
           </View>
           <View>
-            <Text style={styles.brandTitle}>KALAISMR</Text>
-            <Text style={styles.brandSubtitle}>SUPERMARKET POS</Text>
+            <Text
+              style={[
+                styles.brandTitle,
+                { color: currentTheme.textDark, fontFamily: activeFontFamily },
+              ]}
+            >
+              KALAISMR
+            </Text>
+            <Text
+              style={[
+                styles.brandSubtitle,
+                { color: currentTheme.accent, fontFamily: activeFontFamily },
+              ]}
+            >
+              SUPERMARKET POS
+            </Text>
           </View>
         </View>
 
-        <View style={styles.statusPill}>
+        <View style={styles.topNavRight}>
+          {/* Status Pill */}
           <View
             style={[
-              styles.statusDot,
-              isTerminalBlocked && styles.statusDotBlocked,
+              styles.statusPill,
+              {
+                backgroundColor: currentTheme.isDark ? "#1e293b" : "#f1f5f9",
+                borderColor: currentTheme.borderColor,
+              },
             ]}
-          />
-          <Text style={styles.statusText}>
-            {terminalCheckLoading
-              ? "CHECKING TERMINAL..."
-              : isTerminalBlocked
-                ? "TERMINAL RESTRICTED"
-                : `${terminal?.terminalCode || "HQPC1"} • ${terminal?.locationCode || "HQ"} READY`}
-          </Text>
+          >
+            <View
+              style={[
+                styles.statusDot,
+                isTerminalBlocked && styles.statusDotBlocked,
+              ]}
+            />
+            <Text
+              style={[
+                styles.statusText,
+                {
+                  color: currentTheme.isDark ? "#cbd5e1" : "#475569",
+                  fontFamily: activeFontFamily,
+                },
+              ]}
+            >
+              {terminalCheckLoading
+                ? "CHECKING TERMINAL..."
+                : isTerminalBlocked
+                  ? "TERMINAL RESTRICTED"
+                  : `${terminal?.terminalCode || "HQPC1"} • ${terminal?.locationCode || "HQ"} READY`}
+            </Text>
+          </View>
+
+          {/* Theme & Font Customizer Trigger Button */}
+          <TouchableOpacity
+            style={[
+              styles.themeToggleBtn,
+              {
+                backgroundColor: currentTheme.isDark ? "#334155" : "#f1f5f9",
+                borderColor: currentTheme.borderColor,
+              },
+            ]}
+            onPress={() => setShowThemeModal(true)}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons
+              name="palette-outline"
+              size={18}
+              color={currentTheme.primary}
+            />
+            <Text
+              style={[
+                styles.themeToggleBtnText,
+                { color: currentTheme.textDark, fontFamily: activeFontFamily },
+              ]}
+            >
+              Theme & Font
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -379,18 +493,26 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <View
                 style={[
                   styles.pillLabel,
-                  isTerminalBlocked && styles.pillLabelBlocked,
+                  isTerminalBlocked
+                    ? styles.pillLabelBlocked
+                    : {
+                        backgroundColor: currentTheme.primary + "18",
+                        borderColor: currentTheme.primary + "55",
+                      },
                 ]}
               >
                 <MaterialCommunityIcons
                   name={isTerminalBlocked ? "shield-alert" : "shield-check"}
                   size={14}
-                  color={isTerminalBlocked ? "#dc2626" : "#155d36"}
+                  color={isTerminalBlocked ? "#dc2626" : currentTheme.primary}
                 />
                 <Text
                   style={[
                     styles.pillLabelText,
-                    isTerminalBlocked && styles.pillLabelTextBlocked,
+                    { fontFamily: activeFontFamily },
+                    isTerminalBlocked
+                      ? styles.pillLabelTextBlocked
+                      : { color: currentTheme.primary },
                   ]}
                 >
                   {isTerminalBlocked
@@ -400,8 +522,20 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </View>
             </View>
 
-            <Text style={styles.loginTitle}>Cashier Sign In</Text>
-            <Text style={styles.loginSubtitle}>
+            <Text
+              style={[
+                styles.loginTitle,
+                { color: currentTheme.textDark, fontFamily: activeFontFamily },
+              ]}
+            >
+              Cashier Sign In
+            </Text>
+            <Text
+              style={[
+                styles.loginSubtitle,
+                { color: currentTheme.textMuted, fontFamily: activeFontFamily },
+              ]}
+            >
               {isTerminalBlocked
                 ? "This computer is not authorized for billing"
                 : "Select input & tap the touch numpad to sign in"}
@@ -468,10 +602,30 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {/* Input 1: Staff Code / Username */}
             <View style={styles.inputGroup}>
               <View style={styles.inputLabelRow}>
-                <Text style={styles.inputLabel}>Staff Code / Username</Text>
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    { color: currentTheme.textDark, fontFamily: activeFontFamily },
+                  ]}
+                >
+                  Staff Code / Username
+                </Text>
                 {focusedField === "username" && (
-                  <View style={styles.activeFieldTag}>
-                    <Text style={styles.activeFieldTagText}>
+                  <View
+                    style={[
+                      styles.activeFieldTag,
+                      {
+                        backgroundColor: currentTheme.primary + "18",
+                        borderColor: currentTheme.primary + "55",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.activeFieldTagText,
+                        { color: currentTheme.primary, fontFamily: activeFontFamily },
+                      ]}
+                    >
                       ● NUMPAD TARGET
                     </Text>
                   </View>
@@ -483,18 +637,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 onPress={() => setFocusedField("username")}
                 style={[
                   styles.textInputBox,
-                  focusedField === "username" && styles.textInputBoxActive,
+                  focusedField === "username" && [
+                    styles.textInputBoxActive,
+                    { borderColor: currentTheme.primary },
+                  ],
                   isTerminalBlocked && styles.inputDisabled,
                 ]}
               >
                 <MaterialCommunityIcons
                   name="account-tie-outline"
                   size={20}
-                  color={focusedField === "username" ? "#155d36" : "#64748b"}
+                  color={focusedField === "username" ? currentTheme.primary : "#64748b"}
                   style={styles.fieldIcon}
                 />
                 <TextInput
-                  style={styles.textInput}
+                  style={[
+                    styles.textInput,
+                    { fontFamily: activeFontFamily },
+                  ]}
                   value={username}
                   onChangeText={(text) => {
                     setUsername(text);
@@ -525,10 +685,30 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {/* Input 2: Password / PIN */}
             <View style={styles.inputGroup}>
               <View style={styles.inputLabelRow}>
-                <Text style={styles.inputLabel}>Security PIN / Password</Text>
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    { color: currentTheme.textDark, fontFamily: activeFontFamily },
+                  ]}
+                >
+                  Security PIN / Password
+                </Text>
                 {focusedField === "password" && (
-                  <View style={styles.activeFieldTag}>
-                    <Text style={styles.activeFieldTagText}>
+                  <View
+                    style={[
+                      styles.activeFieldTag,
+                      {
+                        backgroundColor: currentTheme.primary + "18",
+                        borderColor: currentTheme.primary + "55",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.activeFieldTagText,
+                        { color: currentTheme.primary, fontFamily: activeFontFamily },
+                      ]}
+                    >
                       ● NUMPAD TARGET
                     </Text>
                   </View>
@@ -540,18 +720,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 onPress={() => setFocusedField("password")}
                 style={[
                   styles.textInputBox,
-                  focusedField === "password" && styles.textInputBoxActive,
+                  focusedField === "password" && [
+                    styles.textInputBoxActive,
+                    { borderColor: currentTheme.primary },
+                  ],
                   isTerminalBlocked && styles.inputDisabled,
                 ]}
               >
                 <MaterialCommunityIcons
                   name="lock-outline"
                   size={20}
-                  color={focusedField === "password" ? "#155d36" : "#64748b"}
+                  color={focusedField === "password" ? currentTheme.primary : "#64748b"}
                   style={styles.fieldIcon}
                 />
                 <TextInput
-                  style={styles.textInput}
+                  style={[
+                    styles.textInput,
+                    { fontFamily: activeFontFamily },
+                  ]}
                   value={password}
                   onChangeText={(text) => {
                     setPassword(text);
@@ -580,12 +766,25 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
             {/* Quick Staff Presets */}
             <View style={styles.presetSection}>
-              <Text style={styles.presetTitle}>Quick Staff Presets:</Text>
+              <Text
+                style={[
+                  styles.presetTitle,
+                  { color: currentTheme.textMuted, fontFamily: activeFontFamily },
+                ]}
+              >
+                Quick Staff Presets:
+              </Text>
               <View style={styles.presetRow}>
                 {["AMITH", "MAYIL", "ADMIN"].map((staff) => (
                   <TouchableOpacity
                     key={staff}
-                    style={styles.presetChip}
+                    style={[
+                      styles.presetChip,
+                      {
+                        backgroundColor: currentTheme.primary + "12",
+                        borderColor: currentTheme.primary + "35",
+                      },
+                    ]}
                     onPress={() => {
                       setUsername(staff);
                       setFocusedField("password");
@@ -596,9 +795,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     <MaterialCommunityIcons
                       name="account"
                       size={12}
-                      color="#155d36"
+                      color={currentTheme.primary}
                     />
-                    <Text style={styles.presetChipText}>{staff}</Text>
+                    <Text
+                      style={[
+                        styles.presetChipText,
+                        { color: currentTheme.primary, fontFamily: activeFontFamily },
+                      ]}
+                    >
+                      {staff}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -608,6 +814,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <TouchableOpacity
               style={[
                 styles.primaryButton,
+                { backgroundColor: currentTheme.primary },
                 (loading || isTerminalBlocked) && styles.buttonDisabled,
               ]}
               onPress={isTerminalBlocked ? checkTerminalStatus : handleLogin}
@@ -618,7 +825,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <ActivityIndicator color="#ffffff" size="small" />
               ) : (
                 <View style={styles.primaryButtonContent}>
-                  <Text style={styles.primaryButtonText}>
+                  <Text
+                    style={[
+                      styles.primaryButtonText,
+                      { fontFamily: activeFontFamily },
+                    ]}
+                  >
                     {isTerminalBlocked
                       ? "Retry Terminal Check"
                       : "Authorize & Open Terminal"}
@@ -650,14 +862,34 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <MaterialCommunityIcons
                   name="dialpad"
                   size={18}
-                  color="#155d36"
+                  color={currentTheme.primary}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={styles.numpadHeading}>TOUCH NUMPAD</Text>
+                <Text
+                  style={[
+                    styles.numpadHeading,
+                    { color: currentTheme.textDark, fontFamily: activeFontFamily },
+                  ]}
+                >
+                  TOUCH NUMPAD
+                </Text>
               </View>
 
-              <View style={styles.targetIndicatorBadge}>
-                <Text style={styles.targetIndicatorText}>
+              <View
+                style={[
+                  styles.targetIndicatorBadge,
+                  {
+                    backgroundColor: currentTheme.primary + "18",
+                    borderColor: currentTheme.primary + "55",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.targetIndicatorText,
+                    { color: currentTheme.primary, fontFamily: activeFontFamily },
+                  ]}
+                >
                   Target: {focusedField === "username" ? "Staff Code" : "PIN"}
                 </Text>
               </View>
@@ -764,7 +996,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
             {/* Enter / Next Action Key */}
             <TouchableOpacity
-              style={styles.keypadEnterBtn}
+              style={[
+                styles.keypadEnterBtn,
+                { backgroundColor: currentTheme.primary },
+              ]}
               onPress={() => handleNumpadKey("ENTER")}
               activeOpacity={0.85}
             >
@@ -774,7 +1009,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 color="#ffffff"
                 style={{ marginRight: 6 }}
               />
-              <Text style={styles.keypadEnterText}>
+              <Text
+                style={[
+                  styles.keypadEnterText,
+                  { fontFamily: activeFontFamily },
+                ]}
+              >
                 {focusedField === "username" ? "NEXT (PIN) ➔" : "SIGN IN ↵"}
               </Text>
             </TouchableOpacity>
@@ -784,15 +1024,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <TouchableOpacity
                 style={[
                   styles.targetSwitchBtn,
-                  focusedField === "username" && styles.targetSwitchBtnActive,
+                  focusedField === "username" && [
+                    styles.targetSwitchBtnActive,
+                    {
+                      backgroundColor: currentTheme.primary + "18",
+                      borderColor: currentTheme.primary,
+                    },
+                  ],
                 ]}
                 onPress={() => setFocusedField("username")}
               >
                 <Text
                   style={[
                     styles.targetSwitchText,
-                    focusedField === "username" &&
+                    { fontFamily: activeFontFamily },
+                    focusedField === "username" && [
                       styles.targetSwitchTextActive,
+                      { color: currentTheme.primary },
+                    ],
                   ]}
                 >
                   Type Staff Code
@@ -802,15 +1051,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <TouchableOpacity
                 style={[
                   styles.targetSwitchBtn,
-                  focusedField === "password" && styles.targetSwitchBtnActive,
+                  focusedField === "password" && [
+                    styles.targetSwitchBtnActive,
+                    {
+                      backgroundColor: currentTheme.primary + "18",
+                      borderColor: currentTheme.primary,
+                    },
+                  ],
                 ]}
                 onPress={() => setFocusedField("password")}
               >
                 <Text
                   style={[
                     styles.targetSwitchText,
-                    focusedField === "password" &&
+                    { fontFamily: activeFontFamily },
+                    focusedField === "password" && [
                       styles.targetSwitchTextActive,
+                      { color: currentTheme.primary },
+                    ],
                   ]}
                 >
                   Type PIN
@@ -820,6 +1078,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           </View>
         </View>
       </View>
+
+      {/* Theme & Font Customizer Modal */}
+      <ThemeModal
+        visible={showThemeModal}
+        onClose={() => setShowThemeModal(false)}
+        currentTheme={currentTheme}
+        currentFont={currentFont}
+        onSelectTheme={handleSelectTheme}
+        onSelectFont={handleSelectFont}
+      />
     </SafeAreaView>
   );
 }
@@ -828,6 +1096,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 // STYLESHEET (GreenMart Supermarket POS Theme with Integrated Touch Numpad)
 // ==============================================================================
 const styles = StyleSheet.create({
+  topNavRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  themeToggleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  themeToggleBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
   // Root page wrapper - fills full screen with zero scroll
   pageContainer: {
     flex: 1,
