@@ -5,7 +5,7 @@
   "EnableImageforTouchPad": 1,
   "POSWITHSTANDALONE": "N",
   "DinamiationDisplay": 1,
-  "HOLDBILL": 0,
+  "HOLDBILL": 1,
   "WebUpdateAllowed": 1,
   "WebURL": "http://tog.com.sg/test",
   "ManualHold": 0,

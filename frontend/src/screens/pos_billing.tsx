@@ -99,7 +99,7 @@ interface CartItem {
   price: number;
   disc: number;
   amount: number;
-  gst: number;
+  gst?: number;
   uom: string;
 }
 
@@ -177,8 +177,23 @@ export default function PosBillingScreen({
 
   // Cart State (Initialized empty)
   const [cart, setCart] = useState<CartItem[]>([]);
-
   const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1);
+  const cartScrollRef = useRef<any>(null);
+  const shouldAutoScrollRef = useRef<boolean>(false);
+  const prevCartLengthRef = useRef<number>(0);
+
+  // Auto-scroll cart grid to newly added items
+  useEffect(() => {
+    if (cart.length > prevCartLengthRef.current) {
+      shouldAutoScrollRef.current = true;
+      const timer = setTimeout(() => {
+        cartScrollRef.current?.scrollToEnd({ animated: true });
+      }, 60);
+      prevCartLengthRef.current = cart.length;
+      return () => clearTimeout(timer);
+    }
+    prevCartLengthRef.current = cart.length;
+  }, [cart.length]);
 
   // Active Item for Top Bar Banner & Math Display
   const [activeItem, setActiveItem] = useState<{
@@ -382,19 +397,41 @@ export default function PosBillingScreen({
     return list;
   }, [items, selectedGroup, skuDesc, skuCode]);
 
-  // Group pagination (5 groups per page for touch without scrolling)
+  // Category Group pagination (dynamically fits vertical rail height without scrolling or touching buttons)
   const [groupPageIndex, setGroupPageIndex] = useState<number>(0);
-  const GROUPS_PER_PAGE = 5;
+  const [railHeight, setRailHeight] = useState<number>(0);
+  const CAT_GAP = 5;
+  const CAT_BTN_HEIGHT = 50;
+  const DEFAULT_GROUPS_PER_PAGE = 6;
+  const BOTTOM_BUFFER = 12; // Guaranteed safety buffer so groups never touch the next button
+
+  const groupsPerPage = useMemo(() => {
+    if (railHeight <= 0) return DEFAULT_GROUPS_PER_PAGE;
+    const usableHeight = railHeight - BOTTOM_BUFFER;
+    const count = Math.floor(
+      (usableHeight + CAT_GAP) / (CAT_BTN_HEIGHT + CAT_GAP),
+    );
+    return Math.max(1, count);
+  }, [railHeight]);
+
   const totalGroupPages = Math.max(
     1,
-    Math.ceil(groups.length / GROUPS_PER_PAGE),
+    Math.ceil(groups.length / groupsPerPage),
   );
+
   const visibleGroups = useMemo(() => {
     return groups.slice(
-      groupPageIndex * GROUPS_PER_PAGE,
-      (groupPageIndex + 1) * GROUPS_PER_PAGE,
+      groupPageIndex * groupsPerPage,
+      (groupPageIndex + 1) * groupsPerPage,
     );
-  }, [groups, groupPageIndex]);
+  }, [groups, groupPageIndex, groupsPerPage]);
+
+  // Keep groupPageIndex within valid range when groupsPerPage or groups change
+  useEffect(() => {
+    if (groupPageIndex >= totalGroupPages) {
+      setGroupPageIndex(Math.max(0, totalGroupPages - 1));
+    }
+  }, [groupPageIndex, totalGroupPages]);
 
   // Item pagination (3x3 grid = exactly 9 items per page, zero scrolling)
   const [itemPageIndex, setItemPageIndex] = useState<number>(0);
@@ -532,6 +569,7 @@ export default function PosBillingScreen({
         };
         const nextCart = [...prev, newItem];
         setSelectedCartIndex(nextCart.length - 1);
+        shouldAutoScrollRef.current = true;
         return nextCart;
       }
     });
@@ -642,6 +680,7 @@ export default function PosBillingScreen({
     const lastHeld = heldBills[heldBills.length - 1];
     setCart(lastHeld);
     setSelectedCartIndex(lastHeld.length - 1);
+    shouldAutoScrollRef.current = true;
     setHeldBills((prev) => prev.slice(0, -1));
   };
 
@@ -1165,8 +1204,9 @@ export default function PosBillingScreen({
                 style={[
                   styles.thCell,
                   {
-                    width: 80,
+                    width: 90,
                     textAlign: "right",
+                    paddingRight: 8,
                     color: currentTheme.tableHeaderColor,
                     fontFamily: activeFontFamily,
                   },
@@ -1174,27 +1214,20 @@ export default function PosBillingScreen({
               >
                 Amount
               </Text>
-              <Text
-                style={[
-                  styles.thCell,
-                  {
-                    width: 55,
-                    textAlign: "right",
-                    paddingRight: 6,
-                    color: currentTheme.tableHeaderColor,
-                    fontFamily: activeFontFamily,
-                  },
-                ]}
-              >
-                GST
-              </Text>
             </View>
 
-            {/* Table Rows (Clean Scroll without scrollbar buttons or track) */}
+            {/* Table Rows (Clean Scroll with auto-scroll on new item) */}
             <ScrollView
+              ref={cartScrollRef}
               style={styles.tableBodyScroll}
               showsVerticalScrollIndicator={false}
               showsHorizontalScrollIndicator={false}
+              onContentSizeChange={() => {
+                if (shouldAutoScrollRef.current) {
+                  cartScrollRef.current?.scrollToEnd({ animated: true });
+                  shouldAutoScrollRef.current = false;
+                }
+              }}
             >
               {cart.length === 0 ? (
                 <View style={styles.emptyTableState}>
@@ -1309,30 +1342,15 @@ export default function PosBillingScreen({
                           styles.tdCell,
                           styles.tdAmount,
                           {
-                            width: 80,
+                            width: 90,
                             textAlign: "right",
+                            paddingRight: 8,
                             fontSize: getNum("GridFontSize", 17) - 3,
                           },
                           isSelected && styles.tdSelectedText,
                         ]}
                       >
                         {item.amount.toFixed(2)}
-                      </Text>
-
-                      <Text
-                        style={[
-                          styles.tdCell,
-                          styles.tdGst,
-                          {
-                            width: 55,
-                            textAlign: "right",
-                            paddingRight: 6,
-                            fontSize: getNum("GridFontSize", 17) - 4,
-                          },
-                          isSelected && styles.tdSelectedText,
-                        ]}
-                      >
-                        {item.gst.toFixed(2)}..
                       </Text>
                     </TouchableOpacity>
                   );
@@ -1820,7 +1838,7 @@ export default function PosBillingScreen({
         <View style={styles.rightPanel}>
           {/* Vertical Category Rail (No scrolling, touch Up/Down buttons) */}
           <View style={styles.categoryRailContainer}>
-            {/* Up Arrow Button for Item Groups */}
+            {/* Up / Previous Button for Item Groups */}
             <TouchableOpacity
               style={[
                 styles.railArrowBtn,
@@ -1830,14 +1848,34 @@ export default function PosBillingScreen({
               onPress={() => setGroupPageIndex((prev) => Math.max(0, prev - 1))}
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons
-                name="chevron-up"
-                size={24}
-                color={groupPageIndex === 0 ? "#cbd5e1" : currentTheme.primary}
-              />
+              <View style={styles.railArrowContent}>
+                <MaterialCommunityIcons
+                  name="chevron-up"
+                  size={22}
+                  color={groupPageIndex === 0 ? "#cbd5e1" : currentTheme.primary}
+                />
+              </View>
             </TouchableOpacity>
 
-            <View style={styles.railListContainer}>
+            <View
+              style={styles.railListContainer}
+              onLayout={(e) => {
+                const { height } = e.nativeEvent.layout;
+                if (height > 0 && Math.abs(height - railHeight) > 2) {
+                  setRailHeight(height);
+                }
+              }}
+              // @ts-ignore - Web mousewheel support for easy desktop pagination
+              onWheel={(e: any) => {
+                if (e?.deltaY > 0) {
+                  setGroupPageIndex((prev) =>
+                    Math.min(totalGroupPages - 1, prev + 1),
+                  );
+                } else if (e?.deltaY < 0) {
+                  setGroupPageIndex((prev) => Math.max(0, prev - 1));
+                }
+              }}
+            >
               {loadingGroups ? (
                 <ActivityIndicator
                   color={currentTheme.primary}
@@ -1845,17 +1883,22 @@ export default function PosBillingScreen({
                   style={{ marginTop: 20 }}
                 />
               ) : (
-                visibleGroups.map((group) => {
+                visibleGroups.map((group, idx) => {
                   const isSelected =
                     selectedGroup.toUpperCase() ===
                     group.GroupCode.toUpperCase();
                   const iconName = getCategoryIcon(group.GroupCode);
+                  const isLast = idx === visibleGroups.length - 1;
 
                   return (
                     <TouchableOpacity
                       key={group.GroupCode}
                       style={[
                         styles.catRailBtn,
+                        {
+                          height: CAT_BTN_HEIGHT,
+                          marginBottom: isLast ? 0 : CAT_GAP,
+                        },
                         isSelected && [
                           styles.catRailBtnActive,
                           {
@@ -1869,9 +1912,9 @@ export default function PosBillingScreen({
                     >
                       <MaterialCommunityIcons
                         name={iconName}
-                        size={20}
+                        size={18}
                         color={isSelected ? "#ffffff" : "#475569"}
-                        style={{ marginBottom: 4 }}
+                        style={{ marginBottom: 2 }}
                       />
                       <Text
                         style={[
@@ -1888,7 +1931,7 @@ export default function PosBillingScreen({
               )}
             </View>
 
-            {/* Down Arrow Button for Item Groups */}
+            {/* Down / Next Button for Item Groups */}
             <TouchableOpacity
               style={[
                 styles.railArrowBtn,
@@ -1903,15 +1946,32 @@ export default function PosBillingScreen({
               }
               activeOpacity={0.7}
             >
-              <MaterialCommunityIcons
-                name="chevron-down"
-                size={24}
-                color={
-                  groupPageIndex >= totalGroupPages - 1
-                    ? "#cbd5e1"
-                    : currentTheme.primary
-                }
-              />
+              <View style={styles.railArrowContent}>
+                <MaterialCommunityIcons
+                  name="chevron-down"
+                  size={22}
+                  color={
+                    groupPageIndex >= totalGroupPages - 1
+                      ? "#cbd5e1"
+                      : currentTheme.primary
+                  }
+                />
+                {totalGroupPages > 1 && (
+                  <Text
+                    style={[
+                      styles.railArrowPageText,
+                      {
+                        color:
+                          groupPageIndex >= totalGroupPages - 1
+                            ? "#94a3b8"
+                            : currentTheme.primary,
+                      },
+                    ]}
+                  >
+                    {groupPageIndex + 1}/{totalGroupPages}
+                  </Text>
+                )}
+              </View>
             </TouchableOpacity>
           </View>
 
@@ -3256,6 +3316,7 @@ const styles = StyleSheet.create({
     padding: 5,
     flexDirection: "column",
     justifyContent: "space-between",
+    overflow: "hidden",
   },
   railArrowBtn: {
     height: 34,
@@ -3275,14 +3336,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#f1f5f9",
     borderColor: "#e2e8f0",
   },
+  railArrowContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+  },
+  railArrowPageText: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    fontFamily: FONT_FAMILY,
+  },
   railListContainer: {
     flex: 1,
     justifyContent: "flex-start",
-    paddingVertical: 5,
+    marginTop: 6,
+    marginBottom: 8,
+    overflow: "hidden",
   },
   catRailBtn: {
-    height: 52,
-    paddingVertical: 6,
+    height: 50,
+    paddingVertical: 3,
     paddingHorizontal: 4,
     borderRadius: 8,
     marginBottom: 5,
@@ -3291,6 +3365,7 @@ const styles = StyleSheet.create({
     borderColor: "#e2e8f0",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.03,
