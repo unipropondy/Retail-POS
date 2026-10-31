@@ -2023,7 +2023,7 @@ export default function PosBillingScreen({
                               <Image
                                 source={{ uri: `${API_URL}/api/inventory/image/${encodeURIComponent(prod.InventoryCode.trim())}` }}
                                 style={{ width: "100%", height: "100%", borderRadius: 6 }}
-                                resizeMode="cover"
+                                resizeMode="contain"
                                 onError={() => {
                                   imageErrorCodes.current.add(prod.InventoryCode);
                                   setImageErrorTick((t) => t + 1); // trigger re-render to show icon
@@ -2032,7 +2032,7 @@ export default function PosBillingScreen({
                             ) : (
                               <MaterialCommunityIcons
                                 name={iconName}
-                                size={18}
+                                size={22}
                                 color="#64748b"
                               />
                             )}
@@ -3428,7 +3428,7 @@ const styles = StyleSheet.create({
   },
   touchTile: {
     width: "31.4%", // Exactly 3 columns (3x3 layout)
-    height: 104, // Comfortable higher card for full 2-line item descriptions
+    height: 110, // Comfortable higher card for full 2-line item descriptions & larger image
     backgroundColor: "#ffffff",
     borderRadius: 8,
     borderWidth: 1,
@@ -3444,9 +3444,9 @@ const styles = StyleSheet.create({
   },
   touchTilePlaceholder: {
     width: "100%",
-    height: 44,
+    height: 54,
     borderRadius: 6,
-    backgroundColor: "#f1f5f9",
+    backgroundColor: "#f8fafc",
     justifyContent: "center",
     alignItems: "center",
     overflow: "hidden",
