@@ -33,7 +33,7 @@ const DEFAULT_CONFIG = {
   "AbovePrice": 2000,
   "Aboveqty": 10,
   "ISValueAbove": 0,
-  "ImagePath": "D:\\UNIPRO\\SMARTERP\\ERP\\NEWPOS\\Debug\\Images\\Display",
+  "ImagePath": "./images",
   "TimerInterval": 5,
   "CartonBarcodewithPanel": 1,
   "ParticularDayTimePromo": 1,

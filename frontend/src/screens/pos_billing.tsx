@@ -78,6 +78,7 @@ export interface TouchItem {
   SellingPrice: number;
   RetailPrice: number;
   UOM: string;
+  hasImage?: number; // 1 = BLOB image exists in DB, 0 = no image (show icon)
 }
 
 export interface PayModeItem {
@@ -180,6 +181,9 @@ export default function PosBillingScreen({
   const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1);
   const cartScrollRef = useRef<any>(null);
   const shouldAutoScrollRef = useRef<boolean>(false);
+  // Tracks tile codes whose image failed to load — shows icon fallback
+  const imageErrorCodes = useRef<Set<string>>(new Set());
+  const [imageErrorTick, setImageErrorTick] = useState<number>(0);
   const prevCartLengthRef = useRef<number>(0);
 
   // Auto-scroll cart grid to newly added items
@@ -2012,14 +2016,26 @@ export default function PosBillingScreen({
                         onPress={() => handleAddItem(prod)}
                         activeOpacity={0.85}
                       >
-                        {/* Image Placeholder Box - Controlled by EnableImageforTouchPad setting */}
+                        {/* Image Box - Controlled by EnableImageforTouchPad setting */}
                         {isEnabled("EnableImageforTouchPad") && (
                           <View style={styles.touchTilePlaceholder}>
-                            <MaterialCommunityIcons
-                              name={iconName}
-                              size={18}
-                              color="#64748b"
-                            />
+                            {!imageErrorCodes.current.has(prod.InventoryCode) ? (
+                              <Image
+                                source={{ uri: `${API_URL}/api/inventory/image/${encodeURIComponent(prod.InventoryCode.trim())}` }}
+                                style={{ width: "100%", height: "100%", borderRadius: 6 }}
+                                resizeMode="cover"
+                                onError={() => {
+                                  imageErrorCodes.current.add(prod.InventoryCode);
+                                  setImageErrorTick((t) => t + 1); // trigger re-render to show icon
+                                }}
+                              />
+                            ) : (
+                              <MaterialCommunityIcons
+                                name={iconName}
+                                size={18}
+                                color="#64748b"
+                              />
+                            )}
                           </View>
                         )}
 
@@ -3428,11 +3444,12 @@ const styles = StyleSheet.create({
   },
   touchTilePlaceholder: {
     width: "100%",
-    height: 28,
+    height: 44,
     borderRadius: 6,
     backgroundColor: "#f1f5f9",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
   },
   touchTileTitle: {
     fontSize: 10.5,
