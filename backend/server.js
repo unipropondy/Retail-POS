@@ -78,6 +78,10 @@ app.use("/api/config", configRoutes);
 const cartRoutes = require("./routes/cartRoutes");
 app.use("/api/cart", cartRoutes);
 
+// Mount Hold & Release routes (F6 Hold / F7 Release)
+const holdRoutes = require("./routes/holdRoutes");
+app.use("/api/hold", holdRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

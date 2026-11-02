@@ -37,6 +37,8 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import ThemeModal from "../components/ThemeModal";
+import HoldModals, { HoldHeaderItem } from "../components/HoldModals";
+import CustomAlertModal, { CustomAlertState } from "../components/CustomAlertModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -242,6 +244,58 @@ export default function PosBillingScreen({
     balance: number;
     payMode: string;
   } | null>(null);
+
+  // Hold & Release Modal States (F6 Hold / F7 Release)
+  const [showHoldListModal, setShowHoldListModal] = useState<boolean>(false);
+  const [holdList, setHoldList] = useState<HoldHeaderItem[]>([]);
+  const [loadingHoldList, setLoadingHoldList] = useState<boolean>(false);
+  const [showManualHoldModal, setShowManualHoldModal] = useState<boolean>(false);
+  const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
+  const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
+
+  // Professional POS Custom Alert / Confirmation Modal
+  const [customAlert, setCustomAlert] = useState<CustomAlertState>({
+    visible: false,
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    title: string,
+    message: string,
+    type: "success" | "warning" | "error" | "info" = "info",
+    onConfirm?: () => void
+  ) => {
+    setCustomAlert({
+      visible: true,
+      type,
+      title,
+      message,
+      confirmText: "OK",
+      onConfirm,
+    });
+  };
+
+  const showConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    onCancel?: () => void,
+    confirmText = "Yes, Proceed",
+    cancelText = "Cancel"
+  ) => {
+    setCustomAlert({
+      visible: true,
+      type: "confirm",
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm,
+      onCancel,
+    });
+  };
 
   // Centralized VB.NET App.config Integration
   const { config, isEnabled, getNum } = useAppConfig();
@@ -539,21 +593,13 @@ export default function PosBillingScreen({
     if (isValueAboveCheck || abovePriceLimit > 0) {
       if (item.SellingPrice > abovePriceLimit) {
         const warnMsg = `Item Price ($${item.SellingPrice.toFixed(2)}) exceeds configured threshold ($${abovePriceLimit.toFixed(2)}) [AbovePrice]. Supervisor authorization required.`;
-        if (Platform.OS === "web") {
-          window.alert(`⚠️ High Value Warning: ${warnMsg}`);
-        } else {
-          Alert.alert("High Value Warning", warnMsg);
-        }
+        showAlert("High Value Warning", warnMsg, "warning");
       }
     }
 
     if (qtyToAdd > aboveQtyLimit) {
       const warnMsg = `Quantity (${qtyToAdd}) exceeds configured limit (${aboveQtyLimit}) [Aboveqty]. Please verify bulk sale.`;
-      if (Platform.OS === "web") {
-        window.alert(`⚠️ High Quantity Warning: ${warnMsg}`);
-      } else {
-        Alert.alert("High Quantity Warning", warnMsg);
-      }
+      showAlert("High Quantity Warning", warnMsg, "warning");
     }
 
     setActiveItem({
@@ -722,51 +768,209 @@ export default function PosBillingScreen({
   };
 
   // Hold current bill (F6 Hold) - Enforces HOLDBILL and AllowHoldOnlyTwobills settings
-  const handleHoldBill = () => {
-    // Condition 1: Check if HOLDBILL is enabled (App.config HOLDBILL = 0 disables parking)
-    if (!isEnabled("HOLDBILL")) {
-      if (Platform.OS === "web") {
-        window.alert(
-          "Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).",
-        );
+  // ---------------------------------------------------------------------------
+  // F6 HOLD & F7 RELEASE WORKFLOW (Direct mirror of VB.NET frmPos1.vb)
+  // ---------------------------------------------------------------------------
+
+  // Fetch active hold bills list from database (Supports "ALL SALES" across all terminals)
+  const fetchHoldList = async (showAll = true) => {
+    setLoadingHoldList(true);
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      const url = showAll || !activeTerm
+        ? `${API_URL}/api/hold/list`
+        : `${API_URL}/api/hold/list?terminalCode=${encodeURIComponent(activeTerm)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.holds)) {
+        setHoldList(data.holds);
       } else {
-        Alert.alert(
-          "Feature Disabled",
-          "Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).",
-        );
+        setHoldList([]);
       }
-      return;
+    } catch (e) {
+      console.warn("Failed to fetch hold list:", e);
+      setHoldList([]);
+    } finally {
+      setLoadingHoldList(false);
     }
-
-    if (cart.length === 0) return;
-
-    // Condition 2: Check AllowHoldOnlyTwobills restriction
-    if (isEnabled("AllowHoldOnlyTwobills") && heldBills.length >= 2) {
-      if (Platform.OS === "web") {
-        window.alert(
-          "Maximum 2 held bills allowed per System Configuration (AllowHoldOnlyTwobills = 1). Please release a bill first.",
-        );
-      } else {
-        Alert.alert(
-          "Hold Limit Reached",
-          "Maximum 2 held bills allowed per System Configuration (AllowHoldOnlyTwobills = 1). Please release a bill first.",
-        );
-      }
-      return;
-    }
-
-    setHeldBills((prev) => [...prev, cart]);
-    handleClearCart();
   };
 
-  // Release held bill (F7 Release)
+  // Execute actual database hold transaction
+  const executeSaveHold = async (customHoldNo?: number) => {
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      const activeUser = (cashierName || "UPS").trim();
+
+      const res = await fetch(`${API_URL}/api/hold/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          holdNo: customHoldNo,
+          items: cart,
+          terminalCode: activeTerm,
+          cashierId: activeUser,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const msg = `Bill successfully held under Hold No #${data.holdNo}`;
+        showAlert("Success", msg, "success");
+        // Clear cart ONLY after backend confirmation
+        handleClearCart();
+        fetchHoldList();
+      } else {
+        const errMsg = data.message || "Failed to hold bill";
+        showAlert("Hold Failed", errMsg, "warning");
+      }
+    } catch (err: any) {
+      const errMsg = err.message || "Network error while saving hold";
+      showAlert("Error", errMsg, "error");
+    }
+  };
+
+  // F6 HOLD Button handler
+  const handleHoldBill = async () => {
+    // Condition 1: Check if HOLDBILL is enabled (App.config HOLDBILL = 0 disables parking)
+    if (!isEnabled("HOLDBILL")) {
+      showAlert(
+        "Feature Disabled",
+        "Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).",
+        "warning"
+      );
+      return;
+    }
+
+    if (cart.length === 0) {
+      showAlert(
+        "Cart is Empty",
+        "No item in cart. Please scan or add items before holding a bill.",
+        "warning"
+      );
+      return;
+    }
+
+    // Condition 2: Check Cashier Permission for F6
+    try {
+      const activeUser = (cashierName || "UPS").trim();
+      const permRes = await fetch(`${API_URL}/api/hold/check-permission?cashierId=${encodeURIComponent(activeUser)}`);
+      const permData = await permRes.json();
+
+      if (permRes.ok && permData.requiresAdminAuth) {
+        // Cashier denied F6 -> prompt for Admin Authorization
+        setShowAdminAuthModal(true);
+        return;
+      }
+    } catch (e) {
+      console.warn("Could not check hold permission, proceeding:", e);
+    }
+
+    // Condition 3: Check Manual Hold setting (App.config ManualHold = 1)
+    if (isEnabled("ManualHold")) {
+      try {
+        const numRes = await fetch(`${API_URL}/api/hold/next-number`);
+        const numData = await numRes.json();
+        setSuggestedHoldNo(numData.nextHoldNo || 1);
+      } catch {
+        setSuggestedHoldNo(1);
+      }
+      setShowManualHoldModal(true);
+      return;
+    }
+
+    // Standard Auto-Hold
+    await executeSaveHold();
+  };
+
+  // Admin authorization submission
+  const handleAdminAuthSubmit = async (user: string, pass: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_URL}/api/hold/verify-admin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: user, password: pass }),
+      });
+      const data = await res.json();
+      if (res.ok && data.authorized) {
+        // Admin verified -> execute the hold
+        executeSaveHold();
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  // F7 RELEASE Button handler (Opens Hold List modal to select & release)
   const handleReleaseBill = () => {
-    if (heldBills.length === 0) return;
-    const lastHeld = heldBills[heldBills.length - 1];
-    setCart(lastHeld);
-    setSelectedCartIndex(lastHeld.length - 1);
-    shouldAutoScrollRef.current = true;
-    setHeldBills((prev) => prev.slice(0, -1));
+    fetchHoldList();
+    setShowHoldListModal(true);
+  };
+
+  // Release specific Hold record into active cart
+  const handleSelectReleaseHold = async (holdNo: number) => {
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      const res = await fetch(`${API_URL}/api/hold/${holdNo}/release`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terminalCode: activeTerm }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.items)) {
+        setCart(data.items);
+        setSelectedCartIndex(data.items.length - 1);
+        shouldAutoScrollRef.current = true;
+        if (data.items.length > 0) {
+          const last = data.items[data.items.length - 1];
+          setActiveItem({
+            name: last.description,
+            qty: last.qty,
+            price: last.price,
+            stock: 0,
+          });
+        }
+        fetchHoldList();
+        showAlert(
+          "Hold Released",
+          `Hold #${holdNo} has been restored into the active cart.`,
+          "success"
+        );
+      } else {
+        const errMsg = data.message || "Failed to release hold bill";
+        showAlert("Release Failed", errMsg, "warning");
+      }
+    } catch (err: any) {
+      const errMsg = err.message || "Network error while releasing hold";
+      showAlert("Error", errMsg, "error");
+    }
+  };
+
+  // Delete specific Hold record
+  const handleDeleteHold = async (holdNo: number) => {
+    showConfirm(
+      "Discard Hold Bill",
+      `Are you sure you want to delete and permanently discard Hold #${holdNo}?`,
+      async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/hold/${holdNo}`, { method: "DELETE" });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            fetchHoldList();
+            showAlert("Deleted", `Hold #${holdNo} has been removed.`, "info");
+          } else {
+            showAlert("Delete Failed", data.message || "Could not delete hold bill", "error");
+          }
+        } catch (e: any) {
+          showAlert("Error", e.message || "Network error", "error");
+        }
+      },
+      undefined,
+      "Delete Bill",
+      "Keep Bill"
+    );
   };
 
   // SKU Bar Enter Key submission
@@ -2409,17 +2613,12 @@ export default function PosBillingScreen({
                     const printer = config.ReceiptPrinter || "RECEIPT PRINTER";
                     const tpl = config.ReceiptTemplate || "Template2";
                     const store = config.CompanyName || "SUPERMART";
-                    if (Platform.OS === "web") {
-                      window.alert(
-                        `🖨️ [${printer}] Spooling receipt to thermal printer using [${tpl}] for ${store}...`,
-                      );
-                    } else {
-                      Alert.alert(
-                        "Printing Receipt",
-                        `Spooling receipt to ${printer} using ${tpl}...`,
-                      );
-                    }
-                    handleFinishSale();
+                    showAlert(
+                      "Printing Receipt",
+                      `Spooling receipt to thermal printer [${printer}] using template [${tpl}] for ${store}...`,
+                      "info",
+                      () => handleFinishSale()
+                    );
                   }}
                 >
                   <MaterialCommunityIcons
@@ -2609,6 +2808,39 @@ export default function PosBillingScreen({
           </View>
         </View>
       </Modal>
+
+      {/* Professional POS Custom Alert & Confirmation Modal */}
+      <CustomAlertModal
+        alertState={customAlert}
+        onClose={() => setCustomAlert((prev) => ({ ...prev, visible: false }))}
+        theme={currentTheme}
+        primaryColor={currentTheme.primary}
+      />
+
+      {/* F6 Hold & F7 Release Modals (Last Transaction Header/Detail Flow) */}
+      <HoldModals
+        showHoldListModal={showHoldListModal}
+        onCloseHoldListModal={() => setShowHoldListModal(false)}
+        holdList={holdList}
+        loadingHoldList={loadingHoldList}
+        onSelectReleaseHold={handleSelectReleaseHold}
+        onDeleteHold={handleDeleteHold}
+        selectedHoldNo={null}
+        onRefreshHoldList={fetchHoldList}
+        showManualHoldModal={showManualHoldModal}
+        onCloseManualHoldModal={() => setShowManualHoldModal(false)}
+        onSubmitManualHold={(holdNo) => {
+          setShowManualHoldModal(false);
+          executeSaveHold(holdNo);
+        }}
+        suggestedHoldNo={suggestedHoldNo}
+        showAdminAuthModal={showAdminAuthModal}
+        onCloseAdminAuthModal={() => setShowAdminAuthModal(false)}
+        onSubmitAdminAuth={handleAdminAuthSubmit}
+        theme={currentTheme}
+        primaryColor={currentTheme.primary}
+        activeTerminal={terminalCode}
+      />
 
       {/* Theme & Typography Customizer Modal */}
       <ThemeModal
