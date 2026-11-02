@@ -1016,8 +1016,8 @@ export default function PosBillingScreen({
       if (res.ok && data.success) {
         const msg = `Bill successfully held under Hold No #${data.holdNo}`;
         showAlert("Success", msg, "success");
-        // Clear cart ONLY after backend confirmation
-        handleClearCart();
+        // Reset frontend screen (backend tblTempSales already parked to hold tables)
+        resetPosScreenState();
         fetchHoldList();
       } else {
         const errMsg = data.message || "Failed to hold bill";
@@ -1294,7 +1294,7 @@ export default function PosBillingScreen({
 
   const handleFinishSale = () => {
     setShowReceiptModal(false);
-    handleClearCart();
+    resetPosScreenState();
   };
 
   // Price Change override
