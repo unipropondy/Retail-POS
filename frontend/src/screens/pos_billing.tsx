@@ -252,6 +252,7 @@ export default function PosBillingScreen({
   const [showManualHoldModal, setShowManualHoldModal] = useState<boolean>(false);
   const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
+  const [showAllCounters, setShowAllCounters] = useState<boolean>(false);
 
   // Professional POS Custom Alert / Confirmation Modal
   const [customAlert, setCustomAlert] = useState<CustomAlertState>({
@@ -772,12 +773,13 @@ export default function PosBillingScreen({
   // F6 HOLD & F7 RELEASE WORKFLOW (Direct mirror of VB.NET frmPos1.vb)
   // ---------------------------------------------------------------------------
 
-  // Fetch active hold bills list from database (Supports "ALL SALES" across all terminals)
-  const fetchHoldList = async (showAll = true) => {
+  // Fetch active hold bills list from database (Respects showAll / current terminal)
+  const fetchHoldList = async (showAll?: boolean) => {
+    const isAll = typeof showAll === "boolean" ? showAll : showAllCounters;
     setLoadingHoldList(true);
     try {
       const activeTerm = (terminalCode || "").trim();
-      const url = showAll || !activeTerm
+      const url = isAll || !activeTerm
         ? `${API_URL}/api/hold/list`
         : `${API_URL}/api/hold/list?terminalCode=${encodeURIComponent(activeTerm)}`;
       const res = await fetch(url);
@@ -904,7 +906,7 @@ export default function PosBillingScreen({
 
   // F7 RELEASE Button handler (Opens Hold List modal to select & release)
   const handleReleaseBill = () => {
-    fetchHoldList();
+    fetchHoldList(showAllCounters);
     setShowHoldListModal(true);
   };
 
@@ -2826,7 +2828,15 @@ export default function PosBillingScreen({
         onSelectReleaseHold={handleSelectReleaseHold}
         onDeleteHold={handleDeleteHold}
         selectedHoldNo={null}
-        onRefreshHoldList={fetchHoldList}
+        onRefreshHoldList={(showAll) => {
+          if (typeof showAll === "boolean") setShowAllCounters(showAll);
+          fetchHoldList(showAll);
+        }}
+        showAllCounters={showAllCounters}
+        onToggleAllCounters={(val) => {
+          setShowAllCounters(val);
+          fetchHoldList(val);
+        }}
         showManualHoldModal={showManualHoldModal}
         onCloseManualHoldModal={() => setShowManualHoldModal(false)}
         onSubmitManualHold={(holdNo) => {

@@ -56,6 +56,8 @@ interface HoldModalsProps {
   onDeleteHold: (holdNo: number) => Promise<void>;
   selectedHoldNo: number | null;
   onRefreshHoldList: (showAll?: boolean) => void;
+  showAllCounters?: boolean;
+  onToggleAllCounters?: (val: boolean) => void;
 
   // Manual Hold Number Entry Modal
   showManualHoldModal: boolean;
@@ -81,6 +83,8 @@ export default function HoldModals({
   onSelectReleaseHold,
   onDeleteHold,
   onRefreshHoldList,
+  showAllCounters = false,
+  onToggleAllCounters,
   showManualHoldModal,
   onCloseManualHoldModal,
   onSubmitManualHold,
@@ -101,9 +105,6 @@ export default function HoldModals({
   // Line items for the selected hold
   const [holdDetails, setHoldDetails] = useState<HoldDetailItem[]>([]);
   const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
-
-  // ALL SALES checkbox filter
-  const [showAllSales, setShowAllSales] = useState<boolean>(true);
 
   // Manual Hold input
   const [manualInput, setManualInput] = useState<string>("");
@@ -173,9 +174,12 @@ export default function HoldModals({
   };
 
   const handleToggleAllSales = () => {
-    const nextVal = !showAllSales;
-    setShowAllSales(nextVal);
-    onRefreshHoldList(nextVal);
+    const nextVal = !showAllCounters;
+    if (onToggleAllCounters) {
+      onToggleAllCounters(nextVal);
+    } else {
+      onRefreshHoldList(nextVal);
+    }
   };
 
   return (
@@ -219,13 +223,13 @@ export default function HoldModals({
                 <TouchableOpacity
                   style={[
                     styles.allSalesPill,
-                    showAllSales ? styles.allSalesPillActive : {},
+                    showAllCounters ? styles.allSalesPillActive : {},
                   ]}
                   activeOpacity={0.8}
                   onPress={handleToggleAllSales}
                 >
                   <MaterialCommunityIcons
-                    name={showAllSales ? "check-circle" : "checkbox-blank-circle-outline"}
+                    name={showAllCounters ? "check-circle" : "checkbox-blank-circle-outline"}
                     size={15}
                     color="#ffffff"
                   />
@@ -235,7 +239,7 @@ export default function HoldModals({
                 {/* Refresh Button */}
                 <TouchableOpacity
                   style={styles.headerActionBtn}
-                  onPress={() => onRefreshHoldList(showAllSales)}
+                  onPress={() => onRefreshHoldList(showAllCounters)}
                   activeOpacity={0.7}
                 >
                   <MaterialCommunityIcons name="refresh" size={18} color="#ffffff" />
