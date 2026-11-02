@@ -4,6 +4,13 @@
 // File: routes/cartRoutes.js
 // Description: Manages uncommitted live cart sessions isolated dynamically by TerminalCode.
 //              Provides zero data loss on refresh, hold, or reconnect.
+//              Also manages the exact VB.NET Delete Item workflow (subVoidItem):
+//              - Disallows deletion of BCRS DEPOSIT
+//              - Saves deleted item details into tblPosSalesDetailCLEAR via sp_SalesDetailClear
+//              - Deletes the item from tblTempSales
+//              - Deletes the item from tblDisplaySales (Dual Display)
+//              - Recalculates and refreshes tblTempSalesSummary
+//              - Executed inside a single ACID SQL Transaction
 // ==============================================================================
 
 const express = require('express');
@@ -135,111 +142,125 @@ router.post('/temp-sales/add', async (req, res) => {
         RTRIM(LTRIM(ISNULL(BrandCode, ''))) AS Brand,
         RTRIM(LTRIM(ISNULL(CategoryCode, ''))) AS Category,
         ISNULL(AverageCost, 0) AS AverageCost,
-        RTRIM(LTRIM(ISNULL(UOM, 'PCS'))) AS UOM
+        ISNULL(OutputTax, 0) AS TaxPerc
       FROM tblInventory
       WHERE RTRIM(LTRIM(InventoryCode)) = @code
     `);
 
-    const inv = itemRes.recordset[0] || {
-      InventoryCode: invCode,
-      Description: 'Custom Item ' + invCode,
-      SellingPrice: 0,
-      Department: '',
-      Brand: '',
-      Category: '',
-      AverageCost: 0,
-      UOM: 'PCS',
-    };
+    if (itemRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Item [${invCode}] not found in inventory` });
+    }
 
-    const unitPrice = overridePrice !== undefined && overridePrice !== null 
-      ? Number(overridePrice) 
-      : Number(inv.SellingPrice);
+    const item = itemRes.recordset[0];
+    const unitPrice = overridePrice !== undefined ? Number(overridePrice) : Number(item.SellingPrice);
 
-    // 2. Check if item is already in tblTempSales for this terminal
+    // 2. Check if this exact item is already in tblTempSales for this terminal
     const checkReq = pool.request();
     checkReq.input('term', sql.VarChar(20), termCode);
     checkReq.input('code', sql.VarChar(50), invCode);
     const existing = await checkReq.query(`
-      SELECT TOP 1 TempID, Qty, Price, Discount, Amount
+      SELECT TOP 1 TempID, Qty, Discount, Price, NetDiscount
       FROM tblTempSales
       WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
       ORDER BY TempID DESC
     `);
 
     if (existing.recordset.length > 0) {
-      // Update existing line
-      const row = existing.recordset[0];
-      const newQty = Number(row.Qty) + qtyNum;
-      const newDisc = Number(row.Discount) + discNum;
-      const newAmount = parseFloat((newQty * unitPrice - newDisc).toFixed(2));
+      // Increment quantity
+      const existingRow = existing.recordset[0];
+      const newQty = Number(existingRow.Qty) + qtyNum;
+      const effectivePrice = Number(existingRow.Price) || unitPrice;
+      const totalDisc = Number(existingRow.Discount) + discNum;
+      const lineTotal = parseFloat((newQty * effectivePrice - totalDisc).toFixed(2));
+
+      const gstPerc = Number(item.TaxPerc || 0);
+      const gstAmount = parseFloat(((lineTotal * gstPerc) / (100 + gstPerc)).toFixed(2));
 
       const updateReq = pool.request();
-      updateReq.input('tempId', sql.Int, row.TempID);
+      updateReq.input('tempId', sql.Int, existingRow.TempID);
       updateReq.input('qty', sql.Decimal(18, 2), newQty);
-      updateReq.input('price', sql.Decimal(18, 2), unitPrice);
-      updateReq.input('charge', sql.Decimal(18, 4), unitPrice);
-      updateReq.input('disc', sql.Decimal(18, 2), newDisc);
-      updateReq.input('amt', sql.Decimal(18, 2), newAmount);
+      updateReq.input('disc', sql.Decimal(18, 2), totalDisc);
+      updateReq.input('netDisc', sql.Decimal(18, 2), totalDisc);
+      updateReq.input('amount', sql.Decimal(18, 2), lineTotal);
+      updateReq.input('gst', sql.Decimal(18, 2), gstAmount);
+      updateReq.input('gstPrec', sql.Decimal(18, 2), gstPerc);
+      updateReq.input('promoName', sql.VarChar(100), effectivePromoName);
 
       await updateReq.query(`
         UPDATE tblTempSales
         SET Qty = @qty,
-            Price = @price,
-            Charge = @charge,
             Discount = @disc,
-            Amount = @amt
+            NetDiscount = @netDisc,
+            Amount = @amount,
+            GST = @gst,
+            GstPrec = @gstPrec,
+            PromoName = @promoName
         WHERE TempID = @tempId
       `);
 
       return res.status(200).json({
         success: true,
-        action: 'updated',
-        tempId: row.TempID,
+        action: 'incremented',
+        tempId: existingRow.TempID,
+        qty: newQty,
+        amount: lineTotal,
       });
     } else {
-      // Insert new line
-      const newAmount = parseFloat((qtyNum * unitPrice - discNum).toFixed(2));
+      // Insert new line item
+      const lineTotal = parseFloat((qtyNum * unitPrice - discNum).toFixed(2));
+      const gstPerc = Number(item.TaxPerc || 0);
+      const gstAmount = parseFloat(((lineTotal * gstPerc) / (100 + gstPerc)).toFixed(2));
+
       const insertReq = pool.request();
       insertReq.input('term', sql.VarChar(20), termCode);
       insertReq.input('code', sql.VarChar(50), invCode);
-      insertReq.input('desc', sql.VarChar(200), inv.Description);
+      insertReq.input('desc', sql.VarChar(200), item.Description);
       insertReq.input('qty', sql.Decimal(18, 2), qtyNum);
-      insertReq.input('dept', sql.VarChar(50), inv.Department);
-      insertReq.input('brand', sql.VarChar(50), inv.Brand);
-      insertReq.input('cat', sql.VarChar(50), inv.Category);
-      insertReq.input('cost', sql.Decimal(18, 2), inv.AverageCost);
+      insertReq.input('dept', sql.VarChar(50), item.Department);
+      insertReq.input('brand', sql.VarChar(50), item.Brand);
+      insertReq.input('cat', sql.VarChar(50), item.Category);
+      insertReq.input('avgCost', sql.Decimal(18, 2), Number(item.AverageCost || 0));
       insertReq.input('price', sql.Decimal(18, 2), unitPrice);
-      insertReq.input('charge', sql.Decimal(18, 4), unitPrice);
+      insertReq.input('charge', sql.Decimal(18, 4), 0);
       insertReq.input('disc', sql.Decimal(18, 2), discNum);
       insertReq.input('netDisc', sql.Decimal(18, 2), discNum);
-      insertReq.input('amt', sql.Decimal(18, 2), newAmount);
+      insertReq.input('gstPrec', sql.Decimal(18, 2), gstPerc);
+      insertReq.input('gst', sql.Decimal(18, 2), gstAmount);
+      insertReq.input('amount', sql.Decimal(18, 2), lineTotal);
+      insertReq.input('salesman', sql.VarChar(20), 'UPS');
       insertReq.input('promoName', sql.VarChar(100), effectivePromoName);
+      insertReq.input('memDisc', sql.Decimal(18, 2), 0);
+      insertReq.input('itemType', sql.VarChar(50), 'NORMAL');
+      insertReq.input('memName', sql.VarChar(100), '');
 
-      const insRes = await insertReq.query(`
+      const insertResult = await insertReq.query(`
         INSERT INTO tblTempSales (
           TerminalCode, InventoryCode, Description, Qty, Department, Brand, Category,
           AverageCost, Price, Charge, Discount, NetDiscount, GstPrec, GST, Amount,
-          DiscountPriceCode, Salesman, PromoName, MemDiscount, ItemType, MemName
-        ) 
+          Salesman, PromoName, MemDiscount, ItemType, MemName
+        )
         OUTPUT INSERTED.TempID
         VALUES (
           @term, @code, @desc, @qty, @dept, @brand, @cat,
-          @cost, @price, @charge, @disc, @netDisc, 0, 0, @amt,
-          '', '', @promoName, 0, '0', ''
+          @avgCost, @price, @charge, @disc, @netDisc, @gstPrec, @gst, @amount,
+          @salesman, @promoName, @memDisc, @itemType, @memName
         )
       `);
 
-      return res.status(200).json({
+      const newTempId = insertResult.recordset[0]?.TempID;
+      return res.status(201).json({
         success: true,
         action: 'inserted',
-        tempId: insRes.recordset[0]?.TempID,
+        tempId: newTempId,
+        qty: qtyNum,
+        amount: lineTotal,
       });
     }
   } catch (error) {
-    console.error('❌ [CART ERROR] Failed to add item to tblTempSales:', error.message);
+    console.error('❌ [CART ERROR] Failed to add to tblTempSales:', error.message);
     return res.status(500).json({
       success: false,
-      message: 'Failed to add item: ' + error.message,
+      message: 'Failed to add item to cart: ' + error.message,
     });
   }
 });
@@ -307,31 +328,198 @@ router.post('/temp-sales/update-qty', async (req, res) => {
 
 // ------------------------------------------------------------------------------
 // DELETE /api/cart/temp-sales/item
-// Deletes a single item by InventoryCode & TerminalCode
+// Exact VB.NET POS subVoidItem() execution:
+// 1. Validates selected item (BCRS DEPOSIT check)
+// 2. Executes sp_SalesDetailClear to archive deleted item in tblPosSalesDetailCLEAR
+// 3. Deletes item from tblTempSales
+// 4. Deletes item from tblDisplaySales (Dual Display)
+// 5. Recalculates and refreshes tblTempSalesSummary
+// 6. Commits inside single ACID SQL transaction
 // ------------------------------------------------------------------------------
 router.delete('/temp-sales/item', async (req, res) => {
+  const pool = await getPool();
+  if (!pool) return res.status(503).json({ success: false, message: 'DB unreachable' });
+
+  const { terminalCode, inventoryCode, cashierId } = req.body;
+  const termCode = getCleanTerminalCode(terminalCode);
+  if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
+
+  const invCode = String(inventoryCode || '').trim();
+  if (!invCode) return res.status(400).json({ success: false, message: 'inventoryCode is required' });
+
+  const cId = (cashierId || 'UPS').trim();
+
+  // Rule 1: BCRS DEPOSIT validation
+  if (invCode.toUpperCase() === 'BCRS DEPOSIT' || invCode.toUpperCase().includes('BCRS')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Deletion of BCRS DEPOSIT is not allowed.',
+    });
+  }
+
+  const transaction = new sql.Transaction(pool);
   try {
-    const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'DB unreachable' });
+    await transaction.begin();
 
-    const { terminalCode, inventoryCode } = req.body;
-    const termCode = getCleanTerminalCode(terminalCode);
-    if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
-
-    const invCode = String(inventoryCode || '').trim();
-
-    const request = pool.request();
-    request.input('term', sql.VarChar(20), termCode);
-    request.input('code', sql.VarChar(50), invCode);
-
-    await request.query(`
-      DELETE FROM tblTempSales
-      WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
+    // 1. Fetch item from tblTempSales to get exact quantity, price, and amounts
+    const fetchReq = new sql.Request(transaction);
+    fetchReq.input('term', sql.VarChar(20), termCode);
+    fetchReq.input('code', sql.VarChar(50), invCode);
+    const itemRes = await fetchReq.query(`
+      SELECT TOP 1 *
+      FROM tblTempSales
+      WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term) 
+        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
     `);
 
-    return res.status(200).json({ success: true, message: 'Item deleted' });
+    // If item was added only in frontend state (or table had slight trim difference),
+    // still allow removing from display and updating summary
+    let item = itemRes.recordset[0];
+    let qtyNum = Number(item?.Qty || 1);
+    let priceNum = Number(item?.Price || 0);
+    let discNum = Number(item?.Discount || 0);
+    let netDiscNum = Number(item?.NetDiscount || 0);
+    let lineTotal = parseFloat((qtyNum * priceNum).toFixed(2));
+    let lineNet = parseFloat((lineTotal - discNum).toFixed(2));
+    let gstNum = Number(item?.GST || 0);
+    let salesmanId = (item?.Salesman || '').trim();
+
+    // 2. Fetch LocationCode and Item Master Info
+    const locReq = new sql.Request(transaction);
+    const locRes = await locReq.query(`
+      SELECT TOP 1 ISNULL(LocationCode, 'HQ') AS LocationCode FROM tblMaCompany
+    `);
+    const locCode = (locRes.recordset[0]?.LocationCode || 'HQ').trim();
+
+    const invInfoReq = new sql.Request(transaction);
+    invInfoReq.input('code', sql.VarChar(50), invCode);
+    const invInfoRes = await invInfoReq.query(`
+      SELECT 
+        ISNULL(Description, '') AS Description,
+        ISNULL(SellingPrice, 0) AS SellingPrice,
+        ISNULL(DepartmentCode, '') AS DeptCode,
+        ISNULL(CategoryCode, '') AS CategoryCode,
+        ISNULL(BrandCode, '') AS BrandCode,
+        ISNULL(AverageCost, 0) AS AverageCost
+      FROM tblInventory
+      WHERE UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
+    `);
+
+    const invInfo = invInfoRes.recordset[0];
+    const description = String(item?.Description || invInfo?.Description || invCode).trim();
+    if (priceNum === 0 && invInfo?.SellingPrice) {
+      priceNum = Number(invInfo.SellingPrice);
+      lineTotal = parseFloat((qtyNum * priceNum).toFixed(2));
+      lineNet = lineTotal;
+    }
+
+    const deptCode = (invInfo?.DeptCode || item?.Department || '').trim();
+    const catCode = (invInfo?.CategoryCode || item?.Category || '').trim();
+    const brandCode = (invInfo?.BrandCode || item?.Brand || '').trim();
+
+    // 3. Save deleted item history via sp_SalesDetailClear
+    // When deleting a single item, InvoiceNo is recorded as 'DELETE'
+    const spReq = new sql.Request(transaction);
+    spReq.input('InvoiceNo', sql.Char(15), 'DELETE');
+    spReq.input('InventoryCode', sql.Char(20), invCode.slice(0, 20));
+    spReq.input('Description', sql.Char(50), description.slice(0, 50));
+    spReq.input('Qty', sql.Decimal(18, 2), qtyNum);
+    spReq.input('Price', sql.Decimal(18, 2), priceNum);
+    spReq.input('TotalValue', sql.Decimal(18, 2), lineTotal);
+    spReq.input('Discount', sql.Decimal(18, 2), discNum);
+    spReq.input('NetDiscount', sql.Decimal(18, 2), netDiscNum);
+    spReq.input('NetAmount', sql.Decimal(18, 2), lineNet);
+    spReq.input('ActualSales', sql.Decimal(18, 2), lineNet);
+    spReq.input('Gst', sql.Decimal(18, 4), gstNum);
+    spReq.input('SalesmanId', sql.Char(10), salesmanId.slice(0, 10));
+    spReq.input('DeptCode', sql.Char(10), deptCode.slice(0, 10));
+    spReq.input('CategoryCode', sql.Char(10), catCode.slice(0, 10));
+    spReq.input('BrandCode', sql.Char(10), brandCode.slice(0, 10));
+    spReq.input('UserID', sql.Char(10), cId.slice(0, 10));
+    spReq.input('LocationCode', sql.Char(10), locCode.slice(0, 10));
+    spReq.input('MemberDiscount', sql.Decimal(18, 2), Number(item?.MemDiscount || 0));
+    spReq.input('GSTType', sql.Char(10), 'Z');
+
+    await spReq.execute('sp_SalesDetailClear');
+
+    // 4. Delete the item from tblTempSales
+    const delTempReq = new sql.Request(transaction);
+    delTempReq.input('term', sql.VarChar(20), termCode);
+    delTempReq.input('code', sql.VarChar(50), invCode);
+    await delTempReq.query(`
+      DELETE FROM tblTempSales
+      WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term) 
+        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
+    `);
+
+    // 5. Delete corresponding item from tblDisplaySales (Dual Display)
+    const delDispReq = new sql.Request(transaction);
+    delDispReq.input('term', sql.VarChar(20), termCode);
+    delDispReq.input('code', sql.VarChar(50), invCode);
+    await delDispReq.query(`
+      DELETE FROM tblDisplaySales
+      WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term) 
+        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
+    `);
+
+    // 6. Recalculate and refresh tblTempSalesSummary for this terminal
+    const sumReq = new sql.Request(transaction);
+    sumReq.input('term', sql.VarChar(20), termCode);
+    const sumRes = await sumReq.query(`
+      SELECT 
+        COUNT(*) AS TotalItems,
+        ISNULL(SUM(Qty), 0) AS TotalQty,
+        ISNULL(SUM(Qty * Price), 0) AS SubTotal,
+        ISNULL(SUM(Discount), 0) AS Discount,
+        ISNULL(SUM(GST), 0) AS Tax,
+        ISNULL(SUM(Amount), 0) AS NetTotal
+      FROM tblTempSales
+      WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term)
+    `);
+
+    const summary = sumRes.recordset[0] || {
+      TotalItems: 0,
+      TotalQty: 0,
+      SubTotal: 0,
+      Discount: 0,
+      Tax: 0,
+      NetTotal: 0,
+    };
+
+    // Remove existing summary row and insert refreshed calculations
+    const refreshSumReq = new sql.Request(transaction);
+    refreshSumReq.input('term', sql.VarChar(20), termCode);
+    refreshSumReq.input('totalItems', sql.Int, summary.TotalItems);
+    refreshSumReq.input('totalQty', sql.Decimal(18, 2), summary.TotalQty);
+    refreshSumReq.input('subTotal', sql.Decimal(18, 2), summary.SubTotal);
+    refreshSumReq.input('disc', sql.Decimal(18, 2), summary.Discount);
+    refreshSumReq.input('tax', sql.Decimal(18, 2), summary.Tax);
+    refreshSumReq.input('netTotal', sql.Decimal(18, 2), summary.NetTotal);
+
+    await refreshSumReq.query(`
+      DELETE FROM tblTempSalesSummary WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term);
+      IF (@totalItems > 0)
+      BEGIN
+        INSERT INTO tblTempSalesSummary (
+          TerminalCode, TotalItems, TotalQty, SubTotal, Discount, Tax, RoundOff, Deposit, NetTotal
+        ) VALUES (
+          @term, @totalItems, @totalQty, @subTotal, @disc, @tax, 0, 0, @netTotal
+        );
+      END
+    `);
+
+    // 7. Commit SQL Transaction
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: `Item [${invCode}] deleted successfully`,
+      remainingItems: summary.TotalItems,
+      summary,
+    });
   } catch (error) {
-    console.error('❌ [CART ERROR] Failed to delete item:', error.message);
+    await transaction.rollback();
+    console.error('❌ [CART DELETE ERROR]:', error.message);
     return res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -352,8 +540,9 @@ router.delete('/temp-sales/clear', async (req, res) => {
     request.input('term', sql.VarChar(20), terminalCode);
 
     await request.query(`
-      DELETE FROM tblTempSales
-      WHERE RTRIM(LTRIM(TerminalCode)) = @term
+      DELETE FROM tblTempSales WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term);
+      DELETE FROM tblDisplaySales WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term);
+      DELETE FROM tblTempSalesSummary WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term);
     `);
 
     return res.status(200).json({ success: true, message: 'Cart cleared for terminal ' + terminalCode });
@@ -364,4 +553,3 @@ router.delete('/temp-sales/clear', async (req, res) => {
 });
 
 module.exports = router;
-

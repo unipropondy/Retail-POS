@@ -254,7 +254,9 @@ export default function PosBillingScreen({
   const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
   const [showClearAdminModal, setShowClearAdminModal] = useState<boolean>(false);
+  const [pendingReleaseHoldNo, setPendingReleaseHoldNo] = useState<number | null>(null);
   const [isClearing, setIsClearing] = useState<boolean>(false);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [showAllCounters, setShowAllCounters] = useState<boolean>(false);
 
   // Professional POS Custom Alert / Confirmation Modal
@@ -722,28 +724,83 @@ export default function PosBillingScreen({
     }
   };
 
-  // Delete selected item from cart
+  // Delete selected item from cart - Exact VB.NET subVoidItem() workflow
   const handleDeleteItem = () => {
-    if (cart.length === 0) return;
-    const targetIdx =
-      selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
-    const targetItem = cart[targetIdx];
-    setCart((prev) => prev.filter((_, i) => i !== targetIdx));
-    setSelectedCartIndex(-1);
-
-    if (targetItem) {
-      try {
-        const activeTerm = (terminalCode || "").trim();
-        fetch(`${API_URL}/api/cart/temp-sales/item`, {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            terminalCode: activeTerm,
-            inventoryCode: targetItem.code,
-          }),
-        }).catch(() => {});
-      } catch {}
+    if (cart.length === 0) {
+      showAlert("Cart Empty", "No item available to delete in the cart.", "info");
+      return;
     }
+    if (isDeleting) return;
+
+    const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    const targetItem = cart[targetIdx];
+    if (!targetItem) return;
+
+    // Rule 1: Do not allow deletion of BCRS DEPOSIT
+    const codeUpper = (targetItem.code || "").toUpperCase();
+    if (codeUpper === "BCRS DEPOSIT" || codeUpper.includes("BCRS")) {
+      showAlert("Action Not Allowed", "Deletion of BCRS DEPOSIT is not permitted.", "warning");
+      return;
+    }
+
+    // Rule 2: Show confirmation dialog before deleting
+    showConfirm(
+      "Confirm Item Deletion",
+      `Are you sure you want to delete item [ ${targetItem.description} ]?`,
+      async () => {
+        setIsDeleting(true);
+        try {
+          const activeTerm = (terminalCode || "").trim();
+          const activeCashier = (cashierName || "UPS").trim();
+
+          const res = await fetch(`${API_URL}/api/cart/temp-sales/item`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              terminalCode: activeTerm,
+              inventoryCode: targetItem.code,
+              cashierId: activeCashier,
+            }),
+          });
+
+          const data = await res.json();
+          if (res.ok && data.success) {
+            // Remove item from frontend state
+            const remainingCart = cart.filter((_, i) => i !== targetIdx);
+            setCart(remainingCart);
+            setSelectedCartIndex(remainingCart.length > 0 ? Math.min(targetIdx, remainingCart.length - 1) : -1);
+
+            // If no items remain, reset active item display
+            if (remainingCart.length === 0) {
+              setActiveItem({
+                name: "READY TO SCAN / SELECT ITEM",
+                qty: 0,
+                price: 0.0,
+                stock: 0,
+              });
+            } else {
+              const activeIdx = Math.min(targetIdx, remainingCart.length - 1);
+              const activeIt = remainingCart[activeIdx];
+              setActiveItem({
+                name: activeIt.description,
+                qty: activeIt.qty,
+                price: activeIt.price,
+                stock: 0,
+              });
+            }
+          } else {
+            showAlert("Delete Failed", data.message || "Failed to delete item", "error");
+          }
+        } catch (err: any) {
+          showAlert("Delete Error", err.message || "Network error while deleting item", "error");
+        } finally {
+          setIsDeleting(false);
+        }
+      },
+      undefined,
+      "Yes, Delete",
+      "Cancel"
+    );
   };
 
   // ---------------------------------------------------------------------------
@@ -771,7 +828,7 @@ export default function PosBillingScreen({
   };
 
   // Backend Clear Execution with SQL Transaction & sp_SalesHeaderClear
-  const executeClearBackend = async (adminId?: string) => {
+  const executeClearBackend = async (adminId?: string, onCleared?: () => Promise<void> | void) => {
     if (isClearing) return;
     setIsClearing(true);
 
@@ -800,7 +857,11 @@ export default function PosBillingScreen({
       if (response.ok && data && data.success) {
         // Reset frontend screen ONLY after backend transaction commits
         resetPosScreenState();
-        showAlert("Success", "Item(s) Cleared", "success");
+        if (onCleared) {
+          await onCleared();
+        } else {
+          showAlert("Success", "Item(s) Cleared", "success");
+        }
       } else {
         const detailedMessage =
           data?.message ||
@@ -826,15 +887,32 @@ export default function PosBillingScreen({
       const data = await res.json();
       if (res.ok && data.authorized) {
         setShowClearAdminModal(false);
-        // Admin authorized: show confirmation
-        showConfirm(
-          "Confirmation",
-          "Do you want to clear the data?",
-          () => executeClearBackend(data.adminUser),
-          undefined,
-          "Yes, Clear",
-          "No"
-        );
+        // Admin authorized
+        if (pendingReleaseHoldNo !== null) {
+          const hNo = pendingReleaseHoldNo;
+          setPendingReleaseHoldNo(null);
+          showConfirm(
+            "Clear and Release",
+            `Admin authorized. Do you want to clear current items and release Hold #${hNo}?`,
+            async () => {
+              await executeClearBackend(data.adminUser, async () => {
+                await executeReleaseHold(hNo);
+              });
+            },
+            undefined,
+            "Clear and Release",
+            "Keep Current Cart"
+          );
+        } else {
+          showConfirm(
+            "Confirmation",
+            "Do you want to clear the data?",
+            () => executeClearBackend(data.adminUser),
+            undefined,
+            "Yes, Clear",
+            "No"
+          );
+        }
         return true;
       }
       return false;
@@ -1030,8 +1108,48 @@ export default function PosBillingScreen({
     setShowHoldListModal(true);
   };
 
-  // Release specific Hold record into active cart
+  // Release specific Hold record into active cart (Follows standard F2 Clear procedure)
   const handleSelectReleaseHold = async (holdNo: number) => {
+    if (cart.length === 0) {
+      await executeReleaseHold(holdNo);
+      return;
+    }
+
+    // Step 1: Check cashier permission for Clear (F2) procedure
+    try {
+      const activeCashier = (cashierName || "UPS").trim();
+      const permRes = await fetch(
+        `${API_URL}/api/pos/clear/check-permission?cashierId=${encodeURIComponent(activeCashier)}`
+      );
+      const permData = await permRes.json();
+
+      if (permRes.ok && permData.requiresAdminAuth) {
+        // Cashier permission denied: prompt for Admin Credentials first
+        setPendingReleaseHoldNo(holdNo);
+        setShowClearAdminModal(true);
+        return;
+      }
+    } catch (e) {
+      console.warn("Could not check clear permission, proceeding to confirmation:", e);
+    }
+
+    // Step 2: Show confirmation dialog
+    showConfirm(
+      "Cart Not Empty",
+      `There are already ${cart.length} item(s) in your active cart. Releasing Hold #${holdNo} will replace them.\n\nDo you want to clear current cart and release this held bill?`,
+      async () => {
+        // Runs standard executeClearBackend (calling sp_SalesHeaderClear and temp table cleanup) then releases
+        await executeClearBackend(undefined, async () => {
+          await executeReleaseHold(holdNo);
+        });
+      },
+      undefined,
+      "Clear and Release",
+      "Keep Current Cart"
+    );
+  };
+
+  const executeReleaseHold = async (holdNo: number) => {
     try {
       const activeTerm = (terminalCode || "").trim();
       const res = await fetch(`${API_URL}/api/hold/${holdNo}/release`, {
@@ -2991,6 +3109,24 @@ export default function PosBillingScreen({
       >
         <AppConfigScreen onClose={() => setShowConfigModal(false)} />
       </Modal>
+
+      {/* Clear / Release Admin Authorization Modal (F2 Permission Override) */}
+      <ClearAdminAuthModal
+        visible={showClearAdminModal}
+        onClose={() => {
+          setShowClearAdminModal(false);
+          setPendingReleaseHoldNo(null);
+        }}
+        onSubmit={handleClearAdminAuthSubmit}
+        theme={currentTheme}
+        primaryColor={currentTheme.primary}
+        actionTitle={pendingReleaseHoldNo !== null ? "Admin Authorization to Clear & Release" : "Admin Authorization Required"}
+        promptMessage={
+          pendingReleaseHoldNo !== null
+            ? `Cashier does not have permission to clear active items to release Hold #${pendingReleaseHoldNo}. Enter Admin or Supervisor credentials:`
+            : "Cashier does not have permission to clear items (F2). Enter Admin or Supervisor credentials:"
+        }
+      />
     </View>
   );
 }
