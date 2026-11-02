@@ -39,6 +39,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import ThemeModal from "../components/ThemeModal";
 import HoldModals, { HoldHeaderItem } from "../components/HoldModals";
 import CustomAlertModal, { CustomAlertState } from "../components/CustomAlertModal";
+import ClearAdminAuthModal from "../components/ClearAdminAuthModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -252,6 +253,8 @@ export default function PosBillingScreen({
   const [showManualHoldModal, setShowManualHoldModal] = useState<boolean>(false);
   const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
+  const [showClearAdminModal, setShowClearAdminModal] = useState<boolean>(false);
+  const [isClearing, setIsClearing] = useState<boolean>(false);
   const [showAllCounters, setShowAllCounters] = useState<boolean>(false);
 
   // Professional POS Custom Alert / Confirmation Modal
@@ -743,8 +746,12 @@ export default function PosBillingScreen({
     }
   };
 
-  // Clear entire cart (F2 Clear)
-  const handleClearCart = () => {
+  // ---------------------------------------------------------------------------
+  // F2 CLEAR SCREEN WORKFLOW (Calls sp_SalesHeaderClear & sp_SalesDetailClear via /api/pos/clear)
+  // ---------------------------------------------------------------------------
+
+  // Screen Reset Process - Mirrors subClearHeader() & subClearDetail()
+  const resetPosScreenState = () => {
     setCart([]);
     setSelectedCartIndex(-1);
     setNumpadValue("");
@@ -757,15 +764,128 @@ export default function PosBillingScreen({
     });
     setSkuCode("");
     setSkuDesc("");
+    setFastQty("1");
+    setFastDisc("0.00");
+    setSelectedPayMode("CASH");
+    skuInputRef.current?.focus();
+  };
+
+  // Backend Clear Execution with SQL Transaction & sp_SalesHeaderClear
+  const executeClearBackend = async (adminId?: string) => {
+    if (isClearing) return;
+    setIsClearing(true);
 
     try {
       const activeTerm = (terminalCode || "").trim();
-      fetch(`${API_URL}/api/cart/temp-sales/clear`, {
-        method: "DELETE",
+      const activeCashier = (cashierName || "UPS").trim();
+
+      const response = await fetch(`${API_URL}/api/pos/clear`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ terminalCode: activeTerm }),
-      }).catch(() => {});
-    } catch {}
+        body: JSON.stringify({
+          items: cart,
+          terminalCode: activeTerm || "HQPC1",
+          cashierId: activeCashier,
+          adminId: adminId || activeCashier,
+        }),
+      });
+
+      const textResp = await response.text();
+      console.log("[CLEAR RESPONSE]", response.status, textResp);
+      let data: any = null;
+      try {
+        data = JSON.parse(textResp);
+      } catch {}
+
+      if (response.ok && data && data.success) {
+        // Reset frontend screen ONLY after backend transaction commits
+        resetPosScreenState();
+        showAlert("Success", "Item(s) Cleared", "success");
+      } else {
+        const detailedMessage =
+          data?.message ||
+          (textResp && textResp.length > 0 && textResp.length < 500 ? textResp : null) ||
+          `HTTP ${response.status}: Failed to execute clear transaction`;
+        showAlert("Clear Failed", detailedMessage, "error");
+      }
+    } catch (err: any) {
+      showAlert("Clear Error", err.message || "Network error during Clear process", "error");
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  // Submit handler for Clear Admin Authorization Modal
+  const handleClearAdminAuthSubmit = async (adminUser: string, adminPass: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_URL}/api/pos/clear/verify-admin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: adminUser, password: adminPass }),
+      });
+      const data = await res.json();
+      if (res.ok && data.authorized) {
+        setShowClearAdminModal(false);
+        // Admin authorized: show confirmation
+        showConfirm(
+          "Confirmation",
+          "Do you want to clear the data?",
+          () => executeClearBackend(data.adminUser),
+          undefined,
+          "Yes, Clear",
+          "No"
+        );
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  // F2 Clear Click Handler - Step-by-step VB.NET permission & confirmation flow
+  const handleClearCart = async () => {
+    if (isClearing) return;
+
+    // If cart is already empty, reset screen inputs and clean terminal temp tables
+    if (cart.length === 0) {
+      executeClearBackend();
+      return;
+    }
+
+    try {
+      const activeCashier = (cashierName || "UPS").trim();
+      const permRes = await fetch(
+        `${API_URL}/api/pos/clear/check-permission?cashierId=${encodeURIComponent(activeCashier)}`
+      );
+      const permData = await permRes.json();
+
+      if (permRes.ok && permData.requiresAdminAuth) {
+        // Cashier permission denied: prompt for Admin Credentials
+        setShowClearAdminModal(true);
+        return;
+      }
+
+      // Cashier is permitted (or Admin): Prompt confirmation dialog
+      showConfirm(
+        "Confirmation",
+        "Do you want to clear the data?",
+        () => executeClearBackend(),
+        undefined,
+        "Yes, Clear",
+        "No"
+      );
+    } catch (err) {
+      // If permission check fails, show fallback confirmation dialog
+      showConfirm(
+        "Confirmation",
+        "Do you want to clear the data?",
+        () => executeClearBackend(),
+        undefined,
+        "Yes, Clear",
+        "No"
+      );
+    }
   };
 
   // Hold current bill (F6 Hold) - Enforces HOLDBILL and AllowHoldOnlyTwobills settings
