@@ -304,8 +304,9 @@ export default function PosBillingScreen({
     }
   };
 
-  // Load Groups and Paymodes on startup & poll license status
+  // Load Saved Cart, Groups, and Paymodes on startup & poll license status
   useEffect(() => {
+    fetchSavedCart();
     fetchTouchGroups();
     fetchPayModes();
     checkLicenseStatus();
@@ -317,6 +318,30 @@ export default function PosBillingScreen({
 
     return () => clearInterval(licenseInterval);
   }, []);
+
+  const fetchSavedCart = async () => {
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      const res = await fetch(`${API_URL}/api/cart/temp-sales?terminalCode=${encodeURIComponent(activeTerm)}`);
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.items)) {
+        if (data.items.length > 0) {
+          setCart(data.items);
+          setSelectedCartIndex(data.items.length - 1);
+          shouldAutoScrollRef.current = true;
+          const last = data.items[data.items.length - 1];
+          setActiveItem({
+            name: last.description,
+            qty: last.qty,
+            price: last.price,
+            stock: 0,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Could not restore saved cart from tblTempSales:", e);
+    }
+  };
 
   const fetchPayModes = async () => {
     try {
@@ -577,6 +602,22 @@ export default function PosBillingScreen({
         return nextCart;
       }
     });
+
+    // Mirror to tblTempSales (persistent session)
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      fetch(`${API_URL}/api/cart/temp-sales/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terminalCode: activeTerm,
+          inventoryCode: item.InventoryCode,
+          qty: qtyToAdd,
+          disc: discToAdd,
+          overridePrice: item.SellingPrice,
+        }),
+      }).catch(() => {});
+    } catch {}
   };
 
   // Adjust active item quantity with (+) or (-) buttons
@@ -596,6 +637,7 @@ export default function PosBillingScreen({
     const targetIdx =
       selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
 
+    const targetItem = cart[targetIdx];
     setCart(
       (prev) =>
         prev
@@ -613,6 +655,21 @@ export default function PosBillingScreen({
           })
           .filter(Boolean) as CartItem[],
     );
+
+    if (targetItem) {
+      try {
+        const activeTerm = (terminalCode || "").trim();
+        fetch(`${API_URL}/api/cart/temp-sales/update-qty`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            terminalCode: activeTerm,
+            inventoryCode: targetItem.code,
+            delta: delta,
+          }),
+        }).catch(() => {});
+      } catch {}
+    }
   };
 
   // Delete selected item from cart
@@ -620,8 +677,23 @@ export default function PosBillingScreen({
     if (cart.length === 0) return;
     const targetIdx =
       selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    const targetItem = cart[targetIdx];
     setCart((prev) => prev.filter((_, i) => i !== targetIdx));
     setSelectedCartIndex(-1);
+
+    if (targetItem) {
+      try {
+        const activeTerm = (terminalCode || "").trim();
+        fetch(`${API_URL}/api/cart/temp-sales/item`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            terminalCode: activeTerm,
+            inventoryCode: targetItem.code,
+          }),
+        }).catch(() => {});
+      } catch {}
+    }
   };
 
   // Clear entire cart (F2 Clear)
@@ -638,6 +710,15 @@ export default function PosBillingScreen({
     });
     setSkuCode("");
     setSkuDesc("");
+
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      fetch(`${API_URL}/api/cart/temp-sales/clear`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terminalCode: activeTerm }),
+      }).catch(() => {});
+    } catch {}
   };
 
   // Hold current bill (F6 Hold) - Enforces HOLDBILL and AllowHoldOnlyTwobills settings
@@ -1027,7 +1108,7 @@ export default function PosBillingScreen({
               { color: currentTheme.textDark, fontFamily: activeFontFamily },
             ]}
           >
-            {terminalCode || "HQPC1"} • {cashierName || "CASHIER"}
+            {terminalCode || "---"} • {cashierName || "CASHIER"}
           </Text>
         </View>
 

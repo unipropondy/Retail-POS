@@ -74,6 +74,10 @@ app.use("/api/paymode", paymodeRoutes);
 const configRoutes = require("./routes/configRoutes");
 app.use("/api/config", configRoutes);
 
+// Mount temporary cart routes (tblTempSales persistence)
+const cartRoutes = require("./routes/cartRoutes");
+app.use("/api/cart", cartRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================
