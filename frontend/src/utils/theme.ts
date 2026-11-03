@@ -36,9 +36,24 @@ export const THEME_STORAGE_KEY = "@pos_theme_setting";
 export const FONT_STORAGE_KEY = "@pos_font_setting";
 
 export const THEMES: ThemeConfig[] = [
+{
+    id: "royal_crimson",
+    name: "Royal Crimson (Default)",
+    primary: "#881337",
+    primaryHover: "#9f1239",
+    accent: "#F43F5E",
+    bg: "#FFF1F2",
+    surface: "#FFFFFF",
+    cardBg: "#FFFFFF",
+    borderColor: "#FECDD3",
+    textDark: "#4C0519",
+    textMuted: "#9F1239",
+    tableHeaderBg: "#881337",
+    tableHeaderColor: "#FFFFFF",
+  },
   {
     id: "greenmart",
-    name: "GreenMart POS (Default)",
+    name: "GreenMart POS",
     primary: "#1b5e20",
     primaryHover: "#2e7d32",
     accent: "#f59e0b",
@@ -97,22 +112,7 @@ export const THEMES: ThemeConfig[] = [
     tableHeaderColor: "#38BDF8",
     isDark: true,
   },
-  {
-    id: "royal_crimson",
-    name: "Royal Crimson",
-    primary: "#881337",
-    primaryHover: "#9f1239",
-    accent: "#F43F5E",
-    bg: "#FFF1F2",
-    surface: "#FFFFFF",
-    cardBg: "#FFFFFF",
-    borderColor: "#FECDD3",
-    textDark: "#4C0519",
-    textMuted: "#9F1239",
-    tableHeaderBg: "#881337",
-    tableHeaderColor: "#FFFFFF",
-  },
-  {
+    {
     id: "classic_amber",
     name: "Amber Corporate",
     primary: "#B45309",

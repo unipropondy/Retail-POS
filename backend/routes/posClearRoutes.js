@@ -256,6 +256,28 @@ router.post('/', async (req, res) => {
       // @ActualSales decimal(18,2), @Gst decimal(18,4), @SalesmanId char(10),
       // @DeptCode char(10), @CategoryCode char(10), @BrandCode char(10),
       // @UserID char(10), @LocationCode char(10), @MemberDiscount decimal(18,2), @GSTType char(10)
+      // High-performance batch prefetch of Department, Category, Brand in a single round-trip
+      const distinctCodes = Array.from(new Set(items.map(it => String(it.code || it.InventoryCode || '').trim()).filter(Boolean)));
+      const itemInfoMap = new Map();
+
+      if (distinctCodes.length > 0) {
+        const invBatchReq = new sql.Request(transaction);
+        const codeParams = distinctCodes.map((c, i) => `@c${i}`).join(', ');
+        distinctCodes.forEach((c, i) => invBatchReq.input(`c${i}`, sql.VarChar(50), c));
+        const batchRes = await invBatchReq.query(`
+          SELECT 
+            RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+            ISNULL(DepartmentCode, '') AS DepartmentCode,
+            ISNULL(CategoryCode, '') AS CategoryCode,
+            ISNULL(BrandCode, '') AS BrandCode
+          FROM tblInventory
+          WHERE RTRIM(LTRIM(InventoryCode)) IN (${codeParams})
+        `);
+        batchRes.recordset.forEach(r => {
+          itemInfoMap.set(r.InventoryCode, r);
+        });
+      }
+
       for (const it of items) {
         const invCode = String(it.code || it.InventoryCode || '').trim();
         const qtyNum = Number(it.qty || 1);
@@ -263,19 +285,7 @@ router.post('/', async (req, res) => {
         const discNum = Number(it.disc || 0);
         const lineTotal = parseFloat((qtyNum * priceNum).toFixed(2));
         const lineNet = parseFloat((lineTotal - discNum).toFixed(2));
-
-        // Fetch Department, Category, Brand from tblInventory
-        const invInfoReq = new sql.Request(transaction);
-        invInfoReq.input('code', sql.VarChar(50), invCode);
-        const invInfoRes = await invInfoReq.query(`
-          SELECT 
-            ISNULL(DepartmentCode, '') AS DepartmentCode,
-            ISNULL(CategoryCode, '') AS CategoryCode,
-            ISNULL(BrandCode, '') AS BrandCode
-          FROM tblInventory
-          WHERE RTRIM(LTRIM(InventoryCode)) = @code
-        `);
-        const itemInfo = invInfoRes.recordset[0] || {
+        const itemInfo = itemInfoMap.get(invCode) || {
           DepartmentCode: '',
           CategoryCode: '',
           BrandCode: '',

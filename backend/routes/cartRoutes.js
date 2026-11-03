@@ -361,20 +361,33 @@ router.delete('/temp-sales/item', async (req, res) => {
   try {
     await transaction.begin();
 
-    // 1. Fetch item from tblTempSales to get exact quantity, price, and amounts
-    const fetchReq = new sql.Request(transaction);
-    fetchReq.input('term', sql.VarChar(20), termCode);
-    fetchReq.input('code', sql.VarChar(50), invCode);
-    const itemRes = await fetchReq.query(`
+    // 1 & 2. In a single round-trip, fetch the item from tblTempSales, company LocationCode, and tblInventory master info
+    const initialReq = new sql.Request(transaction);
+    initialReq.input('term', sql.VarChar(20), termCode);
+    initialReq.input('code', sql.VarChar(50), invCode);
+    const initialRes = await initialReq.query(`
       SELECT TOP 1 *
       FROM tblTempSales
       WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term) 
-        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
+        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code);
+
+      SELECT TOP 1 ISNULL(LocationCode, 'HQ') AS LocationCode FROM tblMaCompany;
+
+      SELECT 
+        ISNULL(Description, '') AS Description,
+        ISNULL(SellingPrice, 0) AS SellingPrice,
+        ISNULL(DepartmentCode, '') AS DeptCode,
+        ISNULL(CategoryCode, '') AS CategoryCode,
+        ISNULL(BrandCode, '') AS BrandCode,
+        ISNULL(AverageCost, 0) AS AverageCost
+      FROM tblInventory
+      WHERE UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code);
     `);
 
-    // If item was added only in frontend state (or table had slight trim difference),
-    // still allow removing from display and updating summary
-    let item = itemRes.recordset[0];
+    let item = initialRes.recordsets[0]?.[0];
+    const locCode = (initialRes.recordsets[1]?.[0]?.LocationCode || 'HQ').trim();
+    const invInfo = initialRes.recordsets[2]?.[0];
+
     let qtyNum = Number(item?.Qty || 1);
     let priceNum = Number(item?.Price || 0);
     let discNum = Number(item?.Discount || 0);
@@ -384,28 +397,6 @@ router.delete('/temp-sales/item', async (req, res) => {
     let gstNum = Number(item?.GST || 0);
     let salesmanId = (item?.Salesman || '').trim();
 
-    // 2. Fetch LocationCode and Item Master Info
-    const locReq = new sql.Request(transaction);
-    const locRes = await locReq.query(`
-      SELECT TOP 1 ISNULL(LocationCode, 'HQ') AS LocationCode FROM tblMaCompany
-    `);
-    const locCode = (locRes.recordset[0]?.LocationCode || 'HQ').trim();
-
-    const invInfoReq = new sql.Request(transaction);
-    invInfoReq.input('code', sql.VarChar(50), invCode);
-    const invInfoRes = await invInfoReq.query(`
-      SELECT 
-        ISNULL(Description, '') AS Description,
-        ISNULL(SellingPrice, 0) AS SellingPrice,
-        ISNULL(DepartmentCode, '') AS DeptCode,
-        ISNULL(CategoryCode, '') AS CategoryCode,
-        ISNULL(BrandCode, '') AS BrandCode,
-        ISNULL(AverageCost, 0) AS AverageCost
-      FROM tblInventory
-      WHERE UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
-    `);
-
-    const invInfo = invInfoRes.recordset[0];
     const description = String(item?.Description || invInfo?.Description || invCode).trim();
     if (priceNum === 0 && invInfo?.SellingPrice) {
       priceNum = Number(invInfo.SellingPrice);
@@ -442,24 +433,18 @@ router.delete('/temp-sales/item', async (req, res) => {
 
     await spReq.execute('sp_SalesDetailClear');
 
-    // 4. Delete the item from tblTempSales
-    const delTempReq = new sql.Request(transaction);
-    delTempReq.input('term', sql.VarChar(20), termCode);
-    delTempReq.input('code', sql.VarChar(50), invCode);
-    await delTempReq.query(`
+    // 4 & 5. Delete the item from tblTempSales and tblDisplaySales in a single batch query
+    const delReq = new sql.Request(transaction);
+    delReq.input('term', sql.VarChar(20), termCode);
+    delReq.input('code', sql.VarChar(50), invCode);
+    await delReq.query(`
       DELETE FROM tblTempSales
       WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term) 
-        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
-    `);
+        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code);
 
-    // 5. Delete corresponding item from tblDisplaySales (Dual Display)
-    const delDispReq = new sql.Request(transaction);
-    delDispReq.input('term', sql.VarChar(20), termCode);
-    delDispReq.input('code', sql.VarChar(50), invCode);
-    await delDispReq.query(`
       DELETE FROM tblDisplaySales
       WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term) 
-        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
+        AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code);
     `);
 
     // 6. Recalculate and refresh tblTempSalesSummary for this terminal

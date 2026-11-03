@@ -37,11 +37,11 @@ const dbConfig = {
     trustServerCertificate: true,
   },
 
-  // Connection pool options for high performance in retail POS
+  // Connection pool options tuned for low-latency retail POS transactions
   pool: {
-    max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000,
+    max: 15,
+    min: 2, // Keep warm connections active to eliminate TCP/auth reconnect latency
+    idleTimeoutMillis: 60000,
   },
 
   // Connection timeout in milliseconds (8 seconds)

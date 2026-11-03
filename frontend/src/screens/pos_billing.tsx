@@ -220,6 +220,8 @@ export default function PosBillingScreen({
   const [skuDesc, setSkuDesc] = useState("");
   const [fastQty, setFastQty] = useState("1");
   const [fastDisc, setFastDisc] = useState("0.00");
+  const [fastDiscPerc, setFastDiscPerc] = useState("0");
+  const [salesMan, setSalesMan] = useState("UPS");
 
   // Numpad & Tender state
   const [numpadValue, setNumpadValue] = useState("");
@@ -306,6 +308,7 @@ export default function PosBillingScreen({
   // Centralized VB.NET App.config Integration
   const { config, isEnabled, getNum } = useAppConfig();
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
+  const [showMoreMenuModal, setShowMoreMenuModal] = useState<boolean>(false);
 
   // License validation states (tblMaCompany ValidateDate)
   const [licenseExpired, setLicenseExpired] = useState(false);
@@ -1384,8 +1387,7 @@ export default function PosBillingScreen({
         />
       )}
       {/* =========================================================================
-          TOP BAR: Brand, Stock count, Active Item Banner, Math Calc (-1 x 1.50 = -1.50),
-          Quick (+)/(-) buttons, Price Check, Keyboard toggle, Theme toggle, Terminal badge, Logout.
+          UNIFIED TOP BAR: Brand, Stock, SKU Code, Search Description, Fast Qty, Fast Disc, (+)/(-), Price Check, Scanner, Three-dot Menu
       ========================================================================= */}
       <View
         style={[
@@ -1396,20 +1398,21 @@ export default function PosBillingScreen({
           },
         ]}
       >
-        {/* Brand Logo & Stock Count */}
+        {/* Brand Logo */}
         <TouchableOpacity
           style={[styles.brandBadge, { backgroundColor: currentTheme.primary }]}
-          onPress={() => setShowThemeModal(true)}
+          onPress={() => setShowMoreMenuModal(true)}
           activeOpacity={0.8}
         >
           <MaterialCommunityIcons
             name="cart-variant"
-            size={20}
+            size={18}
             color="#ffffff"
           />
           <Text style={styles.brandBadgeText}>GM</Text>
         </TouchableOpacity>
 
+        {/* Stock Label */}
         <View style={styles.stockBox}>
           <Text
             style={[
@@ -1421,45 +1424,89 @@ export default function PosBillingScreen({
           </Text>
         </View>
 
-        {/* Active Item Banner */}
-        <View style={styles.activeBannerBox}>
-          <Text
-            style={[
-              styles.activeBannerText,
-              { color: currentTheme.primary, fontFamily: activeFontFamily },
-            ]}
-            numberOfLines={1}
-          >
-            {activeItem.name}
-          </Text>
+        {/* SKU Code Input (lifted next to Stock) */}
+        <View style={styles.skuCodeBox}>
+          <TextInput
+            ref={skuInputRef}
+            placeholder="SKU Code"
+            placeholderTextColor="#64748b"
+            style={styles.skuInput}
+            value={skuCode}
+            onChangeText={setSkuCode}
+            onSubmitEditing={handleSkuSubmit}
+          />
         </View>
 
-        {/* Math Calculation Display: 1 x 1.00 = 1.00 */}
-        <View style={styles.mathCalcBox}>
-          <Text
-            style={[
-              styles.mathCalcText,
-              { color: currentTheme.textDark, fontFamily: activeFontFamily },
-            ]}
-          >
-            {activeItem.qty} x {activeItem.price.toFixed(2)} ={" "}
-            {(activeItem.qty * activeItem.price).toFixed(2)}
-          </Text>
+        {/* Search items by description */}
+        <View style={styles.skuDescBox}>
+          <TextInput
+            placeholder="Search items by description..."
+            placeholderTextColor="#64748b"
+            style={styles.skuInput}
+            value={skuDesc}
+            onChangeText={setSkuDesc}
+            onSubmitEditing={handleSkuSubmit}
+          />
         </View>
+
+        {/* Fast Quantity Box (1) */}
+        <View style={styles.pillInputBox}>
+          <TextInput
+            style={styles.pillInput}
+            value={fastQty}
+            onChangeText={setFastQty}
+            keyboardType="numeric"
+            selectTextOnFocus
+          />
+        </View>
+
+        {/* Fast Disc % Box (0) */}
+        <View style={styles.pillInputBox}>
+          <TextInput
+            style={styles.pillInput}
+            value={fastDiscPerc}
+            onChangeText={setFastDiscPerc}
+            keyboardType="numeric"
+            selectTextOnFocus
+          />
+        </View>
+
+        {/* Fast Disc Amount Box (0.00) */}
+        <View style={[styles.pillInputBox, { width: 52 }]}>
+          <TextInput
+            style={styles.pillInput}
+            value={fastDisc}
+            onChangeText={setFastDisc}
+            keyboardType="numeric"
+            selectTextOnFocus
+          />
+        </View>
+
+        {/* SalesMan / Sales M Button */}
+        <TouchableOpacity
+          style={styles.salesManBtn}
+          onPress={() => {
+            const next = salesMan === "UPS" ? "CASHIER" : "UPS";
+            setSalesMan(next);
+          }}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.salesManBtnText}>Sales Man</Text>
+        </TouchableOpacity>
 
         {/* Plus / Minus Quick Buttons */}
         <TouchableOpacity
           style={[styles.qtyBtnPlus, { backgroundColor: currentTheme.primary }]}
           onPress={() => handleQtyChange(1)}
         >
-          <MaterialCommunityIcons name="plus" size={20} color="#ffffff" />
+          <MaterialCommunityIcons name="plus" size={26} color="#ffffff" />
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.qtyBtnMinus}
           onPress={() => handleQtyChange(-1)}
         >
-          <MaterialCommunityIcons name="minus" size={20} color="#ffffff" />
+          <MaterialCommunityIcons name="minus" size={26} color="#ffffff" />
         </TouchableOpacity>
 
         {/* Price Check Button */}
@@ -1477,89 +1524,26 @@ export default function PosBillingScreen({
         >
           <MaterialCommunityIcons
             name="keyboard-outline"
-            size={20}
+            size={22}
             color="#ffffff"
           />
         </TouchableOpacity>
 
-        {/* System App.config Manager Button */}
+        {/* Three-Dot / More Options Menu (Opens Config, Theme, Station info, Logout) */}
         <TouchableOpacity
-          style={[
-            styles.posThemeBtn,
-            {
-              backgroundColor: currentTheme.isDark ? "#334155" : "#f1f5f9",
-              borderColor: currentTheme.borderColor,
-            },
-          ]}
-          onPress={() => setShowConfigModal(true)}
+          style={styles.moreMenuBtn}
+          onPress={() => setShowMoreMenuModal(true)}
           activeOpacity={0.8}
         >
           <MaterialCommunityIcons
-            name="cog-outline"
-            size={18}
+            name="dots-vertical"
+            size={24}
             color={currentTheme.primary}
           />
-          <Text
-            style={[
-              styles.posThemeBtnText,
-              { color: currentTheme.textDark, fontFamily: activeFontFamily },
-            ]}
-          >
-            Config
-          </Text>
         </TouchableOpacity>
 
-        {/* Theme & Typography Customizer Button */}
-        <TouchableOpacity
-          style={[
-            styles.posThemeBtn,
-            {
-              backgroundColor: currentTheme.isDark ? "#334155" : "#f1f5f9",
-              borderColor: currentTheme.borderColor,
-            },
-          ]}
-          onPress={() => setShowThemeModal(true)}
-          activeOpacity={0.8}
-        >
-          <MaterialCommunityIcons
-            name="palette-outline"
-            size={18}
-            color={currentTheme.primary}
-          />
-          <Text
-            style={[
-              styles.posThemeBtnText,
-              { color: currentTheme.textDark, fontFamily: activeFontFamily },
-            ]}
-          >
-            Theme
-          </Text>
-        </TouchableOpacity>
-
-        {/* Station Badge */}
-        <View
-          style={[
-            styles.stationBadge,
-            {
-              backgroundColor: currentTheme.isDark ? "#1e293b" : "#f1f5f9",
-              borderColor: currentTheme.borderColor,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.stationBadgeText,
-              { color: currentTheme.textDark, fontFamily: activeFontFamily },
-            ]}
-          >
-            {terminalCode || "---"} • {cashierName || "CASHIER"}
-          </Text>
-        </View>
-
-        {/* Exit / Logout Power Icon */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
-          <MaterialCommunityIcons name="power" size={18} color="#ffffff" />
-        </TouchableOpacity>
+        {/* Trailing space */}
+        <View style={{ flex: 1 }} />
       </View>
 
       {/* License Expired Live Alert Banner */}
@@ -1567,7 +1551,7 @@ export default function PosBillingScreen({
         <View style={styles.posLicenseExpiredBanner}>
           <MaterialCommunityIcons
             name="alert-octagon"
-            size={18}
+            size={16}
             color="#ffffff"
           />
           <Text style={styles.posLicenseExpiredText}>
@@ -1582,66 +1566,6 @@ export default function PosBillingScreen({
           </TouchableOpacity>
         </View>
       )}
-
-      {/* =========================================================================
-          SEARCH & SKU BAR: SKU Code, Description, Fast Qty, TG / Sales M Tags
-      ========================================================================= */}
-      <View style={styles.skuBar}>
-        <View style={styles.skuCodeBox}>
-          <TextInput
-            ref={skuInputRef}
-            placeholder="SKU Code"
-            placeholderTextColor="#64748b"
-            style={styles.skuInput}
-            value={skuCode}
-            onChangeText={setSkuCode}
-            onSubmitEditing={handleSkuSubmit}
-          />
-        </View>
-
-        <View style={styles.skuDescBox}>
-          <TextInput
-            placeholder="Search items by description..."
-            placeholderTextColor="#64748b"
-            style={styles.skuInput}
-            value={skuDesc}
-            onChangeText={setSkuDesc}
-            onSubmitEditing={handleSkuSubmit}
-          />
-        </View>
-
-        {/* Fast Quantity Pill (1) */}
-        <View style={styles.pillInputBox}>
-          <TextInput
-            style={styles.pillInput}
-            value={fastQty}
-            onChangeText={setFastQty}
-            keyboardType="numeric"
-          />
-        </View>
-
-        {/* Quick Tag Pills */}
-        <TouchableOpacity style={styles.tagPillBlue}>
-          <Text style={styles.tagPillText}>JD</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.tagPillBlue}>
-          <Text style={styles.tagPillText}>Sales M</Text>
-        </TouchableOpacity>
-
-        <View style={styles.pillInputBox}>
-          <TextInput
-            style={styles.pillInput}
-            value={fastDisc}
-            onChangeText={setFastDisc}
-            keyboardType="numeric"
-          />
-        </View>
-
-        <TouchableOpacity style={styles.tagPillDark}>
-          <Text style={styles.tagPillDarkText}>TG</Text>
-        </TouchableOpacity>
-      </View>
 
       {/* =========================================================================
           MAIN WORKSPACE: LEFT (Cart Ledger + Controls) | RIGHT (Category Rail + Touch Items)
@@ -1666,6 +1590,22 @@ export default function PosBillingScreen({
                 { backgroundColor: currentTheme.tableHeaderBg },
               ]}
             >
+              <Text
+                style={[
+                  styles.thCell,
+                  {
+                    width: 28,
+                    textAlign: "left",
+                    paddingLeft: 2,
+                    color: currentTheme.tableHeaderColor,
+                    fontFamily: activeFontFamily,
+                    fontSize: 11,
+                    fontWeight: "900",
+                  },
+                ]}
+              >
+                S#
+              </Text>
               <Text
                 style={[
                   styles.thCell,
@@ -1798,6 +1738,23 @@ export default function PosBillingScreen({
                       <Text
                         style={[
                           styles.tdCell,
+                          {
+                            width: 28,
+                            textAlign: "left",
+                            paddingLeft: 2,
+                            fontSize: 11.5,
+                            fontWeight: "800",
+                            color: isSelected ? "#b91c1c" : "#0f172a",
+                            fontFamily: FONT_MONO,
+                          },
+                        ]}
+                      >
+                        {idx + 1}
+                      </Text>
+
+                      <Text
+                        style={[
+                          styles.tdCell,
                           styles.tdCode,
                           {
                             width: 90,
@@ -1887,41 +1844,31 @@ export default function PosBillingScreen({
               )}
             </ScrollView>
 
-            {/* Table Footer Totals Strip (Modern Metric Chips) */}
+            {/* Table Footer Totals Strip (Single-Line Compact Bar) */}
             <View style={styles.footerSummaryStrip}>
               <View style={styles.summaryChip}>
-                <Text style={styles.summaryChipLabel}>TOTAL</Text>
-                <Text style={styles.summaryChipVal}>
-                  ${subTotal.toFixed(2)}
-                </Text>
+                <Text style={styles.summaryChipLabel}>Total: </Text>
+                <Text style={styles.summaryChipVal}>${subTotal.toFixed(2)}</Text>
               </View>
               <View style={styles.summaryChip}>
-                <Text style={styles.summaryChipLabel}>ITEMS</Text>
+                <Text style={styles.summaryChipLabel}>Items: </Text>
                 <Text style={styles.summaryChipVal}>{totalQty.toFixed(0)}</Text>
               </View>
               <View style={styles.summaryChip}>
-                <Text style={styles.summaryChipLabel}>DISC</Text>
-                <Text style={styles.summaryChipVal}>
-                  ${totalDiscount.toFixed(2)}
-                </Text>
+                <Text style={styles.summaryChipLabel}>Disc: </Text>
+                <Text style={styles.summaryChipVal}>${totalDiscount.toFixed(2)}</Text>
               </View>
               <View style={styles.summaryChip}>
-                <Text style={styles.summaryChipLabel}>SUBTOTAL</Text>
-                <Text style={styles.summaryChipVal}>
-                  ${subTotal.toFixed(2)}
-                </Text>
+                <Text style={styles.summaryChipLabel}>SubTotal: </Text>
+                <Text style={styles.summaryChipVal}>${subTotal.toFixed(2)}</Text>
               </View>
               <View style={styles.summaryChip}>
-                <Text style={styles.summaryChipLabel}>TAX</Text>
-                <Text style={styles.summaryChipVal}>
-                  ${taxAmount.toFixed(2)}
-                </Text>
+                <Text style={styles.summaryChipLabel}>Tax: </Text>
+                <Text style={styles.summaryChipVal}>${taxAmount.toFixed(2)}</Text>
               </View>
               <View style={styles.summaryChip}>
-                <Text style={styles.summaryChipLabel}>ROUND OFF</Text>
-                <Text style={styles.summaryChipVal}>
-                  ${roundOff.toFixed(2)}
-                </Text>
+                <Text style={styles.summaryChipLabel}>RoundOff: </Text>
+                <Text style={styles.summaryChipVal}>${roundOff.toFixed(2)}</Text>
               </View>
             </View>
           </View>
@@ -2371,17 +2318,19 @@ export default function PosBillingScreen({
             <TouchableOpacity
               style={[
                 styles.railArrowBtn,
-                groupPageIndex === 0 && styles.railArrowBtnDisabled,
+                groupPageIndex === 0
+                  ? styles.railArrowBtnDisabled
+                  : { backgroundColor: currentTheme.primary, borderColor: currentTheme.primary },
               ]}
               disabled={groupPageIndex === 0}
               onPress={() => setGroupPageIndex((prev) => Math.max(0, prev - 1))}
-              activeOpacity={0.7}
+              activeOpacity={0.8}
             >
               <View style={styles.railArrowContent}>
                 <MaterialCommunityIcons
                   name="chevron-up"
                   size={22}
-                  color={groupPageIndex === 0 ? "#cbd5e1" : currentTheme.primary}
+                  color={groupPageIndex === 0 ? "#94a3b8" : "#ffffff"}
                 />
               </View>
             </TouchableOpacity>
@@ -2464,8 +2413,9 @@ export default function PosBillingScreen({
             <TouchableOpacity
               style={[
                 styles.railArrowBtn,
-                groupPageIndex >= totalGroupPages - 1 &&
-                  styles.railArrowBtnDisabled,
+                groupPageIndex >= totalGroupPages - 1
+                  ? styles.railArrowBtnDisabled
+                  : { backgroundColor: currentTheme.primary, borderColor: currentTheme.primary },
               ]}
               disabled={groupPageIndex >= totalGroupPages - 1}
               onPress={() =>
@@ -2473,7 +2423,7 @@ export default function PosBillingScreen({
                   Math.min(totalGroupPages - 1, prev + 1),
                 )
               }
-              activeOpacity={0.7}
+              activeOpacity={0.8}
             >
               <View style={styles.railArrowContent}>
                 <MaterialCommunityIcons
@@ -2481,8 +2431,8 @@ export default function PosBillingScreen({
                   size={22}
                   color={
                     groupPageIndex >= totalGroupPages - 1
-                      ? "#cbd5e1"
-                      : currentTheme.primary
+                      ? "#94a3b8"
+                      : "#ffffff"
                   }
                 />
                 {totalGroupPages > 1 && (
@@ -2493,7 +2443,7 @@ export default function PosBillingScreen({
                         color:
                           groupPageIndex >= totalGroupPages - 1
                             ? "#94a3b8"
-                            : currentTheme.primary,
+                            : "#ffffff",
                       },
                     ]}
                   >
@@ -3100,7 +3050,113 @@ export default function PosBillingScreen({
         onSelectFont={handleSelectFont}
       />
 
-      {/* App Configuration Management Modal */}
+      {/* Three-Dot More Options Dropdown Modal */}
+      <Modal
+        visible={showMoreMenuModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowMoreMenuModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.menuModalBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowMoreMenuModal(false)}
+        >
+          <View
+            style={[
+              styles.menuModalCard,
+              {
+                backgroundColor: currentTheme.surface,
+                borderColor: currentTheme.borderColor,
+              },
+            ]}
+          >
+            {/* Station & Cashier Header */}
+            <View style={styles.menuModalHeader}>
+              <View style={styles.menuStationBadge}>
+                <MaterialCommunityIcons
+                  name="desktop-classic"
+                  size={16}
+                  color={currentTheme.primary}
+                />
+                <Text
+                  style={[
+                    styles.menuStationText,
+                    { color: currentTheme.textDark, fontFamily: activeFontFamily },
+                  ]}
+                >
+                  {terminalCode || "---"} • {cashierName || "CASHIER"}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowMoreMenuModal(false)} style={{ padding: 4 }}>
+                <MaterialCommunityIcons name="close" size={18} color="#64748b" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Menu Items */}
+            <TouchableOpacity
+              style={styles.menuModalItem}
+              onPress={() => {
+                setShowMoreMenuModal(false);
+                setShowConfigModal(true);
+              }}
+            >
+              <View style={[styles.menuItemIconCircle, { backgroundColor: "#eff6ff" }]}>
+                <MaterialCommunityIcons name="cog-outline" size={18} color="#2563eb" />
+              </View>
+              <View style={styles.menuItemTextCol}>
+                <Text style={[styles.menuItemTitle, { color: currentTheme.textDark }]}>
+                  System Configuration
+                </Text>
+                <Text style={styles.menuItemSub}>App.config parameters & POS settings</Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={18} color="#94a3b8" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuModalItem}
+              onPress={() => {
+                setShowMoreMenuModal(false);
+                setShowThemeModal(true);
+              }}
+            >
+              <View style={[styles.menuItemIconCircle, { backgroundColor: "#f0fdf4" }]}>
+                <MaterialCommunityIcons name="palette-outline" size={18} color="#16a34a" />
+              </View>
+              <View style={styles.menuItemTextCol}>
+                <Text style={[styles.menuItemTitle, { color: currentTheme.textDark }]}>
+                  Theme & Typography
+                </Text>
+                <Text style={styles.menuItemSub}>Colors, fonts and UI appearance</Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={18} color="#94a3b8" />
+            </TouchableOpacity>
+
+            <View style={styles.menuDivider} />
+
+            <TouchableOpacity
+              style={[styles.menuModalItem, { marginBottom: 0 }]}
+              onPress={() => {
+                setShowMoreMenuModal(false);
+                if (onLogout) onLogout();
+              }}
+            >
+              <View style={[styles.menuItemIconCircle, { backgroundColor: "#fef2f2" }]}>
+                <MaterialCommunityIcons name="power" size={18} color="#dc2626" />
+              </View>
+              <View style={styles.menuItemTextCol}>
+                <Text style={[styles.menuItemTitle, { color: "#dc2626" }]}>
+                  Exit POS / Switch Cashier
+                </Text>
+                <Text style={styles.menuItemSub}>Log out of current terminal</Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={18} color="#dc2626" />
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+            {/* App Configuration Management Modal */}
       <Modal
         visible={showConfigModal}
         transparent={false}
@@ -3150,10 +3206,93 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
+  moreMenuBtn: {
+    width: 38,
+    height: 34,
+    borderRadius: 6,
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  menuModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
+    justifyContent: "flex-start",
+    alignItems: "flex-end",
+    paddingTop: 42,
+    paddingRight: 10,
+  },
+  menuModalCard: {
+    width: 290,
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  menuModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+    marginBottom: 8,
+  },
+  menuStationBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  menuStationText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  menuModalItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 7,
+    paddingHorizontal: 6,
+    borderRadius: 6,
+    marginBottom: 4,
+    gap: 8,
+  },
+  menuItemIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  menuItemTextCol: {
+    flex: 1,
+  },
+  menuItemTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  menuItemSub: {
+    fontSize: 9.5,
+    color: "#64748b",
+    marginTop: 1,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: "#f1f5f9",
+    marginVertical: 4,
+  },
   screen: {
     flex: 1,
     backgroundColor: "#f4f6f8",
-    padding: 6,
+    padding: 2,
+    paddingTop: 1,
     fontFamily: FONT_FAMILY,
     ...(Platform.OS === "web"
       ? {
@@ -3167,15 +3306,15 @@ const styles = StyleSheet.create({
   // 1. TOP BAR
   // ---------------------------------------------------------------------------
   topBar: {
-    height: 48,
+    height: 42,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderRadius: 8,
+    borderRadius: 7,
     borderWidth: 1,
     borderColor: "#e2e8f0",
     paddingHorizontal: 8,
-    marginBottom: 6,
+    marginBottom: 3,
     gap: 6,
   },
 
@@ -3242,7 +3381,7 @@ const styles = StyleSheet.create({
   brandBadgeText: {
     color: "#ffffff",
     fontWeight: "800",
-    fontSize: 13,
+    fontSize: 11,
     fontFamily: FONT_FAMILY,
   },
   stockBox: {
@@ -3250,13 +3389,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e2e8f0",
     borderRadius: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     height: 34,
     justifyContent: "center",
   },
   stockLabel: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#334155",
     fontFamily: FONT_FAMILY,
   },
@@ -3265,13 +3404,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0fdf4",
     borderWidth: 1,
     borderColor: "#bbf7d0",
-    borderRadius: 6,
-    height: 34,
+    borderRadius: 4,
+    height: 26,
     justifyContent: "center",
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
   },
   activeBannerText: {
-    fontSize: 13,
+    fontSize: 11.5,
     fontWeight: "800",
     color: "#155d36",
     fontFamily: FONT_FAMILY,
@@ -3281,20 +3420,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
     borderWidth: 1,
     borderColor: "#e2e8f0",
-    borderRadius: 6,
-    height: 34,
+    borderRadius: 4,
+    height: 26,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
   },
   mathCalcText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
     color: "#0f172a",
     fontFamily: FONT_MONO,
   },
   qtyBtnPlus: {
-    width: 36,
+    width: 44,
     height: 34,
     borderRadius: 6,
     backgroundColor: "#155d36",
@@ -3302,7 +3441,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   qtyBtnMinus: {
-    width: 36,
+    width: 44,
     height: 34,
     borderRadius: 6,
     backgroundColor: "#dc2626",
@@ -3312,20 +3451,20 @@ const styles = StyleSheet.create({
   priceCheckBtn: {
     backgroundColor: "#f59e0b",
     borderRadius: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
     height: 34,
     justifyContent: "center",
     alignItems: "center",
   },
   priceCheckText: {
     color: "#ffffff",
-    fontSize: 10,
-    fontWeight: "700",
+    fontSize: 10.5,
+    fontWeight: "900",
     textAlign: "center",
     lineHeight: 12,
   },
   keyboardToggleBtn: {
-    width: 36,
+    width: 40,
     height: 34,
     borderRadius: 6,
     backgroundColor: "#0284c7",
@@ -3360,46 +3499,46 @@ const styles = StyleSheet.create({
   // 2. SEARCH & SKU BAR
   // ---------------------------------------------------------------------------
   skuBar: {
-    height: 42,
+    height: 32,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: "#e2e8f0",
-    paddingHorizontal: 8,
-    marginBottom: 6,
+    paddingHorizontal: 6,
+    marginBottom: 2,
     gap: 6,
   },
   skuCodeBox: {
-    width: 140,
-    height: 32,
+    width: 130,
+    height: 34,
     backgroundColor: "#f8fafc",
     borderRadius: 6,
     borderWidth: 1,
     borderColor: "#cbd5e1",
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     justifyContent: "center",
   },
   skuDescBox: {
-    flex: 1,
-    height: 32,
+    width: 260,
+    height: 34,
     backgroundColor: "#f8fafc",
     borderRadius: 6,
     borderWidth: 1,
     borderColor: "#cbd5e1",
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     justifyContent: "center",
   },
   skuInput: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#0f172a",
     fontFamily: FONT_FAMILY,
     outlineStyle: "none" as any,
   },
   pillInputBox: {
-    width: 50,
-    height: 32,
+    width: 48,
+    height: 34,
     backgroundColor: "#fef2f2",
     borderRadius: 6,
     borderWidth: 1,
@@ -3408,11 +3547,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   pillInput: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     color: "#dc2626",
     textAlign: "center",
     outlineStyle: "none" as any,
+  },
+  salesManBtn: {
+    height: 34,
+    paddingHorizontal: 10,
+    backgroundColor: "#ffffff",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  salesManBtnText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#334155",
+    fontFamily: FONT_FAMILY,
   },
   tagPillBlue: {
     backgroundColor: "#e0f2fe",
@@ -3449,7 +3604,7 @@ const styles = StyleSheet.create({
   workspace: {
     flex: 1,
     flexDirection: "row",
-    gap: 6,
+    gap: 3,
   },
 
   // ---------------------------------------------------------------------------
@@ -3458,7 +3613,7 @@ const styles = StyleSheet.create({
   leftPanel: {
     flex: 1.85, // Dominant space for Cart Grid & controls (Barcode-first POS)
     flexDirection: "column",
-    gap: 6,
+    gap: 3,
   },
   tableCard: {
     flex: 1,
@@ -3474,11 +3629,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
     borderBottomWidth: 1,
     borderBottomColor: "#e2e8f0",
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    paddingLeft: 4,
+    paddingRight: 8,
+    paddingVertical: 5,
   },
   thCell: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "800",
     color: "#334155",
     fontFamily: FONT_FAMILY,
@@ -3495,8 +3651,9 @@ const styles = StyleSheet.create({
   tableRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingLeft: 4,
+    paddingRight: 8,
+    paddingVertical: 4.5,
     borderBottomWidth: 1,
     borderBottomColor: "#f1f5f9",
   },
@@ -3524,7 +3681,7 @@ const styles = StyleSheet.create({
   },
 
   tdCell: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#0f172a",
     fontFamily: FONT_FAMILY,
   },
@@ -3588,39 +3745,38 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
     borderTopWidth: 1,
     borderTopColor: "#e2e8f0",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    gap: 5,
   },
   summaryChip: {
     flex: 1,
+    flexDirection: "row",
+    height: 28,
     backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 6,
+    borderColor: "#cbd5e1",
+    borderRadius: 5,
+    paddingHorizontal: 8,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
+    shadowOpacity: 0.04,
     shadowRadius: 1,
     elevation: 1,
   },
   summaryChipLabel: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: "#64748b",
-    letterSpacing: 0.5,
+    fontSize: 11.5,
+    fontWeight: "800",
+    color: "#475569",
     fontFamily: FONT_FAMILY,
   },
   summaryChipVal: {
-    fontSize: 12,
-    fontWeight: "800",
+    fontSize: 13,
+    fontWeight: "900",
     color: "#0f172a",
     fontFamily: FONT_MONO,
-    marginTop: 1,
   },
   summaryCell: {
     fontSize: 11,

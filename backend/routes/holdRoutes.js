@@ -524,30 +524,35 @@ router.post('/:holdNo/release', async (req, res) => {
       clearReq.input('term', sql.VarChar(20), termCode);
       await clearReq.query(`DELETE FROM tblTempSales WHERE RTRIM(LTRIM(TerminalCode)) = @term`);
 
-      // Populate tblTempSales so persistence works after release
-      for (const it of cartItems) {
+      // Populate tblTempSales in a single batch insert so persistence works instantly without round-trip latency
+      if (cartItems.length > 0) {
         const insTemp = new sql.Request(transaction);
         insTemp.input('term', sql.VarChar(20), termCode);
-        insTemp.input('code', sql.VarChar(50), it.code);
-        insTemp.input('desc', sql.VarChar(200), it.description);
-        insTemp.input('qty', sql.Decimal(18, 2), it.qty);
-        insTemp.input('price', sql.Decimal(18, 2), it.price);
-        insTemp.input('charge', sql.Decimal(18, 4), it.price);
-        insTemp.input('disc', sql.Decimal(18, 2), it.disc);
-        insTemp.input('netDisc', sql.Decimal(18, 2), it.disc);
-        insTemp.input('amt', sql.Decimal(18, 2), it.amount);
-        insTemp.input('promoName', sql.VarChar(100), it.code);
+
+        const valueClauses = cartItems.map((it, i) => {
+          insTemp.input(`code_${i}`, sql.VarChar(50), it.code);
+          insTemp.input(`desc_${i}`, sql.VarChar(200), it.description);
+          insTemp.input(`qty_${i}`, sql.Decimal(18, 2), it.qty);
+          insTemp.input(`price_${i}`, sql.Decimal(18, 2), it.price);
+          insTemp.input(`charge_${i}`, sql.Decimal(18, 4), it.price);
+          insTemp.input(`disc_${i}`, sql.Decimal(18, 2), it.disc);
+          insTemp.input(`netDisc_${i}`, sql.Decimal(18, 2), it.disc);
+          insTemp.input(`amt_${i}`, sql.Decimal(18, 2), it.amount);
+          insTemp.input(`promoName_${i}`, sql.VarChar(100), it.code);
+
+          return `(
+            @term, @code_${i}, @desc_${i}, @qty_${i}, '', '', '',
+            0, @price_${i}, @charge_${i}, @disc_${i}, @netDisc_${i}, 0, 0, @amt_${i},
+            '', '', @promoName_${i}, 0, '0', ''
+          )`;
+        }).join(',\n');
 
         await insTemp.query(`
           INSERT INTO tblTempSales (
             TerminalCode, InventoryCode, Description, Qty, Department, Brand, Category,
             AverageCost, Price, Charge, Discount, NetDiscount, GstPrec, GST, Amount,
             DiscountPriceCode, Salesman, PromoName, MemDiscount, ItemType, MemName
-          ) VALUES (
-            @term, @code, @desc, @qty, '', '', '',
-            0, @price, @charge, @disc, @netDisc, 0, 0, @amt,
-            '', '', @promoName, 0, '0', ''
-          )
+          ) VALUES ${valueClauses}
         `);
       }
     }
