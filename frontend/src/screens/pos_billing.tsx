@@ -223,6 +223,15 @@ export default function PosBillingScreen({
   const [fastDiscPerc, setFastDiscPerc] = useState("0");
   const [salesMan, setSalesMan] = useState("UPS");
 
+  // VB.NET Item-Entry Pipeline State
+  const [descSearchResults, setDescSearchResults] = useState<any[]>([]);
+  const [showDescDropdown, setShowDescDropdown] = useState<boolean>(false);
+  const [isSearchingDesc, setIsSearchingDesc] = useState<boolean>(false);
+  const [isScaleLockedQty, setIsScaleLockedQty] = useState<boolean>(false);
+  const [showSalesmanModal, setShowSalesmanModal] = useState<boolean>(false);
+  const [tempSalesmanCode, setTempSalesmanCode] = useState<string>("");
+  const [pendingItemAdd, setPendingItemAdd] = useState<any>(null);
+
   // Numpad & Tender state
   const [numpadValue, setNumpadValue] = useState("");
   const [tenderAmount, setTenderAmount] = useState("0.00");
@@ -579,7 +588,7 @@ export default function PosBillingScreen({
   // ---------------------------------------------------------------------------
   // CART OPERATIONS
   // ---------------------------------------------------------------------------
-  const handleAddItem = async (item: TouchItem) => {
+  const handleAddItem = async (item: TouchItem, explicitQty?: number, explicitPrice?: number, explicitDesc?: string, explicitSalesman?: string) => {
     // 1. License Validation: Block item additions if license ended
     if (licenseExpired) {
       setShowLicenseModal(true);
@@ -591,8 +600,11 @@ export default function PosBillingScreen({
       return;
     }
 
-    const qtyToAdd = parseFloat(fastQty) || 1;
+    const qtyToAdd = explicitQty !== undefined ? explicitQty : (parseFloat(fastQty) || 1);
     const discToAdd = parseFloat(fastDisc) || 0;
+    const finalPrice = explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
+    const finalDesc = explicitDesc || item.Description;
+    const finalSalesman = explicitSalesman || salesMan || "UPS";
 
     // App.config Conditions: AbovePrice, Aboveqty, ISValueAbove validation alerts
     const isValueAboveCheck = isEnabled("ISValueAbove");
@@ -600,8 +612,8 @@ export default function PosBillingScreen({
     const aboveQtyLimit = getNum("Aboveqty", 10);
 
     if (isValueAboveCheck || abovePriceLimit > 0) {
-      if (item.SellingPrice > abovePriceLimit) {
-        const warnMsg = `Item Price ($${item.SellingPrice.toFixed(2)}) exceeds configured threshold ($${abovePriceLimit.toFixed(2)}) [AbovePrice]. Supervisor authorization required.`;
+      if (finalPrice > abovePriceLimit) {
+        const warnMsg = `Item Price ($${finalPrice.toFixed(2)}) exceeds configured threshold ($${abovePriceLimit.toFixed(2)}) [AbovePrice]. Supervisor authorization required.`;
         showAlert("High Value Warning", warnMsg, "warning");
       }
     }
@@ -612,9 +624,9 @@ export default function PosBillingScreen({
     }
 
     setActiveItem({
-      name: item.Description,
+      name: finalDesc,
       qty: qtyToAdd,
-      price: item.SellingPrice,
+      price: finalPrice,
       stock: 0,
     });
 
@@ -641,12 +653,12 @@ export default function PosBillingScreen({
         const newItem: CartItem = {
           id: Date.now().toString() + Math.random().toString(),
           code: item.InventoryCode,
-          description: item.Description,
+          description: finalDesc,
           qty: qtyToAdd,
-          price: item.SellingPrice,
+          price: finalPrice,
           disc: discToAdd,
           amount: parseFloat(
-            (qtyToAdd * item.SellingPrice - discToAdd).toFixed(2),
+            (qtyToAdd * finalPrice - discToAdd).toFixed(2),
           ),
           gst: 0.0,
           uom: item.UOM || "PCS",
@@ -669,7 +681,10 @@ export default function PosBillingScreen({
           inventoryCode: item.InventoryCode,
           qty: qtyToAdd,
           disc: discToAdd,
-          overridePrice: item.SellingPrice,
+          overridePrice: finalPrice,
+          description: finalDesc,
+          salesman: finalSalesman,
+          uom: item.UOM || "PCS",
         }),
       }).catch(() => {});
     } catch {}
@@ -1217,7 +1232,43 @@ export default function PosBillingScreen({
   };
 
   // SKU Bar Enter Key submission
-  const handleSkuSubmit = async () => {
+  // ---------------------------------------------------------------------------
+  // DESCRIPTION SEARCH DEBOUNCE (Live lookup across tblInventory)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!skuDesc || skuDesc.trim().length < 2) {
+      setDescSearchResults([]);
+      setShowDescDropdown(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingDesc(true);
+        const res = await fetch(`${API_URL}/api/inventory/search-desc?q=${encodeURIComponent(skuDesc.trim())}&limit=12`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.items)) {
+          setDescSearchResults(data.items);
+          setShowDescDropdown(data.items.length > 0);
+        } else {
+          setDescSearchResults([]);
+          setShowDescDropdown(false);
+        }
+      } catch {
+        setDescSearchResults([]);
+        setShowDescDropdown(false);
+      } finally {
+        setIsSearchingDesc(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [skuDesc]);
+
+  // ---------------------------------------------------------------------------
+  // COMPLETE VB.NET POS ITEM LOOKUP & PROCESSING PIPELINE (txtInventoryCode_Leave)
+  // ---------------------------------------------------------------------------
+  const processItemLookup = async (codeToLookup: string, forcedSalesman?: string) => {
     if (licenseExpired) {
       setShowLicenseModal(true);
       return;
@@ -1228,32 +1279,108 @@ export default function PosBillingScreen({
       return;
     }
 
-    if (!skuCode.trim() && !skuDesc.trim()) return;
-    const searchVal = (skuCode || skuDesc).trim().toLowerCase();
+    const rawInput = (codeToLookup || "").trim();
+    if (!rawInput) return;
 
-    const match = items.find(
-      (it) =>
-        it.InventoryCode.toLowerCase() === searchVal ||
-        it.Description.toLowerCase().includes(searchVal),
-    );
+    try {
+      // 1. Calculate current cart quantity for negative stock calculation
+      const currentCartItems = cart.map((c) => ({
+        InventoryCode: c.code,
+        Qty: c.qty,
+      }));
 
-    if (match) {
-      handleAddItem(match);
-      setSkuCode("");
-      setSkuDesc("");
+      // 2. Call unified backend /api/inventory/lookup
+      const res = await fetch(`${API_URL}/api/inventory/lookup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rawInput: rawInput,
+          currentQty: fastQty,
+          currentCartItems: currentCartItems,
+          locationCode: "HQ",
+          salesmanCode: forcedSalesman || salesMan || "UPS",
+          allowWeighingScale: true,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        showAlert("Invalid Item", data.message || "Item not found in inventory.", "error");
+        setSkuCode("");
+        return;
+      }
+
+      // Check salesman requirement
+      if (data.requiresSalesman) {
+        setPendingItemAdd(data);
+        setTempSalesmanCode(salesMan || "");
+        setShowSalesmanModal(true);
+        return;
+      }
+
+      // Complete cart insertion
+      finalizeValidatedItemAdd(data, forcedSalesman);
+    } catch (err: any) {
+      showAlert("Lookup Error", err.message || "Failed to process item code.", "error");
+    }
+  };
+
+  const finalizeValidatedItemAdd = (data: any, chosenSalesman?: string) => {
+    const finalSalesman = chosenSalesman || data.salesmanCode || salesMan || "UPS";
+    const itemData = data.item;
+    const finalQty = Number(data.quantity) || 1;
+    const finalPrice = Number(data.price) !== undefined ? Number(data.price) : Number(itemData.SellingPrice);
+
+    // Update active item HUD
+    setActiveItem({
+      name: itemData.Description,
+      qty: finalQty,
+      price: finalPrice,
+      stock: data.stock !== null ? Number(data.stock) : 0,
+    });
+
+    // Check if weighing scale locked manual quantity
+    if (data.isWeighingScale) {
+      setIsScaleLockedQty(true);
     } else {
-      const customItem: TouchItem = {
-        GroupCode: selectedGroup || "MISC",
-        InventoryCode: skuCode || "999999",
-        SortOrder: 99,
-        Description: skuDesc ? skuDesc.toUpperCase() : `ITEM #${skuCode}`,
-        SellingPrice: 1.0,
-        RetailPrice: 1.0,
-        UOM: "PCS",
-      };
-      handleAddItem(customItem);
-      setSkuCode("");
-      setSkuDesc("");
+      setIsScaleLockedQty(false);
+    }
+
+    // Add to cart with validated parameters
+    const touchItem: TouchItem = {
+      GroupCode: itemData.GroupCode || "GENERAL",
+      InventoryCode: itemData.InventoryCode,
+      SortOrder: 0,
+      Description: itemData.Description,
+      SellingPrice: finalPrice,
+      RetailPrice: Number(itemData.RetailPrice) || finalPrice,
+      UOM: itemData.UOM || "PCS",
+    };
+
+    handleAddItem(touchItem, finalQty, finalPrice, itemData.Description, finalSalesman);
+
+    // Reset inputs
+    setSkuCode("");
+    setSkuDesc("");
+    setShowDescDropdown(false);
+    setFastQty("1");
+    setFastDisc("0.00");
+    setFastDiscPerc("0");
+    skuInputRef.current?.focus();
+  };
+
+  const handleSkuSubmit = async () => {
+    if (skuCode.trim()) {
+      await processItemLookup(skuCode.trim());
+    } else if (skuDesc.trim()) {
+      // If user presses enter on description input without dropdown selection
+      if (descSearchResults.length > 0) {
+        const firstMatch = descSearchResults[0];
+        await processItemLookup(firstMatch.InventoryCode);
+      } else {
+        await processItemLookup(skuDesc.trim());
+      }
     }
   };
 
@@ -1438,23 +1565,91 @@ export default function PosBillingScreen({
         </View>
 
         {/* Search items by description */}
-        <View style={styles.skuDescBox}>
+        <View style={[styles.skuDescBox, { zIndex: 9999 }]}>
           <TextInput
             placeholder="Search items by description..."
             placeholderTextColor="#64748b"
             style={styles.skuInput}
             value={skuDesc}
-            onChangeText={setSkuDesc}
+            onChangeText={(t) => {
+              setSkuDesc(t);
+              if (!showDescDropdown) setShowDescDropdown(true);
+            }}
             onSubmitEditing={handleSkuSubmit}
           />
+          {isSearchingDesc && (
+            <ActivityIndicator size="small" color="#64748b" style={{ position: "absolute", right: 8 }} />
+          )}
+
+          {/* Description Live Search Autocomplete Dropdown */}
+          {showDescDropdown && descSearchResults.length > 0 && (
+            <View
+              style={{
+                position: "absolute",
+                top: 36,
+                left: 0,
+                right: 0,
+                maxHeight: 280,
+                backgroundColor: "#ffffff",
+                borderWidth: 1,
+                borderColor: "#cbd5e1",
+                borderRadius: 6,
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.15,
+                shadowRadius: 8,
+                elevation: 10,
+                zIndex: 99999,
+                overflow: "hidden",
+              }}
+            >
+              <ScrollView keyboardShouldPersistTaps="handled">
+                {descSearchResults.map((prod) => (
+                  <TouchableOpacity
+                    key={prod.InventoryCode}
+                    style={{
+                      paddingVertical: 8,
+                      paddingHorizontal: 10,
+                      borderBottomWidth: 1,
+                      borderBottomColor: "#f1f5f9",
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                    onPress={() => {
+                      setShowDescDropdown(false);
+                      setSkuDesc("");
+                      processItemLookup(prod.InventoryCode);
+                    }}
+                  >
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#1e293b" }} numberOfLines={1}>
+                        {prod.Description}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: "#64748b" }}>
+                        SKU: {prod.InventoryCode} | UOM: {prod.UOM || "PCS"}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 12, fontWeight: "800", color: "#15803d" }}>
+                      ${Number(prod.SellingPrice).toFixed(2)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
         </View>
 
-        {/* Fast Quantity Box (1) */}
-        <View style={styles.pillInputBox}>
+        {/* Fast Quantity Box (1) - Locked if Weighing scale item */}
+        <View style={[styles.pillInputBox, isScaleLockedQty && { backgroundColor: "#f1f5f9", opacity: 0.7 }]}>
           <TextInput
             style={styles.pillInput}
             value={fastQty}
-            onChangeText={setFastQty}
+            editable={!isScaleLockedQty}
+            onChangeText={(txt) => {
+              if (isScaleLockedQty) return;
+              setFastQty(txt);
+            }}
             keyboardType="numeric"
             selectTextOnFocus
           />
@@ -1486,12 +1681,12 @@ export default function PosBillingScreen({
         <TouchableOpacity
           style={styles.salesManBtn}
           onPress={() => {
-            const next = salesMan === "UPS" ? "CASHIER" : "UPS";
-            setSalesMan(next);
+            setTempSalesmanCode(salesMan || "");
+            setShowSalesmanModal(true);
           }}
           activeOpacity={0.8}
         >
-          <Text style={styles.salesManBtnText}>Sales Man</Text>
+          <Text style={styles.salesManBtnText}>{salesMan ? `SM: ${salesMan}` : "Sales Man"}</Text>
         </TouchableOpacity>
 
         {/* Plus / Minus Quick Buttons */}
@@ -3006,6 +3201,96 @@ export default function PosBillingScreen({
         theme={currentTheme}
         primaryColor={currentTheme.primary}
       />
+
+      {/* VB.NET Mandatory / Item-Wise Salesman Modal */}
+      <Modal
+        visible={showSalesmanModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setShowSalesmanModal(false);
+          setPendingItemAdd(null);
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { maxWidth: 380 }]}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>Select Salesman</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowSalesmanModal(false);
+                  setPendingItemAdd(null);
+                }}
+              >
+                <MaterialCommunityIcons name="close" size={20} color="#475569" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, color: "#475569", marginVertical: 12 }}>
+              {pendingItemAdd
+                ? `Item [ ${pendingItemAdd.item.Description} ] requires a valid Salesman code:`
+                : "Enter Salesman Code to assign for sales transactions:"}
+            </Text>
+
+            <TextInput
+              style={[styles.modalTextInput, { textTransform: "uppercase" }]}
+              placeholder="Enter Salesman Code (e.g. UPS, SM01)..."
+              placeholderTextColor="#94a3b8"
+              autoFocus
+              value={tempSalesmanCode}
+              onChangeText={(t) => setTempSalesmanCode(t.toUpperCase())}
+            />
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                style={styles.modalSecondaryBtn}
+                onPress={() => {
+                  setShowSalesmanModal(false);
+                  setPendingItemAdd(null);
+                }}
+              >
+                <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalPrimaryBtn, { backgroundColor: currentTheme.primary }]}
+                onPress={async () => {
+                  const sm = tempSalesmanCode.trim();
+                  if (!sm) {
+                    showAlert("Required", "Please enter a Salesman code.", "warning");
+                    return;
+                  }
+
+                  try {
+                    const res = await fetch(`${API_URL}/api/inventory/validate-salesman`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ salesmanCode: sm }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.success || !data.isValid) {
+                      showAlert("Invalid Salesman", "Salesman not found in system.", "error");
+                      return;
+                    }
+
+                    setSalesMan(data.salesman.SalesManCode);
+                    setShowSalesmanModal(false);
+
+                    if (pendingItemAdd) {
+                      finalizeValidatedItemAdd(pendingItemAdd, data.salesman.SalesManCode);
+                      setPendingItemAdd(null);
+                    }
+                  } catch (err: any) {
+                    showAlert("Validation Error", err.message || "Failed to validate salesman.", "error");
+                  }
+                }}
+              >
+                <Text style={styles.modalPrimaryBtnText}>Assign Salesman</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* F6 Hold & F7 Release Modals (Last Transaction Header/Detail Flow) */}
       <HoldModals

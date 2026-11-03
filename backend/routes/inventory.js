@@ -209,4 +209,237 @@ router.get('/image/:inventoryCode', async (req, res) => {
   }
 });
 
+// ------------------------------------------------------------------------------
+// POST /api/inventory/lookup
+// Complete VB.NET item pipeline:
+// Parses Qty prefix (*), Weighing scale barcodes (20...), resolves Barcode/Carton,
+// validates InActive/Discontinued/Voucher/ZeroPrice/QOH stock, and returns item package.
+// ------------------------------------------------------------------------------
+router.post('/lookup', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unavailable' });
+
+    const { rawCode, currentQty, locationCode = 'HQ' } = req.body;
+    if (!rawCode || !String(rawCode).trim()) {
+      return res.status(400).json({ success: false, message: 'Item code is required' });
+    }
+
+    const posItemService = require('../services/posItemService');
+
+    // 1. Check quantity prefix (e.g. 5*8888001)
+    const { code: unprefixCode, qty: parsedQty } = posItemService.parseQtyPrefix(rawCode, currentQty);
+
+    // 2. Check weighing scale barcodes (20...)
+    const allowScale = configService.get('ALLOWWEIGHINSCALE') !== '0';
+    const scaleRes = posItemService.parseWeighingScaleBarcode(unprefixCode, allowScale);
+    const searchCode = scaleRes.code;
+
+    // 3. Resolve SKU / Barcode / Carton Barcode
+    const resolveRes = await posItemService.resolveInventoryCode(pool, searchCode);
+    if (!resolveRes.resolvedCode) {
+      return res.status(404).json({
+        success: false,
+        message: 'Inventory code not found.',
+        errorCode: 'ITEM_NOT_FOUND',
+      });
+    }
+
+    // 4. Retrieve complete master inventory record
+    const item = await posItemService.getInventoryMaster(pool, resolveRes.resolvedCode);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Inventory record not found in tblInventory.',
+        errorCode: 'ITEM_NOT_FOUND',
+      });
+    }
+
+    // 5. VB.NET Item Validations
+    // Check A: BCRS Deposit directly scanned
+    if (item.Description.toUpperCase() === 'BCRS DEPOSIT') {
+      return res.status(400).json({
+        success: false,
+        message: 'This Item is for BCRS Deposit. Unable to Scan directly.',
+        errorCode: 'BCRS_DEPOSIT_DIRECT',
+      });
+    }
+
+    // Check B: Discontinued
+    if (Boolean(item.Discontinued)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Item is Discontinued. Not Allowed to do any Transaction!',
+        errorCode: 'ITEM_DISCONTINUED',
+      });
+    }
+
+    // Check C: InActive
+    if (Boolean(item.InActive)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Item is InActive. Not Allowed to do any Transaction!',
+        errorCode: 'ITEM_INACTIVE',
+      });
+    }
+
+    // Check D: Pricing determination
+    let price = Number(item.RetailPrice);
+    if (resolveRes.isCarton) {
+      price = resolveRes.unitPriceFromCarton;
+    } else if (scaleRes.isScale && scaleRes.encodedPrice > 0) {
+      price = scaleRes.encodedPrice;
+    }
+
+    // Check E: Zero Price allowance
+    const allowZero = Boolean(item.AllowZeroPrice);
+    if (price <= 0 && !allowZero && !Boolean(item.OpenItem) && !Boolean(item.AllowPaymodeCommision)) {
+      if (item.UOM !== 'KG') {
+        return res.status(400).json({
+          success: false,
+          message: 'Please set the price. Zero price not allowed for this item.',
+          errorCode: 'ZERO_PRICE_NOT_ALLOWED',
+        });
+      }
+    }
+
+    // 6. QOH Stock Check
+    const qoh = await posItemService.getItemStock(pool, item.InventoryCode, locationCode);
+
+    // 7. Determine fractional UOM allowance
+    const allowFraction = (item.UOM === 'KG' || item.UOM === 'MTR');
+    let effectiveQty = parsedQty;
+    if (resolveRes.isCarton) {
+      effectiveQty = parsedQty * resolveRes.cartonQty;
+    } else if (scaleRes.isScale && scaleRes.weightKg) {
+      effectiveQty = scaleRes.weightKg;
+    }
+
+    return res.status(200).json({
+      success: true,
+      item: {
+        InventoryCode: item.InventoryCode,
+        Description: item.Description,
+        ShortDescription: item.ShortDescription,
+        RetailPrice: Number(item.RetailPrice),
+        SellingPrice: Number(item.SellingPrice),
+        Price: price,
+        UOM: item.UOM,
+        AllowFraction: allowFraction,
+        IsScale: scaleRes.isScale,
+        LockQty: scaleRes.lockQty || false,
+        Qty: effectiveQty,
+        IsCarton: resolveRes.isCarton,
+        CartonQty: resolveRes.cartonQty || 1,
+        CartonPrice: resolveRes.cartonPrice || 0,
+        DepartmentCode: item.DepartmentCode,
+        CategoryCode: item.CategoryCode,
+        BrandCode: item.BrandCode,
+        AverageCost: Number(item.AverageCost),
+        AllowNegativeStock: Boolean(item.AllowNegativeStock),
+        SalesmanRequired: Boolean(item.SalesmanRequired),
+        OpenItem: Boolean(item.OpenItem),
+        ChangeDescription: Boolean(item.ChangeDescription),
+        IsFixedPrice: Boolean(item.IsFixedPrice),
+        AllowZeroPrice: allowZero,
+        AllowMemberPrice: Boolean(item.AllowMemberPrice),
+        NonTaxItem: Boolean(item.NonTaxItem),
+        OutputTax: Number(item.OutputTax),
+        WebInfo: Boolean(item.WebInfo),
+        QOH: qoh,
+      },
+    });
+  } catch (err) {
+    console.error('❌ [INVENTORY LOOKUP ERROR]:', err.message);
+    return res.status(500).json({ success: false, message: 'Lookup error: ' + err.message });
+  }
+});
+
+// ------------------------------------------------------------------------------
+// GET /api/inventory/search-desc
+// Live full-text search against tblInventory master for description lookup
+// ------------------------------------------------------------------------------
+router.get('/search-desc', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unavailable' });
+
+    const q = String(req.query.q || '').trim();
+    if (!q || q.length < 1) {
+      return res.status(200).json({ success: true, items: [] });
+    }
+
+    const request = pool.request();
+    request.input('searchTerm', sql.VarChar(100), `%${q}%`);
+    request.input('exactTerm', sql.VarChar(50), q);
+
+    const result = await request.query(`
+      SELECT TOP 25
+        RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+        RTRIM(LTRIM(Description)) AS Description,
+        ISNULL(SellingPrice, 0) AS SellingPrice,
+        ISNULL(RetailPrice, 0) AS RetailPrice,
+        RTRIM(LTRIM(ISNULL(UOM, 'PCS'))) AS UOM,
+        RTRIM(LTRIM(ISNULL(DepartmentCode, ''))) AS DepartmentCode,
+        ISNULL(OpenItem, 0) AS OpenItem,
+        ISNULL(SalesmanRequired, 0) AS SalesmanRequired
+      FROM tblInventory
+      WHERE InActive = 0 AND Discontinued = 0
+        AND (
+          Description LIKE @searchTerm 
+          OR UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@exactTerm)
+          OR InventoryCode LIKE @searchTerm
+        )
+      ORDER BY 
+        CASE WHEN UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@exactTerm) THEN 0
+             WHEN Description LIKE @exactTerm + '%' THEN 1
+             ELSE 2 END,
+        Description
+    `);
+
+    return res.status(200).json({
+      success: true,
+      count: result.recordset.length,
+      items: result.recordset,
+    });
+  } catch (err) {
+    console.error('❌ [DESC SEARCH ERROR]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ------------------------------------------------------------------------------
+// POST /api/inventory/validate-salesman
+// Validates salesman code against tblInvSalesMan and tblMaSalesMan
+// ------------------------------------------------------------------------------
+router.post('/validate-salesman', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unavailable' });
+
+    const { salesmanCode } = req.body;
+    if (!salesmanCode || !String(salesmanCode).trim()) {
+      return res.status(400).json({ success: false, message: 'Salesman code required' });
+    }
+
+    const posItemService = require('../services/posItemService');
+    const sm = await posItemService.validateSalesman(pool, salesmanCode);
+
+    if (sm) {
+      return res.status(200).json({
+        success: true,
+        salesman: sm,
+      });
+    } else {
+      return res.status(404).json({
+        success: false,
+        message: 'Please check the sales man code. Not found in master.',
+      });
+    }
+  } catch (err) {
+    console.error('❌ [SALESMAN VALIDATE ERROR]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;

@@ -114,6 +114,9 @@ router.post('/temp-sales/add', async (req, res) => {
       disc = 0,
       overridePrice,
       promoName,
+      salesman,
+      description,
+      uom,
     } = req.body;
 
     const termCode = getCleanTerminalCode(terminalCode);
@@ -212,9 +215,12 @@ router.post('/temp-sales/add', async (req, res) => {
       const gstAmount = parseFloat(((lineTotal * gstPerc) / (100 + gstPerc)).toFixed(2));
 
       const insertReq = pool.request();
+      const lineDesc = (description && String(description).trim()) || item.Description;
+      const effectiveSalesman = (salesman && String(salesman).trim()) || 'UPS';
+
       insertReq.input('term', sql.VarChar(20), termCode);
       insertReq.input('code', sql.VarChar(50), invCode);
-      insertReq.input('desc', sql.VarChar(200), item.Description);
+      insertReq.input('desc', sql.VarChar(200), lineDesc);
       insertReq.input('qty', sql.Decimal(18, 2), qtyNum);
       insertReq.input('dept', sql.VarChar(50), item.Department);
       insertReq.input('brand', sql.VarChar(50), item.Brand);
@@ -227,7 +233,7 @@ router.post('/temp-sales/add', async (req, res) => {
       insertReq.input('gstPrec', sql.Decimal(18, 2), gstPerc);
       insertReq.input('gst', sql.Decimal(18, 2), gstAmount);
       insertReq.input('amount', sql.Decimal(18, 2), lineTotal);
-      insertReq.input('salesman', sql.VarChar(20), 'UPS');
+      insertReq.input('salesman', sql.VarChar(20), effectiveSalesman);
       insertReq.input('promoName', sql.VarChar(100), effectivePromoName);
       insertReq.input('memDisc', sql.Decimal(18, 2), 0);
       insertReq.input('itemType', sql.VarChar(50), 'NORMAL');
