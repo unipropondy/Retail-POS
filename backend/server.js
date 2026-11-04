@@ -86,6 +86,14 @@ app.use("/api/hold", holdRoutes);
 const posClearRoutes = require("./routes/posClearRoutes");
 app.use("/api/pos/clear", posClearRoutes);
 
+// Mount Promotion routes (Item Promo, Multi-buy, Pair, Break Price)
+const promotionRoutes = require("./routes/promotionRoutes");
+app.use("/api/promotions", promotionRoutes);
+
+// Mount Price Change routes (F11 Price Change, exact VB.NET parity)
+const priceChangeRoutes = require("./routes/priceChangeRoutes");
+app.use("/api/price-change", priceChangeRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

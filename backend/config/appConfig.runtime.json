@@ -26,7 +26,7 @@
   "UID": "ups",
   "PWD": "ups",
   "DSNName": "RetailPosERp",
-  "POSDB": "OLD",
+  "POSDB": "NEW",
   "DBConn": "server=26.63.60.58,5799;uid=ups;pwd=ups;database=RetailposERPKALAISMR",
   "DBHQConn": "server=SCK-TG,5899;uid=ups;pwd=ups;database=RetailPOSERP",
   "DBConnStandAlone": "server=26.79.167.123\\sql2008;uid=ups;pwd=ups;database=StandAlone",

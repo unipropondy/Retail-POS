@@ -191,12 +191,14 @@ async function getInventoryMaster(pool, inventoryCode) {
 }
 
 /**
- * 5. Retrieve stock on hand (QOH) from tblInventoryStock
+ * 5. Retrieve stock on hand (QOH) from tblInventoryStock dynamically checked with DB
  */
-async function getItemStock(pool, inventoryCode, locationCode = 'HQ') {
+async function getItemStock(pool, inventoryCode, locationCode) {
+  const { getDbLocationCode } = require('./locationService');
+  const loc = await getDbLocationCode(pool, '', locationCode);
   const req = pool.request();
   req.input('code', sql.VarChar(50), inventoryCode.trim());
-  req.input('loc', sql.VarChar(10), locationCode.trim());
+  req.input('loc', sql.VarChar(20), (loc || '').trim());
 
   const res = await req.query(`
     SELECT ISNULL(SUM(QtyOnHand), 0) AS QtyOnHand

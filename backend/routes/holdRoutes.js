@@ -430,10 +430,10 @@ router.post('/save', async (req, res) => {
       detReq.input('TaxPerc', sql.Decimal(18, 2), Number(attr.OutputTax) || 0);
       detReq.input('Remarks', sql.VarChar(100), '');
       detReq.input('SalesManCode', sql.VarChar(10), '');
-      detReq.input('PromotionCode', sql.VarChar(10), '');
-      detReq.input('PromotionName', sql.VarChar(50), invCode.slice(0, 50));
-      detReq.input('DiscPriceCode', sql.VarChar(10), '');
-      detReq.input('DiscPriceQty', sql.Decimal(18, 2), 0);
+      detReq.input('PromotionCode', sql.VarChar(10), String(it.promoCode || '').slice(0, 10));
+      detReq.input('PromotionName', sql.VarChar(50), String(it.promoName || invCode).slice(0, 50));
+      detReq.input('DiscPriceCode', sql.VarChar(10), String(it.discountPriceCode || it.discPriceCode || '').slice(0, 10));
+      detReq.input('DiscPriceQty', sql.Decimal(18, 2), Number(it.discPriceQty || it.allocatedDPQty || 0));
       detReq.input('UserID', sql.Char(10), cId.slice(0, 10));
 
       await detReq.execute('sp_POS_SalesHoldDetailSave');

@@ -81,6 +81,9 @@ export interface TouchItem {
   SellingPrice: number;
   RetailPrice: number;
   UOM: string;
+  Stock?: number;
+  AllowZeroPrice?: boolean | number;
+  IsFixedPrice?: boolean | number;
   hasImage?: number; // 1 = BLOB image exists in DB, 0 = no image (show icon)
 }
 
@@ -101,11 +104,22 @@ interface CartItem {
   description: string;
   qty: number;
   price: number;
+  normalPrice?: number;
+  manualDisc?: number;
+  promoDisc?: number;
+  pairDisc?: number;
   disc: number;
   amount: number;
   gst?: number;
+  gstPrec?: number;
   salesman?: string;
   uom: string;
+  stock?: number;
+  promoCode?: string;
+  promoName?: string;
+  discountPriceCode?: string;
+  discPriceQty?: number;
+  allocatedDPQty?: number;
 }
 
 interface PosBillingProps {
@@ -186,6 +200,53 @@ export default function PosBillingScreen({
 
   // Cart State (Initialized empty)
   const [cart, setCart] = useState<CartItem[]>([]);
+
+  // ==============================================================================
+  // Promotion Recalculation Engine Integration (Matches VB.NET frmPos1.vb)
+  // Automatically runs whenever items are added, updated, removed, or restored
+  // ==============================================================================
+  const isRecalculatingRef = React.useRef(false);
+
+  const applyPromotionsToCart = React.useCallback(async (itemsToCalc: CartItem[]) => {
+    if (!itemsToCalc || itemsToCalc.length === 0) return itemsToCalc;
+    try {
+      const activeLoc = (locationCode || "HQ").trim();
+      const res = await fetch(`${API_URL}/api/promotions/recalculate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: itemsToCalc,
+          locationCode: activeLoc,
+        }),
+      });
+
+      if (!res.ok) return itemsToCalc;
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.items)) {
+        return data.items as CartItem[];
+      }
+    } catch (err) {
+      console.warn("Promotion calculation fallback:", err);
+    }
+    return itemsToCalc;
+  }, [locationCode]);
+
+  // Sync entire cart with promotions to tblTempSales (Exact SaveTempBill L5732)
+  const syncTempSalesFull = React.useCallback((itemsToSync: CartItem[]) => {
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      if (!activeTerm) return;
+      fetch(`${API_URL}/api/cart/temp-sales/sync-full`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terminalCode: activeTerm,
+          items: itemsToSync,
+        }),
+      }).catch(() => {});
+    } catch {}
+  }, [terminalCode]);
+
   const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1);
   const cartScrollRef = useRef<any>(null);
   const shouldAutoScrollRef = useRef<boolean>(false);
@@ -224,8 +285,10 @@ export default function PosBillingScreen({
   const [skuCode, setSkuCode] = useState("");
   const [skuDesc, setSkuDesc] = useState("");
   const [fastQty, setFastQty] = useState("1");
-  const [fastDisc, setFastDisc] = useState("0.00");
+  const [fastPrice, setFastPrice] = useState("0.00");
   const [fastDiscPerc, setFastDiscPerc] = useState("0");
+  const [fastDisc, setFastDisc] = useState("0.00");
+  const [pendingZeroPriceItem, setPendingZeroPriceItem] = useState<any>(null);
   const effectiveLocation = (locationCode || "").trim() || "HQ";
   const [salesMan, setSalesMan] = useState(effectiveLocation);
 
@@ -263,6 +326,8 @@ export default function PosBillingScreen({
 
   const [showPriceChangeModal, setShowPriceChangeModal] = useState(false);
   const [overridePrice, setOverridePrice] = useState("");
+  const [bPriceChange, setBPriceChange] = useState<boolean>(false); // Exact VB.NET bPriceChange toggle
+  const [maxPriceChangeAllowed, setMaxPriceChangeAllowed] = useState<number>(100);
 
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [receiptSummary, setReceiptSummary] = useState<{
@@ -279,6 +344,7 @@ export default function PosBillingScreen({
   const [showManualHoldModal, setShowManualHoldModal] = useState<boolean>(false);
   const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
+  const [adminAuthContext, setAdminAuthContext] = useState<"HOLD" | "PRICE_CHANGE">("HOLD");
   const [showClearAdminModal, setShowClearAdminModal] = useState<boolean>(false);
   const [pendingReleaseHoldNo, setPendingReleaseHoldNo] = useState<number | null>(null);
   const [isClearing, setIsClearing] = useState<boolean>(false);
@@ -347,7 +413,7 @@ export default function PosBillingScreen({
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
   const fastQtyInputRef = useRef<any>(null);
-  const fastDiscPercInputRef = useRef<any>(null);
+  const fastPriceInputRef = useRef<any>(null);
   const fastDiscInputRef = useRef<any>(null);
 
   // Load saved theme & typography preferences on mount
@@ -399,6 +465,7 @@ export default function PosBillingScreen({
     fetchSavedCart();
     fetchTouchGroups();
     fetchPayModes();
+    fetchPriceChangeLimits();
     checkLicenseStatus();
 
     // Live validation interval (checks license every 30s while cashier is billing)
@@ -431,6 +498,17 @@ export default function PosBillingScreen({
     } catch (e) {
       console.warn("Could not restore saved cart from tblTempSales:", e);
     }
+  };
+
+  // Load Price Change limits from tblMaCompany
+  const fetchPriceChangeLimits = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/price-change/limits`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMaxPriceChangeAllowed(Number(data.maxPriceChangeAllowed) || 100);
+      }
+    } catch {}
   };
 
   const fetchPayModes = async () => {
@@ -472,9 +550,14 @@ export default function PosBillingScreen({
   const fetchTouchItems = async (groupCode?: string) => {
     setLoadingItems(true);
     try {
-      const url = groupCode
-        ? `${API_URL}/api/inventory/touch-items?groupCode=${encodeURIComponent(groupCode)}`
-        : `${API_URL}/api/inventory/touch-items`;
+      const activeTerm = (terminalCode || "").trim();
+      const loc = (effectiveLocation || locationCode || "").trim();
+      let queryParams = [];
+      if (activeTerm) queryParams.push(`terminalCode=${encodeURIComponent(activeTerm)}`);
+      if (loc) queryParams.push(`locationCode=${encodeURIComponent(loc)}`);
+      if (groupCode) queryParams.push(`groupCode=${encodeURIComponent(groupCode)}`);
+
+      const url = `${API_URL}/api/inventory/touch-items${queryParams.length > 0 ? `?${queryParams.join("&")}` : ""}`;
       const res = await fetch(url);
       const data = await res.json();
       if (res.ok && data.success && data.items && data.items.length > 0) {
@@ -586,12 +669,16 @@ export default function PosBillingScreen({
   useEffect(() => {
     if (selectedCartIndex >= 0 && selectedCartIndex < cart.length) {
       const item = cart[selectedCartIndex];
-      setActiveItem({
+      if (!item) return;
+
+      setSkuCode(item.code);
+      setSkuDesc(item.description);
+      setActiveItem((prev) => ({
         name: item.description,
         qty: item.qty,
         price: item.price,
-        stock: 0,
-      });
+        stock: item.stock !== undefined ? item.stock : prev.stock,
+      }));
     }
   }, [selectedCartIndex, cart]);
 
@@ -599,13 +686,8 @@ export default function PosBillingScreen({
   // CART OPERATIONS
   // ---------------------------------------------------------------------------
   const handleAddItem = async (item: TouchItem, explicitQty?: number, explicitPrice?: number, explicitDesc?: string, explicitSalesman?: string) => {
-    // 1. License Validation: Block item additions if license ended
+    // Check if license is flagged as expired locally (fast non-blocking check)
     if (licenseExpired) {
-      setShowLicenseModal(true);
-      return;
-    }
-    const isLicenseActive = await checkLicenseStatus();
-    if (!isLicenseActive) {
       setShowLicenseModal(true);
       return;
     }
@@ -615,6 +697,104 @@ export default function PosBillingScreen({
     const finalPrice = explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
     const finalDesc = explicitDesc || item.Description;
     const finalSalesman = explicitSalesman || salesMan || effectiveLocation;
+    const initialStock = item.Stock !== undefined ? Number(item.Stock) : 0;
+
+    // Always display clicked/scanned item details in top SKU bar & description bar
+    setSkuCode(item.InventoryCode);
+    setSkuDesc(finalDesc);
+
+    // Fetch live stock for this item to ensure top 'Stock : X' is 100% accurate & live
+    try {
+      const loc = (effectiveLocation || locationCode || "").trim();
+      const activeTerm = (terminalCode || "").trim();
+      fetch(`${API_URL}/api/inventory/lookup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rawCode: item.InventoryCode,
+          currentQty: qtyToAdd,
+          terminalCode: activeTerm,
+          locationCode: loc,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.success && data.item) {
+            const liveQoh = data.item.QOH !== undefined ? Number(data.item.QOH) : (data.item.Stock !== undefined ? Number(data.item.Stock) : 0);
+            setActiveItem((prev) => ({
+              ...prev,
+              stock: liveQoh,
+            }));
+            if (pendingZeroPriceItem && pendingZeroPriceItem.InventoryCode === item.InventoryCode) {
+              setPendingZeroPriceItem((prev: any) => (prev ? { ...prev, Stock: liveQoh } : null));
+            }
+            setCart((prevCart) =>
+              prevCart.map((c) =>
+                c.code === item.InventoryCode ? { ...c, stock: liveQoh } : c
+              )
+            );
+          }
+        })
+        .catch(() => {});
+    } catch {}
+
+    // Check if item has $0.00 price (Zero-Price Item workflow) OR if Price Change mode is ON:
+    // If bPriceChange is active, prompt manual price entry
+    if (bPriceChange) {
+      if (item.IsFixedPrice) {
+        showAlert("Fixed Price Item", "This item is marked as Fixed Price. Price Change is not allowed.", "warning");
+        return;
+      }
+
+      setPendingZeroPriceItem({
+        InventoryCode: item.InventoryCode,
+        Description: finalDesc,
+        SellingPrice: item.SellingPrice,
+        RetailPrice: item.SellingPrice,
+        Price: item.SellingPrice,
+        UOM: item.UOM || "PCS",
+        Stock: initialStock,
+        isPriceChangeMode: true,
+      });
+      setActiveItem({
+        name: finalDesc,
+        qty: qtyToAdd,
+        price: finalPrice,
+        stock: initialStock,
+      });
+      setFastQty(String(qtyToAdd));
+      setFastPrice("");
+      setTimeout(() => {
+        fastPriceInputRef.current?.focus();
+      }, 50);
+      return;
+    }
+
+    // Check if item has $0.00 price (Zero-Price Item workflow):
+    // Do NOT add to cart immediately. Populate SKU, Description, and prompt in 2nd box (Price)!
+    if (Number(finalPrice) <= 0) {
+      setPendingZeroPriceItem({
+        InventoryCode: item.InventoryCode,
+        Description: finalDesc,
+        SellingPrice: 0,
+        RetailPrice: 0,
+        Price: 0,
+        UOM: item.UOM || "PCS",
+        Stock: initialStock,
+      });
+      setActiveItem({
+        name: finalDesc,
+        qty: qtyToAdd,
+        price: 0,
+        stock: initialStock,
+      });
+      setFastQty(String(qtyToAdd));
+      setFastPrice("");
+      setTimeout(() => {
+        fastPriceInputRef.current?.focus();
+      }, 50);
+      return;
+    }
 
     // App.config Conditions: AbovePrice, Aboveqty, ISValueAbove validation alerts
     const isValueAboveCheck = isEnabled("ISValueAbove");
@@ -637,7 +817,7 @@ export default function PosBillingScreen({
       name: finalDesc,
       qty: qtyToAdd,
       price: finalPrice,
-      stock: 0,
+      stock: initialStock,
     });
 
     setCart((prev) => {
@@ -650,7 +830,7 @@ export default function PosBillingScreen({
                 qty: c.qty + qtyToAdd,
                 disc: c.disc + discToAdd,
                 amount: parseFloat(
-                  ((c.qty + qtyToAdd) * c.price - (c.disc + discToAdd)).toFixed(
+                  ((c.qty + qtyToAdd) * (c.normalPrice || c.price) - (c.disc + discToAdd)).toFixed(
                     2,
                   ),
                 ),
@@ -673,6 +853,7 @@ export default function PosBillingScreen({
           gst: 0.0,
           salesman: finalSalesman,
           uom: item.UOM || "PCS",
+          stock: initialStock,
         };
         const nextCart = [...prev, newItem];
         setSelectedCartIndex(nextCart.length - 1);
@@ -681,7 +862,7 @@ export default function PosBillingScreen({
       }
     });
 
-    // Mirror to tblTempSales (persistent session)
+    // Mirror to tblTempSales & receive atomic recalculated promotion cart
     try {
       const activeTerm = (terminalCode || "").trim();
       fetch(`${API_URL}/api/cart/temp-sales/add`, {
@@ -697,7 +878,29 @@ export default function PosBillingScreen({
           salesman: finalSalesman,
           uom: item.UOM || "PCS",
         }),
-      }).catch(() => {});
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.success && Array.isArray(data.cartItems)) {
+            setCart((prev) =>
+              data.cartItems.map((c: CartItem) => {
+                const existing = prev.find((p) => p.code === c.code);
+                return {
+                  ...c,
+                  stock: c.stock !== undefined ? c.stock : existing?.stock,
+                };
+              })
+            );
+            // Highlight the exact matching item row (yellow highlight)
+            const matchedIdx = data.cartItems.findIndex(
+              (c: CartItem) => c.code === item.InventoryCode
+            );
+            if (matchedIdx !== -1) {
+              setSelectedCartIndex(matchedIdx);
+            }
+          }
+        })
+        .catch(() => {});
     } catch {}
 
     // Reset fast quantity back to 1 for the next item
@@ -707,6 +910,94 @@ export default function PosBillingScreen({
   };
 
   
+  // Commits price for pending zero-price item and adds it to cart
+  const handleFastPriceCommit = async (enteredPriceStr: string) => {
+    const enteredPrice = parseFloat(enteredPriceStr);
+    if (isNaN(enteredPrice) || enteredPrice <= 0) {
+      if (pendingZeroPriceItem) {
+        showAlert("Price Required", "Please enter a valid price greater than $0.00 for this item.", "warning");
+        fastPriceInputRef.current?.focus();
+      }
+      return;
+    }
+
+    if (pendingZeroPriceItem) {
+      const targetItem = pendingZeroPriceItem;
+      const targetQty = parseFloat(fastQty) || 1;
+      const targetDisc = parseFloat(fastDisc) || 0;
+      const activeTerm = (terminalCode || "").trim();
+
+      // VB.NET txtPrice_Leave Price Change Validation
+      if (targetItem.isPriceChangeMode) {
+        const originalPrice = Number(targetItem.SellingPrice || targetItem.Price || 0);
+        if (originalPrice > 0 && maxPriceChangeAllowed > 0 && maxPriceChangeAllowed < 100) {
+          const minAllowedPrice = originalPrice * (1 - maxPriceChangeAllowed / 100);
+          if (enteredPrice < minAllowedPrice) {
+            showAlert(
+              "Price Change Limit Exceeded",
+              `More Price Change cannot be allowed !!! ... Max Discount : ${maxPriceChangeAllowed.toFixed(2)}% (Min Price: $${minAllowedPrice.toFixed(2)})`,
+              "warning"
+            );
+            fastPriceInputRef.current?.focus();
+            return;
+          }
+        }
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/api/inventory/direct-sku`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            skuCode: targetItem.InventoryCode,
+            terminalCode: activeTerm,
+            qty: targetQty,
+            disc: targetDisc,
+            overridePrice: enteredPrice,
+            salesmanCode: salesMan || effectiveLocation,
+            cashierId: cashierName || "",
+            locationCode: effectiveLocation,
+          }),
+        });
+
+        const data = await res.json();
+        if (data && data.success && Array.isArray(data.cartItems)) {
+          setCart(data.cartItems);
+          const matchedIdx = data.cartItems.findIndex(
+            (c: CartItem) => c.code.toUpperCase() === targetItem.InventoryCode.toUpperCase()
+          );
+          setSelectedCartIndex(matchedIdx !== -1 ? matchedIdx : data.cartItems.length - 1);
+          shouldAutoScrollRef.current = true;
+        }
+
+        // Clear pending item and reset input bar
+        setPendingZeroPriceItem(null);
+        setSkuCode("");
+        setSkuDesc("");
+        setFastQty("1");
+        setFastPrice("0.00");
+        setFastDisc("0.00");
+        skuInputRef.current?.focus();
+      } catch (err: any) {
+        showAlert("Error", "Failed to add item with price: " + err.message, "error");
+      }
+    } else if (cart.length > 0) {
+      // If an existing cart item is selected, update its price (Price Change)
+      const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      setCart((prev) =>
+        prev.map((c, i) =>
+          i === targetIdx
+            ? {
+                ...c,
+                price: enteredPrice,
+                amount: parseFloat((c.qty * enteredPrice - c.disc).toFixed(2)),
+              }
+            : c
+        )
+      );
+    }
+  };
+
   // Updates quantity for the currently selected item in the cart if cart has items,
   // or sets the pre-entry quantity for the next scanned/tapped item.
   const handleFastQtyCommit = (newQtyStr: string) => {
@@ -854,16 +1145,9 @@ export default function PosBillingScreen({
 
   // Adjust active item quantity with (+) or (-) buttons
   const handleQtyChange = async (delta: number) => {
-    if (delta > 0) {
-      if (licenseExpired) {
-        setShowLicenseModal(true);
-        return;
-      }
-      const isLicenseActive = await checkLicenseStatus();
-      if (!isLicenseActive) {
-        setShowLicenseModal(true);
-        return;
-      }
+    if (delta > 0 && licenseExpired) {
+      setShowLicenseModal(true);
+      return;
     }
     if (cart.length === 0) return;
     const targetIdx =
@@ -899,7 +1183,14 @@ export default function PosBillingScreen({
             inventoryCode: targetItem.code,
             delta: delta,
           }),
-        }).catch(() => {});
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data && data.success && Array.isArray(data.cartItems)) {
+              setCart(data.cartItems);
+            }
+          })
+          .catch(() => {});
       } catch {}
     }
   };
@@ -1021,7 +1312,7 @@ export default function PosBillingScreen({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           items: cart,
-          terminalCode: activeTerm || "HQPC1",
+          terminalCode: activeTerm,
           cashierId: activeCashier,
           adminId: adminId || activeCashier,
         }),
@@ -1238,6 +1529,7 @@ export default function PosBillingScreen({
 
       if (permRes.ok && permData.requiresAdminAuth) {
         // Cashier denied F6 -> prompt for Admin Authorization
+        setAdminAuthContext("HOLD");
         setShowAdminAuthModal(true);
         return;
       }
@@ -1265,6 +1557,21 @@ export default function PosBillingScreen({
   // Admin authorization submission
   const handleAdminAuthSubmit = async (user: string, pass: string): Promise<boolean> => {
     try {
+      if (adminAuthContext === "PRICE_CHANGE") {
+        const res = await fetch(`${API_URL}/api/price-change/verify-admin`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        const data = await res.json();
+        if (res.ok && data.authorized) {
+          subPriceChange();
+          return true;
+        }
+        return false;
+      }
+
+      // Default: HOLD Admin Authorization
       const res = await fetch(`${API_URL}/api/hold/verify-admin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1340,8 +1647,13 @@ export default function PosBillingScreen({
 
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.items)) {
-        setCart(data.items);
-        setSelectedCartIndex(data.items.length - 1);
+        const restoredItems = data.items;
+        setSelectedCartIndex(restoredItems.length - 1);
+        (async () => {
+          const promoCart = await applyPromotionsToCart(restoredItems);
+          setCart(promoCart);
+          syncTempSalesFull(promoCart);
+        })();
         shouldAutoScrollRef.current = true;
         if (data.items.length > 0) {
           const last = data.items[data.items.length - 1];
@@ -1435,11 +1747,6 @@ export default function PosBillingScreen({
       setShowLicenseModal(true);
       return;
     }
-    const isLicenseActive = await checkLicenseStatus();
-    if (!isLicenseActive) {
-      setShowLicenseModal(true);
-      return;
-    }
 
     const rawInput = (codeToLookup || "").trim();
     if (!rawInput) return;
@@ -1478,6 +1785,24 @@ export default function PosBillingScreen({
       // If salesman resolved, update top salesman indicator directly without popup
       if (data.salesman) {
         setSalesMan(data.salesman);
+      }
+
+      // Check if item has 0 price (requires price prompt)
+      if (data.requiresPricePrompt && data.item) {
+        setSkuCode(data.item.InventoryCode);
+        setSkuDesc(data.item.Description);
+        setPendingZeroPriceItem(data.item);
+        setActiveItem({
+          name: data.item.Description,
+          qty: Number(fastQty) || 1,
+          price: 0,
+          stock: data.item.Stock || 0,
+        });
+        setFastPrice("");
+        setTimeout(() => {
+          fastPriceInputRef.current?.focus();
+        }, 50);
+        return;
       }
 
       // Complete cart insertion
@@ -1545,7 +1870,7 @@ export default function PosBillingScreen({
     setIsProcessingSku(true);
 
     try {
-      const activeTerm = (terminalCode || "").trim() || "HQPC1";
+      const activeTerm = (terminalCode || "").trim();
       const currentQtyNum = parseFloat(fastQty) || 1;
       const currentDiscNum = parseFloat(fastDisc) || 0;
 
@@ -1566,7 +1891,6 @@ export default function PosBillingScreen({
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        // Step 5: If SKU Code does not exist or validation fails
         showAlert(
           "Invalid SKU Code",
           data.message || "Invalid SKU Code. Item not found in Inventory.",
@@ -1577,10 +1901,58 @@ export default function PosBillingScreen({
         return;
       }
 
+      // Check if item has 0 price (requires price prompt) or Price Change Mode is active
+      if (bPriceChange) {
+        if (data.item?.IsFixedPrice) {
+          showAlert("Fixed Price Item", "This item is marked as Fixed Price. Price Change is not allowed.", "warning");
+          setSkuCode("");
+          return;
+        }
+
+        setSkuCode(data.item.InventoryCode);
+        setSkuDesc(data.item.Description);
+        setPendingZeroPriceItem({ ...data.item, isPriceChangeMode: true });
+        setActiveItem({
+          name: data.item.Description,
+          qty: currentQtyNum,
+          price: data.item.Price || data.item.SellingPrice,
+          stock: data.item.Stock || 0,
+        });
+        setFastQty(String(currentQtyNum));
+        setFastPrice("");
+        setTimeout(() => {
+          fastPriceInputRef.current?.focus();
+        }, 50);
+        return;
+      }
+
+      if (data.requiresPricePrompt && data.item) {
+        setSkuCode(data.item.InventoryCode);
+        setSkuDesc(data.item.Description);
+        setPendingZeroPriceItem(data.item);
+        setActiveItem({
+          name: data.item.Description,
+          qty: currentQtyNum,
+          price: 0,
+          stock: data.item.Stock || 0,
+        });
+        setFastQty(String(currentQtyNum));
+        setFastPrice("");
+        setTimeout(() => {
+          fastPriceInputRef.current?.focus();
+        }, 50);
+        return;
+      }
+
       // Step 4: Successful Insertion into tblTempSales
       if (Array.isArray(data.cartItems)) {
         setCart(data.cartItems);
-        setSelectedCartIndex(data.cartItems.length - 1);
+        // If the item was already in cart, highlight its respective row; otherwise highlight the newly added row
+        const targetCode = data.item?.InventoryCode || enteredSku;
+        const matchedIdx = data.cartItems.findIndex(
+          (c: CartItem) => c.code.toUpperCase() === targetCode.toUpperCase()
+        );
+        setSelectedCartIndex(matchedIdx !== -1 ? matchedIdx : data.cartItems.length - 1);
         shouldAutoScrollRef.current = true;
       }
 
@@ -1665,9 +2037,65 @@ export default function PosBillingScreen({
     setShowReceiptModal(true);
   };
 
-  const handleFinishSale = () => {
+  const handleFinishSale = async () => {
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      const activeUser = (cashierName || "ADMIN").trim();
+      const activeLoc = (locationCode || "HQ").trim();
+      const invNo = ("INV" + Date.now().toString().slice(-10));
+
+      await fetch(`${API_URL}/api/cart/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terminalCode: activeTerm,
+          invoiceNo: invNo,
+          cashierId: activeUser,
+          locationCode: activeLoc,
+          items: cart,
+          payMode: receiptSummary?.payMode || selectedPayMode || "CASH",
+          tenderAmount: receiptSummary?.tender || grandTotal,
+        }),
+      });
+    } catch (e) {
+      console.warn("Checkout sync warning:", e);
+    }
     setShowReceiptModal(false);
     resetPosScreenState();
+  };
+
+  // ---------------------------------------------------------------------------
+  // PRICE CHANGE WORKFLOW (Exact VB.NET btn_PriceChange_Click & subPriceChange)
+  // ---------------------------------------------------------------------------
+  const subPriceChange = () => {
+    setBPriceChange((prev) => {
+      const nextState = !prev;
+      if (nextState) {
+        // Mode ON: Focus SKU code input ready for scanning or manual price entry
+        setTimeout(() => {
+          skuInputRef.current?.focus();
+        }, 50);
+      }
+      return nextState;
+    });
+  };
+
+  const handlePriceChangeClick = async () => {
+    try {
+      const activeUser = (cashierName || "UPS").trim();
+      const res = await fetch(`${API_URL}/api/price-change/check-permission?cashierId=${encodeURIComponent(activeUser)}`);
+      const data = await res.json();
+
+      if (res.ok && data.success && data.allowed) {
+        subPriceChange();
+      } else {
+        // Request Admin Password (frmAdminPassword.ShowDialog())
+        setAdminAuthContext("PRICE_CHANGE");
+        setShowAdminAuthModal(true);
+      }
+    } catch {
+      subPriceChange();
+    }
   };
 
   // Price Change override
@@ -1711,6 +2139,9 @@ export default function PosBillingScreen({
       } else if (e.key === "F7") {
         e.preventDefault();
         handleReleaseBill();
+      } else if (e.key === "F11") {
+        e.preventDefault();
+        handlePriceChangeClick();
       } else if (e.key === "F10") {
         e.preventDefault();
         if (onLogout) onLogout();
@@ -1768,18 +2199,29 @@ export default function PosBillingScreen({
           },
         ]}
       >
-        {/* Brand Logo */}
+        {/* Brand Logo - Unipro Enterprise Logo */}
         <TouchableOpacity
-          style={[styles.brandBadge, { backgroundColor: currentTheme.primary }]}
+          style={[
+            styles.brandBadge,
+            {
+              backgroundColor: "#ffffff",
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: "#e2e8f0",
+              paddingHorizontal: 8,
+              height: 34,
+              justifyContent: "center",
+              alignItems: "center",
+            },
+          ]}
           onPress={() => setShowMoreMenuModal(true)}
           activeOpacity={0.8}
         >
-          <MaterialCommunityIcons
-            name="cart-variant"
-            size={18}
-            color="#ffffff"
+          <Image
+            source={require("../../assets/unipro_logo.jpg")}
+            style={{ width: 95, height: 26 }}
+            resizeMode="contain"
           />
-          <Text style={styles.brandBadgeText}>GM</Text>
         </TouchableOpacity>
 
         {/* Stock Label */}
@@ -1804,7 +2246,6 @@ export default function PosBillingScreen({
             value={skuCode}
             onChangeText={setSkuCode}
             onSubmitEditing={processDirectSkuCode}
-            onBlur={processDirectSkuCode}
             editable={!isProcessingSku}
           />
         </View>
@@ -1910,21 +2351,32 @@ export default function PosBillingScreen({
           />
         </TouchableOpacity>
 
-        {/* Fast Disc % Box (0) */}
+        {/* Fast Price Box (2nd Box - Price) */}
         <TouchableOpacity
           activeOpacity={1}
-          onPress={() => fastDiscPercInputRef.current?.focus()}
-          style={styles.pillInputBox}
+          onPress={() => fastPriceInputRef.current?.focus()}
+          style={[
+            styles.pillInputBox,
+            Boolean(pendingZeroPriceItem) && {
+              backgroundColor: "#fef3c7",
+              borderColor: "#d97706",
+              borderWidth: 2,
+            },
+          ]}
         >
           <TextInput
-            ref={fastDiscPercInputRef}
-            style={styles.pillInput}
-            value={fastDiscPerc}
-            onChangeText={setFastDiscPerc}
-            onEndEditing={(e) => handleFastDiscPercCommit(e.nativeEvent.text)}
+            ref={fastPriceInputRef}
+            style={[
+              styles.pillInput,
+              Boolean(pendingZeroPriceItem) && { color: "#b45309", fontWeight: "800" },
+            ]}
+            placeholder="0.00"
+            placeholderTextColor="#94a3b8"
+            value={fastPrice}
+            onChangeText={setFastPrice}
+            onEndEditing={(e) => handleFastPriceCommit(e.nativeEvent.text)}
             onSubmitEditing={(e) => {
-              handleFastDiscPercCommit(e.nativeEvent.text);
-              skuInputRef.current?.focus();
+              handleFastPriceCommit(e.nativeEvent.text);
             }}
             keyboardType="numeric"
             selectTextOnFocus
@@ -2026,6 +2478,8 @@ export default function PosBillingScreen({
             color={currentTheme.primary}
           />
         </TouchableOpacity>
+
+
 
         {/* Trailing space */}
         <View style={{ flex: 1 }} />
@@ -2251,17 +2705,28 @@ export default function PosBillingScreen({
                         {item.code}
                       </Text>
 
-                      <Text
-                        style={[
-                          styles.tdCell,
-                          styles.tdDescription,
-                          { flex: 1, fontSize: getNum("GridFontSize", 17) - 3 },
-                          isSelected && styles.tdSelectedText,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {item.description}
-                      </Text>
+                      <View style={{ flex: 1, justifyContent: 'center' }}>
+                        <Text
+                          style={[
+                            styles.tdCell,
+                            styles.tdDescription,
+                            { fontSize: getNum("GridFontSize", 17) - 3 },
+                            isSelected && styles.tdSelectedText,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item.description}
+                        </Text>
+                        {Boolean((item.promoName && item.promoName !== item.code) || item.promoDisc || item.pairDisc) && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                            <View style={{ backgroundColor: '#ffedd5', borderColor: '#ea580c', borderWidth: 1, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 }}>
+                              <Text style={{ color: '#c2410c', fontSize: 10, fontWeight: '700' }}>
+                                🏷️ {item.promoName || 'PROMOTION'} {item.disc > 0 ? `(-${item.disc.toFixed(2)})` : ''}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
 
                       <Text
                         style={[
@@ -2345,7 +2810,7 @@ export default function PosBillingScreen({
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>SubTotal: </Text>
-                <Text style={styles.summaryChipVal}>${subTotal.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>${netBeforeTax.toFixed(2)}</Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>Tax: </Text>
@@ -2560,17 +3025,30 @@ export default function PosBillingScreen({
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.posBtn, styles.btnPriceChange]}
-                onPress={() => setShowPriceChangeModal(true)}
+                style={[
+                  styles.posBtn,
+                  styles.btnPriceChange,
+                  bPriceChange && {
+                    backgroundColor: "#035f65", // VB.NET active toggle color
+                    borderColor: "#38bdf8",
+                    borderWidth: 2,
+                  },
+                ]}
+                onPress={handlePriceChangeClick}
                 activeOpacity={0.8}
               >
+                <View style={styles.posKeyBadge}>
+                  <Text style={styles.posKeyBadgeText}>F11</Text>
+                </View>
                 <MaterialCommunityIcons
                   name="tag-outline"
                   size={16}
                   color="#ffffff"
                   style={styles.posBtnIcon}
                 />
-                <Text style={styles.posBtnTitle}>Price Chg</Text>
+                <Text style={styles.posBtnTitle}>
+                  {bPriceChange ? "Price ON" : "Price Chg"}
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity

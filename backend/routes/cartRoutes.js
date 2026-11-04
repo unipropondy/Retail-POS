@@ -60,7 +60,9 @@ router.get('/temp-sales', async (req, res) => {
         ISNULL(ts.GstPrec, 0) AS GstPrec,
         ISNULL(ts.GST, 0) AS GST,
         RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
-        RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
+        RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM,
+        RTRIM(LTRIM(ISNULL(ts.DiscountPriceCode, ''))) AS DiscountPriceCode,
+        RTRIM(LTRIM(ISNULL(ts.PromoName, ''))) AS PromoName
       FROM tblTempSales ts
       LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
       WHERE RTRIM(LTRIM(ts.TerminalCode)) = @terminalCode
@@ -79,6 +81,8 @@ router.get('/temp-sales', async (req, res) => {
       gst: Number(row.GST),
       salesman: row.Salesman || '',
       uom: row.UOM || 'PCS',
+      discountPriceCode: row.DiscountPriceCode || '',
+      promoName: row.PromoName || '',
     }));
 
     return res.status(200).json({
@@ -209,12 +213,55 @@ router.post('/temp-sales/add', async (req, res) => {
         WHERE TempID = @tempId
       `);
 
+      // Recalculate promotions for the entire cart in this terminal
+      const { recalculateCartPromotions } = require('../services/promotionService');
+      const allRowsReq = pool.request();
+      allRowsReq.input('term', sql.VarChar(20), termCode);
+      const allRowsRes = await allRowsReq.query(`
+        SELECT 
+          ts.TempID, RTRIM(LTRIM(ts.TerminalCode)) AS TerminalCode, RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
+          RTRIM(LTRIM(ISNULL(ts.Description, inv.Description))) AS Description, ISNULL(ts.Qty, 1) AS Qty,
+          ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(inv.SellingPrice, 0) AS NormalPrice,
+          ISNULL(ts.Discount, 0) AS Discount, ISNULL(ts.NetDiscount, 0) AS NetDiscount, ISNULL(ts.Amount, 0) AS Amount,
+          ISNULL(ts.GstPrec, 0) AS GstPrec, ISNULL(ts.GST, 0) AS GST, RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
+          RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
+        FROM tblTempSales ts
+        LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
+        WHERE RTRIM(LTRIM(ts.TerminalCode)) = @term
+        ORDER BY ts.TempID ASC
+      `);
+
+      const rawItems = allRowsRes.recordset.map((r) => ({
+        id: String(r.TempID), code: r.InventoryCode, description: r.Description, qty: Number(r.Qty),
+        price: Number(r.Price), normalPrice: Number(r.NormalPrice || r.Price), disc: Number(r.Discount),
+        amount: Number(r.Amount), gst: Number(r.GST), gstPrec: Number(r.GstPrec), salesman: r.Salesman || '', uom: r.UOM || 'PCS',
+      }));
+
+      const recalculated = await recalculateCartPromotions(pool, rawItems, 'HQ');
+
+      for (const c of recalculated) {
+        const up = pool.request();
+        up.input('tId', sql.Int, parseInt(c.id, 10));
+        up.input('d', sql.Decimal(18, 2), Number(c.disc) || 0);
+        up.input('nd', sql.Decimal(18, 2), Number(c.disc) || 0);
+        up.input('a', sql.Decimal(18, 2), Number(c.amount) || 0);
+        up.input('g', sql.Decimal(18, 2), Number(c.gst) || 0);
+        up.input('dpc', sql.VarChar(50), String(c.discountPriceCode || '').trim());
+        up.input('pn', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
+        await up.query(`
+          UPDATE tblTempSales
+          SET Discount = @d, NetDiscount = @nd, Amount = @a, GST = @g, DiscountPriceCode = @dpc, PromoName = @pn
+          WHERE TempID = @tId
+        `);
+      }
+
       return res.status(200).json({
         success: true,
         action: 'incremented',
         tempId: existingRow.TempID,
         qty: newQty,
         amount: lineTotal,
+        cartItems: recalculated,
       });
     } else {
       // Insert new line item
@@ -280,12 +327,56 @@ router.post('/temp-sales/add', async (req, res) => {
       `);
 
       const newTempId = insertResult.recordset[0]?.TempID;
+
+      // Recalculate promotions for the entire cart in this terminal
+      const { recalculateCartPromotions } = require('../services/promotionService');
+      const allRowsReq = pool.request();
+      allRowsReq.input('term', sql.VarChar(20), termCode);
+      const allRowsRes = await allRowsReq.query(`
+        SELECT 
+          ts.TempID, RTRIM(LTRIM(ts.TerminalCode)) AS TerminalCode, RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
+          RTRIM(LTRIM(ISNULL(ts.Description, inv.Description))) AS Description, ISNULL(ts.Qty, 1) AS Qty,
+          ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(inv.SellingPrice, 0) AS NormalPrice,
+          ISNULL(ts.Discount, 0) AS Discount, ISNULL(ts.NetDiscount, 0) AS NetDiscount, ISNULL(ts.Amount, 0) AS Amount,
+          ISNULL(ts.GstPrec, 0) AS GstPrec, ISNULL(ts.GST, 0) AS GST, RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
+          RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
+        FROM tblTempSales ts
+        LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
+        WHERE RTRIM(LTRIM(ts.TerminalCode)) = @term
+        ORDER BY ts.TempID ASC
+      `);
+
+      const rawItems = allRowsRes.recordset.map((r) => ({
+        id: String(r.TempID), code: r.InventoryCode, description: r.Description, qty: Number(r.Qty),
+        price: Number(r.Price), normalPrice: Number(r.NormalPrice || r.Price), disc: Number(r.Discount),
+        amount: Number(r.Amount), gst: Number(r.GST), gstPrec: Number(r.GstPrec), salesman: r.Salesman || '', uom: r.UOM || 'PCS',
+      }));
+
+      const recalculated = await recalculateCartPromotions(pool, rawItems, 'HQ');
+
+      for (const c of recalculated) {
+        const up = pool.request();
+        up.input('tId', sql.Int, parseInt(c.id, 10));
+        up.input('d', sql.Decimal(18, 2), Number(c.disc) || 0);
+        up.input('nd', sql.Decimal(18, 2), Number(c.disc) || 0);
+        up.input('a', sql.Decimal(18, 2), Number(c.amount) || 0);
+        up.input('g', sql.Decimal(18, 2), Number(c.gst) || 0);
+        up.input('dpc', sql.VarChar(50), String(c.discountPriceCode || '').trim());
+        up.input('pn', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
+        await up.query(`
+          UPDATE tblTempSales
+          SET Discount = @d, NetDiscount = @nd, Amount = @a, GST = @g, DiscountPriceCode = @dpc, PromoName = @pn
+          WHERE TempID = @tId
+        `);
+      }
+
       return res.status(201).json({
         success: true,
         action: 'inserted',
         tempId: newTempId,
         qty: qtyNum,
         amount: lineTotal,
+        cartItems: recalculated,
       });
     }
   } catch (error) {
@@ -338,20 +429,59 @@ router.post('/temp-sales/update-qty', async (req, res) => {
       return res.status(200).json({ success: true, action: 'deleted' });
     }
 
-    const newAmount = parseFloat((nextQty * Number(row.Price) - Number(row.Discount)).toFixed(2));
     const upReq = pool.request();
     upReq.input('tempId', sql.Int, row.TempID);
     upReq.input('qty', sql.Decimal(18, 2), nextQty);
-    upReq.input('amt', sql.Decimal(18, 2), newAmount);
 
     await upReq.query(`
       UPDATE tblTempSales
-      SET Qty = @qty,
-          Amount = @amt
+      SET Qty = @qty
       WHERE TempID = @tempId
     `);
 
-    return res.status(200).json({ success: true, action: 'updated', qty: nextQty, amount: newAmount });
+    // Recalculate promotions for entire cart after quantity modification
+    const { recalculateCartPromotions } = require('../services/promotionService');
+    const allRowsReq = pool.request();
+    allRowsReq.input('term', sql.VarChar(20), termCode);
+    const allRowsRes = await allRowsReq.query(`
+      SELECT 
+        ts.TempID, RTRIM(LTRIM(ts.TerminalCode)) AS TerminalCode, RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
+        RTRIM(LTRIM(ISNULL(ts.Description, inv.Description))) AS Description, ISNULL(ts.Qty, 1) AS Qty,
+        ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(inv.SellingPrice, 0) AS NormalPrice,
+        ISNULL(ts.Discount, 0) AS Discount, ISNULL(ts.NetDiscount, 0) AS NetDiscount, ISNULL(ts.Amount, 0) AS Amount,
+        ISNULL(ts.GstPrec, 0) AS GstPrec, ISNULL(ts.GST, 0) AS GST, RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
+        RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
+      FROM tblTempSales ts
+      LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
+      WHERE RTRIM(LTRIM(ts.TerminalCode)) = @term
+      ORDER BY ts.TempID ASC
+    `);
+
+    const rawItems = allRowsRes.recordset.map((r) => ({
+      id: String(r.TempID), code: r.InventoryCode, description: r.Description, qty: Number(r.Qty),
+      price: Number(r.Price), normalPrice: Number(r.NormalPrice || r.Price), disc: Number(r.Discount),
+      amount: Number(r.Amount), gst: Number(r.GST), gstPrec: Number(r.GstPrec), salesman: r.Salesman || '', uom: r.UOM || 'PCS',
+    }));
+
+    const recalculated = await recalculateCartPromotions(pool, rawItems, 'HQ');
+
+    for (const c of recalculated) {
+      const up = pool.request();
+      up.input('tId', sql.Int, parseInt(c.id, 10));
+      up.input('d', sql.Decimal(18, 2), Number(c.disc) || 0);
+      up.input('nd', sql.Decimal(18, 2), Number(c.disc) || 0);
+      up.input('a', sql.Decimal(18, 2), Number(c.amount) || 0);
+      up.input('g', sql.Decimal(18, 2), Number(c.gst) || 0);
+      up.input('dpc', sql.VarChar(50), String(c.discountPriceCode || '').trim());
+      up.input('pn', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
+      await up.query(`
+        UPDATE tblTempSales
+        SET Discount = @d, NetDiscount = @nd, Amount = @a, GST = @g, DiscountPriceCode = @dpc, PromoName = @pn
+        WHERE TempID = @tId
+      `);
+    }
+
+    return res.status(200).json({ success: true, action: 'updated', qty: nextQty, cartItems: recalculated });
   } catch (error) {
     console.error('❌ [CART ERROR] Failed to update qty in tblTempSales:', error.message);
     return res.status(500).json({ success: false, message: error.message });
@@ -594,7 +724,10 @@ router.delete('/temp-sales/item', async (req, res) => {
       WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term) 
         AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code);
 
-      SELECT TOP 1 ISNULL(LocationCode, 'HQ') AS LocationCode FROM tblMaCompany;
+      SELECT TOP 1 
+        ISNULL(term.LocationCode, ISNULL(comp.LocationCode, 'HQ')) AS LocationCode
+      FROM tblMaCompany comp
+      LEFT JOIN tblMaTerminal term ON UPPER(RTRIM(LTRIM(term.TerminalCode))) = UPPER(@term);
 
       SELECT 
         ISNULL(Description, '') AS Description,
@@ -761,3 +894,172 @@ router.delete('/temp-sales/clear', async (req, res) => {
 });
 
 module.exports = router;
+
+// ------------------------------------------------------------------------------
+// POST /api/cart/temp-sales/sync-full
+// Synchronizes entire calculated cart into tblTempSales (Exact SaveTempBill from VB.NET)
+// ------------------------------------------------------------------------------
+router.post('/temp-sales/sync-full', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+
+    const { terminalCode, items = [] } = req.body;
+    const termCode = getCleanTerminalCode(terminalCode);
+    if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
+
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    try {
+      const delReq = new sql.Request(transaction);
+      delReq.input('term', sql.VarChar(20), termCode);
+      await delReq.query('DELETE FROM tblTempSales WHERE RTRIM(LTRIM(TerminalCode)) = @term');
+
+      if (items.length > 0) {
+        const insReq = new sql.Request(transaction);
+        insReq.input('term', sql.VarChar(20), termCode);
+
+        const valLines = [];
+        items.forEach((it, idx) => {
+          insReq.input('code_' + idx, sql.VarChar(50), String(it.code || '').trim());
+          insReq.input('desc_' + idx, sql.VarChar(200), String(it.description || '').slice(0, 200));
+          insReq.input('qty_' + idx, sql.Decimal(18, 2), Number(it.qty) || 1);
+          insReq.input('price_' + idx, sql.Decimal(18, 2), Number(it.price) || 0);
+          insReq.input('charge_' + idx, sql.Decimal(18, 4), Number(it.price) || 0);
+          insReq.input('disc_' + idx, sql.Decimal(18, 2), Number(it.disc) || 0);
+          insReq.input('netDisc_' + idx, sql.Decimal(18, 2), Number(it.disc) || 0);
+          insReq.input('gstPrec_' + idx, sql.Decimal(18, 2), Number(it.gstPrec || 0));
+          insReq.input('gst_' + idx, sql.Decimal(18, 2), Number(it.gst || 0));
+          insReq.input('amt_' + idx, sql.Decimal(18, 2), Number(it.amount || 0));
+          insReq.input('dpCode_' + idx, sql.VarChar(50), String(it.discountPriceCode || '').trim());
+          insReq.input('salesman_' + idx, sql.VarChar(20), String(it.salesman || '').trim());
+          insReq.input('promoName_' + idx, sql.VarChar(100), String(it.promoName || it.code || '').trim().slice(0, 100));
+
+          valLines.push(`(@term, @code_${idx}, @desc_${idx}, @qty_${idx}, '', '', '', 0, @price_${idx}, @charge_${idx}, @disc_${idx}, @netDisc_${idx}, @gstPrec_${idx}, @gst_${idx}, @amt_${idx}, @dpCode_${idx}, @salesman_${idx}, @promoName_${idx}, 0, '0', '')`);
+        });
+
+        await insReq.query('INSERT INTO tblTempSales (TerminalCode, InventoryCode, Description, Qty, Department, Brand, Category, AverageCost, Price, Charge, Discount, NetDiscount, GstPrec, GST, Amount, DiscountPriceCode, Salesman, PromoName, MemDiscount, ItemType, MemName) VALUES ' + valLines.join(',\n'));
+      }
+
+      await transaction.commit();
+      return res.status(200).json({ success: true, count: items.length });
+    } catch (txErr) {
+      await transaction.rollback();
+      throw txErr;
+    }
+  } catch (err) {
+    console.error('❌ [SYNC FULL ERROR]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ------------------------------------------------------------------------------
+// POST /api/cart/checkout
+// Finalizes sale and persists line items into tblPOSSalesDetail (via sp_SalesDetail)
+// ------------------------------------------------------------------------------
+router.post('/checkout', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+
+    const {
+      terminalCode,
+      invoiceNo,
+      cashierId = 'ADMIN',
+      locationCode = 'HQ',
+      items = [],
+      payMode = 'CASH',
+      tenderAmount = 0,
+    } = req.body;
+
+    const termCode = getCleanTerminalCode(terminalCode);
+    if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
+    if (!invoiceNo) return res.status(400).json({ success: false, message: 'invoiceNo is required' });
+    if (!items || items.length === 0) return res.status(400).json({ success: false, message: 'No items in cart to checkout' });
+
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    try {
+      for (const it of items) {
+        const invCode = String(it.code || '').trim();
+        const qtyNum = Number(it.qty) || 1;
+        const priceNum = Number(it.price) || 0;
+        const totalValue = parseFloat((qtyNum * priceNum).toFixed(2));
+        const discNum = Number(it.disc) || 0;
+        const netAmount = Math.max(0, parseFloat((totalValue - discNum).toFixed(2)));
+        const gstPrec = Number(it.gstPrec) || 0;
+        const gst = gstPrec > 0 ? parseFloat(((netAmount * gstPrec) / (100 + gstPrec)).toFixed(2)) : 0;
+        const actualSales = parseFloat((netAmount - gst).toFixed(2));
+
+        // Fetch attributes from tblInventory
+        const itemReq = new sql.Request(transaction);
+        itemReq.input('code', sql.VarChar(50), invCode);
+        const itemRes = await itemReq.query('SELECT DepartmentCode, CategoryCode, BrandCode, AverageCost, OutputTax FROM tblInventory WHERE UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)');
+        const attr = itemRes.recordset[0] || {};
+
+        const prmFlag = (it.promoCode || it.discountPriceCode || it.promoDisc > 0 || it.pairDisc > 0) ? 'Y' : 'N';
+        const promoName = String(it.promoName || invCode).slice(0, 100);
+
+        const spReq = new sql.Request(transaction);
+        spReq.input('InvoiceNo', sql.Char(15), String(invoiceNo).slice(0, 15));
+        spReq.input('InventoryCode', sql.Char(20), invCode.slice(0, 20));
+        spReq.input('Description', sql.NVarChar(200), String(it.description || '').slice(0, 200));
+        spReq.input('Qty', sql.Decimal(18, 2), qtyNum);
+        spReq.input('Price', sql.Decimal(18, 2), priceNum);
+        spReq.input('TotalValue', sql.Decimal(18, 2), totalValue);
+        spReq.input('Discount', sql.Decimal(18, 2), discNum);
+        spReq.input('NetDiscount', sql.Decimal(18, 2), discNum);
+        spReq.input('NetAmount', sql.Decimal(18, 2), netAmount);
+        spReq.input('ActualSales', sql.Decimal(18, 2), actualSales);
+        spReq.input('Gst', sql.Decimal(18, 4), gst);
+        spReq.input('SalesmanId', sql.Char(10), String(it.salesman || '').slice(0, 10));
+        spReq.input('DeptCode', sql.Char(10), String(attr.DepartmentCode || '').slice(0, 10));
+        spReq.input('CategoryCode', sql.Char(20), String(attr.CategoryCode || '').slice(0, 20));
+        spReq.input('BrandCode', sql.Char(20), String(attr.BrandCode || '').slice(0, 20));
+        spReq.input('UserID', sql.Char(10), String(cashierId).slice(0, 10));
+        spReq.input('LocationCode', sql.Char(10), String(locationCode).slice(0, 10));
+        spReq.input('MemberDiscount', sql.Decimal(18, 2), 0);
+        spReq.input('GSTType', sql.Char(10), 'I');
+        spReq.input('PRMFlag', sql.Char(1), prmFlag);
+        spReq.input('EventDesc', sql.VarChar(100), promoName);
+        spReq.input('FreeItem', sql.Char(10), '');
+        spReq.input('MRP', sql.Money, 0);
+        spReq.input('TaxPerc', sql.Decimal(18, 2), gstPrec);
+        spReq.input('ExpiryDate', sql.Char(8), '');
+        spReq.input('BatchNo', sql.NVarChar(50), '');
+        spReq.input('BinNo', sql.Char(10), '');
+        spReq.input('CardType', sql.Char(10), '');
+        spReq.input('CardCommPerc', sql.Decimal(18, 2), 0);
+        spReq.input('Remarks', sql.VarChar(120), '');
+        spReq.input('SerialNo', sql.VarChar(50), '');
+        spReq.input('MXRemarks', sql.VarChar(120), '');
+
+        await spReq.execute('sp_SalesDetail');
+
+        // Also update PromotionCode and PromotionName explicitly on tblPOSSalesDetail
+        const upReq = new sql.Request(transaction);
+        upReq.input('invNo', sql.VarChar(20), invoiceNo);
+        upReq.input('code', sql.VarChar(20), invCode);
+        upReq.input('pCode', sql.VarChar(10), String(it.promoCode || '').slice(0, 10));
+        upReq.input('pName', sql.VarChar(50), promoName.slice(0, 50));
+        await upReq.query('UPDATE tblPOSSalesDetail SET PromotionCode = @pCode, PromotionName = @pName WHERE RTRIM(LTRIM(InvoiceNo)) = @invNo AND RTRIM(LTRIM(InventoryCode)) = @code');
+      }
+
+      // Clean temporary sales table for this terminal
+      const clearTemp = new sql.Request(transaction);
+      clearTemp.input('term', sql.VarChar(20), termCode);
+      await clearTemp.query('DELETE FROM tblTempSales WHERE RTRIM(LTRIM(TerminalCode)) = @term');
+
+      await transaction.commit();
+      return res.status(200).json({ success: true, invoiceNo, message: 'Checkout completed and promotions persisted' });
+    } catch (txErr) {
+      await transaction.rollback();
+      throw txErr;
+    }
+  } catch (err) {
+    console.error('❌ [CHECKOUT ERROR]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});

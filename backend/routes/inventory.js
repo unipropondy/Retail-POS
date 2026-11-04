@@ -18,6 +18,7 @@ const router = express.Router();
 const { sql, getPool } = require('../config/db');
 const configService = require('../config/configService');
 const { resolveSalesmanValue } = require('../services/salesmanService');
+const { getDbLocationCode } = require('../services/locationService');
 
 // ------------------------------------------------------------------------------
 // GET /api/inventory/touch-groups
@@ -74,7 +75,8 @@ router.get('/touch-items', async (req, res) => {
       });
     }
 
-    const { groupCode } = req.query;
+    const { groupCode, locationCode, terminalCode } = req.query;
+    const loc = await getDbLocationCode(pool, terminalCode, locationCode);
     const maxItems = configService.getNumber('itemListMaxData', 40);
 
     let query = `
@@ -86,13 +88,23 @@ router.get('/touch-items', async (req, res) => {
         ISNULL(inv.SellingPrice, 0) AS SellingPrice,
         ISNULL(inv.RetailPrice, 0) AS RetailPrice,
         RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM,
+        ISNULL(inv.AllowZeroPrice, 0) AS AllowZeroPrice,
+        ISNULL(inv.IsFixedPrice, 0) AS IsFixedPrice,
+        ISNULL(stk.QtyOnHand, 0) AS Stock,
         1 AS hasImage
       FROM tblInventoryTSList ts
       INNER JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
+      LEFT JOIN (
+        SELECT RTRIM(LTRIM(InventoryCode)) AS InventoryCode, SUM(QtyOnHand) AS QtyOnHand
+        FROM tblInventoryStock
+        WHERE UPPER(RTRIM(LTRIM(LocationCode))) = @loc
+        GROUP BY RTRIM(LTRIM(InventoryCode))
+      ) stk ON RTRIM(LTRIM(inv.InventoryCode)) = stk.InventoryCode
       WHERE ts.IsActive = 1
     `;
 
     const request = pool.request();
+    request.input('loc', sql.VarChar, loc.toUpperCase());
 
     if (groupCode) {
       query += ` AND UPPER(RTRIM(LTRIM(ts.GroupCode))) = @groupCode`;
@@ -221,10 +233,12 @@ router.post('/lookup', async (req, res) => {
     const pool = await getPool();
     if (!pool) return res.status(503).json({ success: false, message: 'Database unavailable' });
 
-    const { rawCode, currentQty, locationCode = 'HQ' } = req.body;
+    const { rawCode, currentQty, locationCode, terminalCode } = req.body;
     if (!rawCode || !String(rawCode).trim()) {
       return res.status(400).json({ success: false, message: 'Item code is required' });
     }
+
+    const effectiveLoc = await getDbLocationCode(pool, terminalCode, locationCode);
 
     const posItemService = require('../services/posItemService');
 
@@ -292,20 +306,29 @@ router.post('/lookup', async (req, res) => {
       price = scaleRes.encodedPrice;
     }
 
+    // 6. QOH Stock Check
+    const qoh = await posItemService.getItemStock(pool, item.InventoryCode, effectiveLoc);
+
     // Check E: Zero Price allowance
     const allowZero = Boolean(item.AllowZeroPrice);
-    if (price <= 0 && !allowZero && !Boolean(item.OpenItem) && !Boolean(item.AllowPaymodeCommision)) {
+    if (price <= 0 && !allowZero) {
       if (item.UOM !== 'KG') {
-        return res.status(400).json({
-          success: false,
-          message: 'Please set the price. Zero price not allowed for this item.',
-          errorCode: 'ZERO_PRICE_NOT_ALLOWED',
+        return res.status(200).json({
+          success: true,
+          requiresPricePrompt: true,
+          item: {
+            InventoryCode: item.InventoryCode,
+            Description: item.Description,
+            SellingPrice: 0,
+            RetailPrice: 0,
+            Price: 0,
+            UOM: item.UOM || 'PCS',
+            Stock: qoh !== undefined ? qoh : 0,
+          },
+          message: 'Please set the price. Zero price item requires quantity and price.',
         });
       }
     }
-
-    // 6. QOH Stock Check
-    const qoh = await posItemService.getItemStock(pool, item.InventoryCode, locationCode);
 
     // 7. Determine fractional UOM allowance
     const allowFraction = (item.UOM === 'KG' || item.UOM === 'MTR');
@@ -496,6 +519,7 @@ router.post('/direct-sku', async (req, res) => {
       terminalCode,
       qty = 1,
       disc = 0,
+      overridePrice,
       salesmanCode,
       cashierId,
       locationCode = '',
@@ -562,23 +586,35 @@ router.post('/direct-sku', async (req, res) => {
       });
     }
 
-    // D: Determine retail price
-    const retailPrice = Number(item.RetailPrice !== null && item.RetailPrice !== undefined ? item.RetailPrice : item.SellingPrice) || 0;
-    const allowZero = Boolean(item.AllowZeroPrice);
-
-    if (retailPrice <= 0 && !allowZero && !Boolean(item.OpenItem) && !Boolean(item.AllowPaymodeCommision)) {
-      if (item.UOM !== 'KG') {
-        return res.status(400).json({
-          success: false,
-          errorCode: 'ZERO_PRICE_NOT_ALLOWED',
-          message: 'Please set the price. Zero price not allowed for this item.',
-        });
-      }
-    }
+    // Resolve terminal LocationCode from DB (tblmaTerminal / tblMaCompany) if not provided
+    const loc = await getDbLocationCode(pool, termCode, locationCode);
 
     // E: Stock QOH Check
     const posItemService = require('../services/posItemService');
-    const qoh = await posItemService.getItemStock(pool, item.InventoryCode, locationCode);
+    const qoh = await posItemService.getItemStock(pool, item.InventoryCode, loc);
+
+    // D: Determine retail price
+    const baseRetailPrice = Number(item.RetailPrice !== null && item.RetailPrice !== undefined ? item.RetailPrice : item.SellingPrice) || 0;
+    const retailPrice = overridePrice !== undefined && Number(overridePrice) > 0 ? Number(overridePrice) : baseRetailPrice;
+    const allowZero = Boolean(item.AllowZeroPrice);
+
+    if (retailPrice <= 0 && !allowZero) {
+      // Return requiresPricePrompt so frontend populates SKU & Description and prompts for price
+      return res.status(200).json({
+        success: true,
+        requiresPricePrompt: true,
+        item: {
+          InventoryCode: trimmedSku,
+          Description: item.Description,
+          Price: 0,
+          SellingPrice: 0,
+          RetailPrice: 0,
+          Stock: qoh !== undefined ? qoh : 0,
+          UOM: item.UOM || 'PCS',
+        },
+        message: 'Please enter quantity and price for this item.',
+      });
+    }
 
     // Determine Salesman column value:
     // If an explicit salesman was chosen (and is not terminal Location Code), use it directly.
@@ -590,15 +626,6 @@ router.post('/direct-sku', async (req, res) => {
     // If SalesmanRequired = 1: User Name
     // If SalesmanRequired = 0: Location Name
     let effectiveSalesman = (salesmanCode && String(salesmanCode).trim()) || '';
-    
-    // Resolve terminal LocationCode from tblmaTerminal if not provided
-    let loc = (locationCode && String(locationCode).trim()) || '';
-    if (!loc && termCode) {
-      const tReq = pool.request();
-      tReq.input('tCode', sql.VarChar(20), termCode);
-      const tRes = await tReq.query('SELECT TOP 1 RTRIM(LTRIM(LocationCode)) AS LocationCode FROM tblmaTerminal WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@tCode)');
-      loc = tRes.recordset[0]?.LocationCode || '';
-    }
 
     if (!effectiveSalesman || (loc && effectiveSalesman.toUpperCase() === loc.toUpperCase())) {
       const salesmanResolution = await resolveSalesmanValue(pool, {
@@ -718,25 +745,54 @@ router.post('/direct-sku', async (req, res) => {
         ISNULL(ts.GstPrec, 0) AS GstPrec,
         ISNULL(ts.GST, 0) AS GST,
         RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
-        RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
+        RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM,
+        ISNULL(inv.SellingPrice, 0) AS NormalPrice
       FROM tblTempSales ts
       LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
       WHERE RTRIM(LTRIM(ts.TerminalCode)) = @term
       ORDER BY ts.TempID ASC
     `);
 
-    const cartItems = cartRes.recordset.map((row) => ({
+    const rawCartItems = cartRes.recordset.map((row) => ({
       id: String(row.TempID),
       code: row.InventoryCode,
       description: row.Description,
       qty: Number(row.Qty),
       price: Number(row.Price),
+      normalPrice: Number(row.NormalPrice || row.Price),
       disc: Number(row.Discount),
       amount: Number(row.Amount),
       gst: Number(row.GST),
+      gstPrec: Number(row.GstPrec),
       salesman: row.Salesman || '',
       uom: row.UOM || 'PCS',
     }));
+
+    // Recalculate promotions server-side so direct SKU entry gets exact promo results
+    const { recalculateCartPromotions } = require('../services/promotionService');
+    const cartItems = await recalculateCartPromotions(pool, rawCartItems, locationCode);
+
+    // Sync recalculated promotions back into tblTempSales
+    for (const c of cartItems) {
+      const upTemp = pool.request();
+      upTemp.input('tempId', sql.Int, parseInt(c.id, 10));
+      upTemp.input('disc', sql.Decimal(18, 2), Number(c.disc) || 0);
+      upTemp.input('netDisc', sql.Decimal(18, 2), Number(c.disc) || 0);
+      upTemp.input('amount', sql.Decimal(18, 2), Number(c.amount) || 0);
+      upTemp.input('gst', sql.Decimal(18, 2), Number(c.gst) || 0);
+      upTemp.input('dpCode', sql.VarChar(50), String(c.discountPriceCode || '').trim());
+      upTemp.input('promoName', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
+      await upTemp.query(`
+        UPDATE tblTempSales
+        SET Discount = @disc,
+            NetDiscount = @netDisc,
+            Amount = @amount,
+            GST = @gst,
+            DiscountPriceCode = @dpCode,
+            PromoName = @promoName
+        WHERE TempID = @tempId
+      `);
+    }
 
     return res.status(200).json({
       success: true,
