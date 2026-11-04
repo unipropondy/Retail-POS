@@ -104,6 +104,7 @@ interface CartItem {
   disc: number;
   amount: number;
   gst?: number;
+  salesman?: string;
   uom: string;
 }
 
@@ -111,6 +112,7 @@ interface PosBillingProps {
   onLogout?: () => void;
   cashierName?: string;
   terminalCode?: string;
+  isSalesMan?: boolean;
 }
 
 // Visual category icon mappings
@@ -164,6 +166,7 @@ export default function PosBillingScreen({
   onLogout,
   cashierName,
   terminalCode,
+  isSalesMan,
 }: PosBillingProps) {
   // ---------------------------------------------------------------------------
   // LIVE DATABASE STATE
@@ -221,13 +224,25 @@ export default function PosBillingScreen({
   const [fastQty, setFastQty] = useState("1");
   const [fastDisc, setFastDisc] = useState("0.00");
   const [fastDiscPerc, setFastDiscPerc] = useState("0");
-  const [salesMan, setSalesMan] = useState("UPS");
+  const [salesMan, setSalesMan] = useState(() => {
+    if (isSalesMan === true && cashierName) return cashierName;
+    return "HQ";
+  });
+
+  // Keep salesMan in sync when props update
+  useEffect(() => {
+    if (isSalesMan === true && cashierName) {
+      setSalesMan(cashierName);
+    }
+  }, [isSalesMan, cashierName]);
 
   // VB.NET Item-Entry Pipeline State
   const [descSearchResults, setDescSearchResults] = useState<any[]>([]);
   const [showDescDropdown, setShowDescDropdown] = useState<boolean>(false);
   const [isSearchingDesc, setIsSearchingDesc] = useState<boolean>(false);
   const [isScaleLockedQty, setIsScaleLockedQty] = useState<boolean>(false);
+  const [isProcessingSku, setIsProcessingSku] = useState<boolean>(false);
+  const isProcessingSkuRef = useRef<boolean>(false);
   const [showSalesmanModal, setShowSalesmanModal] = useState<boolean>(false);
   const [tempSalesmanCode, setTempSalesmanCode] = useState<string>("");
   const [pendingItemAdd, setPendingItemAdd] = useState<any>(null);
@@ -331,6 +346,9 @@ export default function PosBillingScreen({
 
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
+  const fastQtyInputRef = useRef<any>(null);
+  const fastDiscPercInputRef = useRef<any>(null);
+  const fastDiscInputRef = useRef<any>(null);
 
   // Load saved theme & typography preferences on mount
   useEffect(() => {
@@ -487,16 +505,8 @@ export default function PosBillingScreen({
         (it) => it.GroupCode.toUpperCase() === selectedGroup.toUpperCase(),
       );
     }
-    if (skuDesc.trim()) {
-      const q = skuDesc.toLowerCase().trim();
-      list = list.filter((it) => it.Description.toLowerCase().includes(q));
-    }
-    if (skuCode.trim()) {
-      const q = skuCode.toLowerCase().trim();
-      list = list.filter((it) => it.InventoryCode.toLowerCase().includes(q));
-    }
     return list;
-  }, [items, selectedGroup, skuDesc, skuCode]);
+  }, [items, selectedGroup]);
 
   // Category Group pagination (dynamically fits vertical rail height without scrolling or touching buttons)
   const [groupPageIndex, setGroupPageIndex] = useState<number>(0);
@@ -548,10 +558,10 @@ export default function PosBillingScreen({
     );
   }, [filteredProducts, itemPageIndex]);
 
-  // Reset itemPageIndex to 0 whenever filter/category changes
+  // Reset itemPageIndex to 0 whenever category changes
   useEffect(() => {
     setItemPageIndex(0);
-  }, [selectedGroup, skuDesc, skuCode]);
+  }, [selectedGroup]);
 
   // ---------------------------------------------------------------------------
   // FINANCIAL CALCULATIONS (Total, Tot Qty, Disc, SubTotal, Tax, RoundOff)
@@ -572,7 +582,7 @@ export default function PosBillingScreen({
     : parseFloat(tenderAmount) || 0.0;
   const balance = Math.max(0, currentTender - grandTotal);
 
-  // Sync active item when cart selection changes
+  // Sync active item and Salesman indicator when cart selection changes
   useEffect(() => {
     if (selectedCartIndex >= 0 && selectedCartIndex < cart.length) {
       const item = cart[selectedCartIndex];
@@ -582,6 +592,9 @@ export default function PosBillingScreen({
         price: item.price,
         stock: 0,
       });
+      if (item.salesman) {
+        setSalesMan(item.salesman);
+      }
     }
   }, [selectedCartIndex, cart]);
 
@@ -604,7 +617,7 @@ export default function PosBillingScreen({
     const discToAdd = parseFloat(fastDisc) || 0;
     const finalPrice = explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
     const finalDesc = explicitDesc || item.Description;
-    const finalSalesman = explicitSalesman || salesMan || "UPS";
+    const finalSalesman = explicitSalesman || salesMan || cashierName || "HQ";
 
     // App.config Conditions: AbovePrice, Aboveqty, ISValueAbove validation alerts
     const isValueAboveCheck = isEnabled("ISValueAbove");
@@ -661,6 +674,7 @@ export default function PosBillingScreen({
             (qtyToAdd * finalPrice - discToAdd).toFixed(2),
           ),
           gst: 0.0,
+          salesman: finalSalesman,
           uom: item.UOM || "PCS",
         };
         const nextCart = [...prev, newItem];
@@ -688,6 +702,157 @@ export default function PosBillingScreen({
         }),
       }).catch(() => {});
     } catch {}
+
+    // Reset fast quantity back to 1 for the next item
+    setFastQty("1");
+    setFastDisc("0.00");
+    setFastDiscPerc("0");
+  };
+
+  
+  // Updates quantity for the currently selected item in the cart if cart has items,
+  // or sets the pre-entry quantity for the next scanned/tapped item.
+  const handleFastQtyCommit = (newQtyStr: string) => {
+    const parsed = parseFloat(newQtyStr);
+    if (isNaN(parsed) || parsed <= 0) {
+      setFastQty("1");
+      return;
+    }
+
+    setFastQty(String(parsed));
+
+    // If an item is currently selected in the cart, update its quantity immediately
+    if (cart.length > 0) {
+      const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      const targetItem = cart[targetIdx];
+      if (targetItem) {
+        setCart((prev) =>
+          prev.map((c, i) => {
+            if (i === targetIdx) {
+              return {
+                ...c,
+                qty: parsed,
+                amount: parseFloat((parsed * c.price - c.disc).toFixed(2)),
+              };
+            }
+            return c;
+          })
+        );
+
+        setActiveItem((prev) => ({
+          ...prev,
+          qty: parsed,
+        }));
+
+        try {
+          const activeTerm = (terminalCode || "").trim();
+          fetch(`${API_URL}/api/cart/temp-sales/update-qty`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              terminalCode: activeTerm,
+              inventoryCode: targetItem.code,
+              exactQty: parsed,
+            }),
+          }).catch(() => {});
+        } catch {}
+      }
+    }
+  };
+
+  // Updates discount percentage for the currently selected item in the cart or next item
+  const handleFastDiscPercCommit = (newPercStr: string) => {
+    const parsed = parseFloat(newPercStr);
+    if (isNaN(parsed) || parsed < 0) {
+      setFastDiscPerc("0");
+      return;
+    }
+
+    setFastDiscPerc(String(parsed));
+
+    if (cart.length > 0) {
+      const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      const targetItem = cart[targetIdx];
+      if (targetItem) {
+        const gross = targetItem.qty * targetItem.price;
+        const discAmt = parseFloat(((gross * parsed) / 100).toFixed(2));
+        setFastDisc(discAmt.toFixed(2));
+
+        setCart((prev) =>
+          prev.map((c, i) => {
+            if (i === targetIdx) {
+              return {
+                ...c,
+                disc: discAmt,
+                amount: parseFloat(Math.max(0, gross - discAmt).toFixed(2)),
+              };
+            }
+            return c;
+          })
+        );
+
+        try {
+          const activeTerm = (terminalCode || "").trim();
+          fetch(`${API_URL}/api/cart/temp-sales/update-discount`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              terminalCode: activeTerm,
+              inventoryCode: targetItem.code,
+              discountPerc: parsed,
+            }),
+          }).catch(() => {});
+        } catch {}
+      }
+    }
+  };
+
+  // Updates discount amount for the currently selected item in the cart or next item
+  const handleFastDiscAmountCommit = (newAmtStr: string) => {
+    const parsed = parseFloat(newAmtStr);
+    if (isNaN(parsed) || parsed < 0) {
+      setFastDisc("0.00");
+      return;
+    }
+
+    setFastDisc(parsed.toFixed(2));
+
+    if (cart.length > 0) {
+      const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      const targetItem = cart[targetIdx];
+      if (targetItem) {
+        const gross = targetItem.qty * targetItem.price;
+        const discAmt = Math.min(parsed, gross);
+        const calculatedPerc = gross > 0 ? parseFloat(((discAmt / gross) * 100).toFixed(1)) : 0;
+        setFastDiscPerc(String(calculatedPerc));
+
+        setCart((prev) =>
+          prev.map((c, i) => {
+            if (i === targetIdx) {
+              return {
+                ...c,
+                disc: discAmt,
+                amount: parseFloat(Math.max(0, gross - discAmt).toFixed(2)),
+              };
+            }
+            return c;
+          })
+        );
+
+        try {
+          const activeTerm = (terminalCode || "").trim();
+          fetch(`${API_URL}/api/cart/temp-sales/update-discount`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              terminalCode: activeTerm,
+              inventoryCode: targetItem.code,
+              discountAmount: discAmt,
+            }),
+          }).catch(() => {});
+        } catch {}
+      }
+    }
   };
 
   // Adjust active item quantity with (+) or (-) buttons
@@ -1311,23 +1476,20 @@ export default function PosBillingScreen({
         return;
       }
 
-      // Check salesman requirement
-      if (data.requiresSalesman) {
-        setPendingItemAdd(data);
-        setTempSalesmanCode(salesMan || "");
-        setShowSalesmanModal(true);
-        return;
+      // If salesman resolved, update top salesman indicator directly without popup
+      if (data.salesman) {
+        setSalesMan(data.salesman);
       }
 
       // Complete cart insertion
-      finalizeValidatedItemAdd(data, forcedSalesman);
+      finalizeValidatedItemAdd(data, data.salesman || forcedSalesman);
     } catch (err: any) {
       showAlert("Lookup Error", err.message || "Failed to process item code.", "error");
     }
   };
 
   const finalizeValidatedItemAdd = (data: any, chosenSalesman?: string) => {
-    const finalSalesman = chosenSalesman || data.salesmanCode || salesMan || "UPS";
+    const finalSalesman = chosenSalesman || data.salesmanCode || salesMan || cashierName || "HQ";
     const itemData = data.item;
     const finalQty = Number(data.quantity) || 1;
     const finalPrice = Number(data.price) !== undefined ? Number(data.price) : Number(itemData.SellingPrice);
@@ -1370,9 +1532,91 @@ export default function PosBillingScreen({
     skuInputRef.current?.focus();
   };
 
+
+  // ---------------------------------------------------------------------------
+  // DIRECT SKU VALIDATION & TBLTEMPSALES INSERTION (txtInventoryCode_Leave / Enter)
+  // Strict matching against tblInventory.InventoryCode only.
+  // ---------------------------------------------------------------------------
+  const processDirectSkuCode = async () => {
+    const enteredSku = skuCode.trim();
+    if (!enteredSku) return;
+
+    if (isProcessingSkuRef.current) return;
+    isProcessingSkuRef.current = true;
+    setIsProcessingSku(true);
+
+    try {
+      const activeTerm = (terminalCode || "").trim() || "HQPC1";
+      const activeCashier = (cashierName || "").trim();
+      const currentQtyNum = parseFloat(fastQty) || 1;
+      const currentDiscNum = parseFloat(fastDisc) || 0;
+
+      const res = await fetch(`${API_URL}/api/inventory/direct-sku`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          skuCode: enteredSku,
+          terminalCode: activeTerm,
+          qty: currentQtyNum,
+          disc: currentDiscNum,
+          salesmanCode: activeCashier || salesMan || "AMITH",
+          locationCode: "HQ",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        // Step 5: If SKU Code does not exist or validation fails
+        showAlert(
+          "Invalid SKU Code",
+          data.message || "Invalid SKU Code. Item not found in Inventory.",
+          "error"
+        );
+        setSkuCode("");
+        skuInputRef.current?.focus();
+        return;
+      }
+
+      // Step 4: Successful Insertion into tblTempSales
+      if (Array.isArray(data.cartItems)) {
+        setCart(data.cartItems);
+        setSelectedCartIndex(data.cartItems.length - 1);
+        shouldAutoScrollRef.current = true;
+      }
+
+      // Update HUD active item
+      if (data.item) {
+        setActiveItem({
+          name: data.item.Description,
+          qty: currentQtyNum,
+          price: data.item.Price,
+          stock: data.item.Stock !== undefined ? data.item.Stock : 0,
+        });
+      }
+      if (data.salesman) {
+        setSalesMan(data.salesman);
+      }
+
+      // Reset SKU input and reset fast inputs
+      setSkuCode("");
+      setFastQty("1");
+      setFastDisc("0.00");
+      setFastDiscPerc("0");
+      skuInputRef.current?.focus();
+    } catch (err: any) {
+      showAlert("SKU Error", err.message || "Network error while validating SKU code.", "error");
+      setSkuCode("");
+      skuInputRef.current?.focus();
+    } finally {
+      isProcessingSkuRef.current = false;
+      setIsProcessingSku(false);
+    }
+  };
+
   const handleSkuSubmit = async () => {
     if (skuCode.trim()) {
-      await processItemLookup(skuCode.trim());
+      await processDirectSkuCode();
     } else if (skuDesc.trim()) {
       // If user presses enter on description input without dropdown selection
       if (descSearchResults.length > 0) {
@@ -1560,7 +1804,9 @@ export default function PosBillingScreen({
             style={styles.skuInput}
             value={skuCode}
             onChangeText={setSkuCode}
-            onSubmitEditing={handleSkuSubmit}
+            onSubmitEditing={processDirectSkuCode}
+            onBlur={processDirectSkuCode}
+            editable={!isProcessingSku}
           />
         </View>
 
@@ -1640,9 +1886,14 @@ export default function PosBillingScreen({
           )}
         </View>
 
-        {/* Fast Quantity Box (1) - Locked if Weighing scale item */}
-        <View style={[styles.pillInputBox, isScaleLockedQty && { backgroundColor: "#f1f5f9", opacity: 0.7 }]}>
+        {/* Fast Quantity Box (1) - Editable for next item or selected cart item */}
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => fastQtyInputRef.current?.focus()}
+          style={[styles.pillInputBox, isScaleLockedQty && { backgroundColor: "#f1f5f9", opacity: 0.7 }]}
+        >
           <TextInput
+            ref={fastQtyInputRef}
             style={styles.pillInput}
             value={fastQty}
             editable={!isScaleLockedQty}
@@ -1650,44 +1901,62 @@ export default function PosBillingScreen({
               if (isScaleLockedQty) return;
               setFastQty(txt);
             }}
+            onEndEditing={(e) => handleFastQtyCommit(e.nativeEvent.text)}
+            onSubmitEditing={(e) => {
+              handleFastQtyCommit(e.nativeEvent.text);
+              skuInputRef.current?.focus();
+            }}
             keyboardType="numeric"
             selectTextOnFocus
           />
-        </View>
+        </TouchableOpacity>
 
         {/* Fast Disc % Box (0) */}
-        <View style={styles.pillInputBox}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => fastDiscPercInputRef.current?.focus()}
+          style={styles.pillInputBox}
+        >
           <TextInput
+            ref={fastDiscPercInputRef}
             style={styles.pillInput}
             value={fastDiscPerc}
             onChangeText={setFastDiscPerc}
+            onEndEditing={(e) => handleFastDiscPercCommit(e.nativeEvent.text)}
+            onSubmitEditing={(e) => {
+              handleFastDiscPercCommit(e.nativeEvent.text);
+              skuInputRef.current?.focus();
+            }}
             keyboardType="numeric"
             selectTextOnFocus
           />
-        </View>
+        </TouchableOpacity>
 
         {/* Fast Disc Amount Box (0.00) */}
-        <View style={[styles.pillInputBox, { width: 52 }]}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => fastDiscInputRef.current?.focus()}
+          style={[styles.pillInputBox, { width: 52 }]}
+        >
           <TextInput
+            ref={fastDiscInputRef}
             style={styles.pillInput}
             value={fastDisc}
             onChangeText={setFastDisc}
+            onEndEditing={(e) => handleFastDiscAmountCommit(e.nativeEvent.text)}
+            onSubmitEditing={(e) => {
+              handleFastDiscAmountCommit(e.nativeEvent.text);
+              skuInputRef.current?.focus();
+            }}
             keyboardType="numeric"
             selectTextOnFocus
           />
-        </View>
-
-        {/* SalesMan / Sales M Button */}
-        <TouchableOpacity
-          style={styles.salesManBtn}
-          onPress={() => {
-            setTempSalesmanCode(salesMan || "");
-            setShowSalesmanModal(true);
-          }}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.salesManBtnText}>{salesMan ? `SM: ${salesMan}` : "Sales Man"}</Text>
         </TouchableOpacity>
+
+        {/* SalesMan / Sales M Display Pill (Direct indicator - no modal popup) */}
+        <View style={styles.salesManBtn}>
+          <Text style={styles.salesManBtnText}>{salesMan ? `SM: ${salesMan}` : "SM: HQ"}</Text>
+        </View>
 
         {/* Plus / Minus Quick Buttons */}
         <TouchableOpacity
@@ -3830,13 +4099,19 @@ const styles = StyleSheet.create({
     borderColor: "#fecaca",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
   },
   pillInput: {
+    width: "100%",
+    height: "100%",
     fontSize: 12,
     fontWeight: "700",
     color: "#dc2626",
     textAlign: "center",
+    padding: 0,
+    margin: 0,
     outlineStyle: "none" as any,
+    cursor: "text" as any,
   },
   salesManBtn: {
     height: 34,

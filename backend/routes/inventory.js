@@ -17,6 +17,7 @@ const express = require('express');
 const router = express.Router();
 const { sql, getPool } = require('../config/db');
 const configService = require('../config/configService');
+const { resolveSalesmanValue } = require('../services/salesmanService');
 
 // ------------------------------------------------------------------------------
 // GET /api/inventory/touch-groups
@@ -315,8 +316,20 @@ router.post('/lookup', async (req, res) => {
       effectiveQty = scaleRes.weightKg;
     }
 
+    // 8. Determine Salesman value automatically based on the 4 conditions:
+    const salesmanResolution = await resolveSalesmanValue(pool, {
+      inventoryCode: item.InventoryCode,
+      departmentCode: item.DepartmentCode,
+      itemSalesmanRequired: item.SalesmanRequired,
+      cashierId: req.body.salesmanCode || 'UPS',
+      locationCode: locationCode,
+    });
+
     return res.status(200).json({
       success: true,
+      requiresSalesman: false, // Never open popup, auto-assigned
+      salesman: salesmanResolution.salesman,
+      salesmanCode: salesmanResolution.salesman,
       item: {
         InventoryCode: item.InventoryCode,
         Description: item.Description,
@@ -439,6 +452,276 @@ router.post('/validate-salesman', async (req, res) => {
   } catch (err) {
     console.error('❌ [SALESMAN VALIDATE ERROR]:', err.message);
     return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ------------------------------------------------------------------------------
+// POST /api/inventory/direct-sku
+// Direct SKU Code Validation and tblTempSales Insertion (Strict matching against tblInventory)
+// Requirements:
+// 1. Matches entered SKU against tblInventory.InventoryCode only (no description, no barcode mapping).
+// 2. Retrieves complete inventory record (Description, RetailPrice, UOM, DepartmentCode, CategoryCode, BrandCode, etc.).
+// 3. Validates InActive, Discontinued, BCRS Deposit, and Zero Price rules.
+// 4. Retrieves available stock (QOH) via getItemStock.
+// 5. Inserts or increments the item in tblTempSales directly within the database.
+// 6. Returns the updated cart items and summary for instant frontend refresh.
+// ------------------------------------------------------------------------------
+router.post('/direct-sku', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database is currently unreachable.' });
+
+    const {
+      skuCode,
+      terminalCode,
+      qty = 1,
+      disc = 0,
+      salesmanCode,
+      locationCode = 'HQ',
+    } = req.body;
+
+    const trimmedSku = String(skuCode || '').trim();
+    if (!trimmedSku) {
+      return res.status(400).json({ success: false, message: 'SKU Code is required.' });
+    }
+
+    const termCode = String(terminalCode || '').trim();
+    if (!termCode) {
+      return res.status(400).json({ success: false, message: 'TerminalCode is required.' });
+    }
+
+    const qtyNum = Number(qty) > 0 ? Number(qty) : 1;
+    const discNum = Number(disc) >= 0 ? Number(disc) : 0;
+
+    // Step 2: Check tblInventory strictly matching InventoryCode
+    const invReq = pool.request();
+    invReq.input('InventoryCode', sql.VarChar(50), trimmedSku);
+
+    const invRes = await invReq.query(`
+      SELECT TOP 1 *
+      FROM tblInventory
+      WHERE UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@InventoryCode)
+    `);
+
+    if (invRes.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        errorCode: 'ITEM_NOT_FOUND',
+        message: 'Invalid SKU Code. Item not found in Inventory.',
+      });
+    }
+
+    const item = invRes.recordset[0];
+
+    // Step 3: Validate item eligibility
+    // A: Discontinued check
+    if (Boolean(item.Discontinued)) {
+      return res.status(400).json({
+        success: false,
+        errorCode: 'ITEM_DISCONTINUED',
+        message: 'Item is Discontinued. Not Allowed to do any Transaction!',
+      });
+    }
+
+    // B: InActive check
+    if (Boolean(item.InActive)) {
+      return res.status(400).json({
+        success: false,
+        errorCode: 'ITEM_INACTIVE',
+        message: 'Item is InActive. Not Allowed to do any Transaction!',
+      });
+    }
+
+    // C: BCRS Deposit check
+    if (String(item.Description || '').toUpperCase() === 'BCRS DEPOSIT') {
+      return res.status(400).json({
+        success: false,
+        errorCode: 'BCRS_DEPOSIT_DIRECT',
+        message: 'This Item is for BCRS Deposit. Unable to Scan directly.',
+      });
+    }
+
+    // D: Determine retail price
+    const retailPrice = Number(item.RetailPrice !== null && item.RetailPrice !== undefined ? item.RetailPrice : item.SellingPrice) || 0;
+    const allowZero = Boolean(item.AllowZeroPrice);
+
+    if (retailPrice <= 0 && !allowZero && !Boolean(item.OpenItem) && !Boolean(item.AllowPaymodeCommision)) {
+      if (item.UOM !== 'KG') {
+        return res.status(400).json({
+          success: false,
+          errorCode: 'ZERO_PRICE_NOT_ALLOWED',
+          message: 'Please set the price. Zero price not allowed for this item.',
+        });
+      }
+    }
+
+    // E: Stock QOH Check
+    const posItemService = require('../services/posItemService');
+    const qoh = await posItemService.getItemStock(pool, item.InventoryCode, locationCode);
+
+    // Determine Salesman column value based on:
+    // 1. tblMaParamMaster where Value = 1
+    // 2. tblMaUserMaster where IsSalesMan = 1
+    // 3. tblInventory where SalesmanRequired = 1
+    // 4. tblInvDepartment where SalesmanRequired = 1
+    // If SalesmanRequired = 1: User Name
+    // If SalesmanRequired = 0: Location Name
+    const salesmanResolution = await resolveSalesmanValue(pool, {
+      inventoryCode: item.InventoryCode,
+      departmentCode: item.DepartmentCode,
+      itemSalesmanRequired: item.SalesmanRequired,
+      cashierId: salesmanCode || 'UPS',
+      terminalCode: termCode,
+      locationCode: locationCode,
+    });
+    const effectiveSalesman = salesmanResolution.salesman;
+
+    // Step 4: Insert / update into tblTempSales
+    const invCode = String(item.InventoryCode).trim();
+    const lineDesc = String(item.Description || '').trim();
+    const effectivePromoName = invCode;
+
+    // Check if this exact item already exists in tblTempSales for this terminal
+    const checkReq = pool.request();
+    checkReq.input('term', sql.VarChar(20), termCode);
+    checkReq.input('code', sql.VarChar(50), invCode);
+    const existing = await checkReq.query(`
+      SELECT TOP 1 TempID, Qty, Discount, Price, NetDiscount
+      FROM tblTempSales
+      WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
+      ORDER BY TempID DESC
+    `);
+
+    const gstPerc = Number(item.OutputTax || 0);
+
+    if (existing.recordset.length > 0) {
+      // Increment existing row
+      const existingRow = existing.recordset[0];
+      const newQty = Number(existingRow.Qty) + qtyNum;
+      const effectivePrice = Number(existingRow.Price) || retailPrice;
+      const totalDisc = Number(existingRow.Discount) + discNum;
+      const lineTotal = parseFloat((newQty * effectivePrice - totalDisc).toFixed(2));
+      const gstAmount = parseFloat(((lineTotal * gstPerc) / (100 + gstPerc)).toFixed(2));
+
+      const updateReq = pool.request();
+      updateReq.input('tempId', sql.Int, existingRow.TempID);
+      updateReq.input('qty', sql.Decimal(18, 2), newQty);
+      updateReq.input('disc', sql.Decimal(18, 2), totalDisc);
+      updateReq.input('netDisc', sql.Decimal(18, 2), totalDisc);
+      updateReq.input('amount', sql.Decimal(18, 2), lineTotal);
+      updateReq.input('gst', sql.Decimal(18, 2), gstAmount);
+      updateReq.input('gstPrec', sql.Decimal(18, 2), gstPerc);
+      updateReq.input('promoName', sql.VarChar(100), effectivePromoName);
+
+      await updateReq.query(`
+        UPDATE tblTempSales
+        SET Qty = @qty,
+            Discount = @disc,
+            NetDiscount = @netDisc,
+            Amount = @amount,
+            GST = @gst,
+            GstPrec = @gstPrec,
+            PromoName = @promoName
+        WHERE TempID = @tempId
+      `);
+    } else {
+      // Insert new line item
+      const lineTotal = parseFloat((qtyNum * retailPrice - discNum).toFixed(2));
+      const gstAmount = parseFloat(((lineTotal * gstPerc) / (100 + gstPerc)).toFixed(2));
+
+      const insertReq = pool.request();
+      insertReq.input('term', sql.VarChar(20), termCode);
+      insertReq.input('code', sql.VarChar(50), invCode);
+      insertReq.input('desc', sql.VarChar(200), lineDesc);
+      insertReq.input('qty', sql.Decimal(18, 2), qtyNum);
+      insertReq.input('dept', sql.VarChar(50), String(item.DepartmentCode || '').trim());
+      insertReq.input('brand', sql.VarChar(50), String(item.BrandCode || '').trim());
+      insertReq.input('cat', sql.VarChar(50), String(item.CategoryCode || '').trim());
+      insertReq.input('avgCost', sql.Decimal(18, 2), Number(item.AverageCost || 0));
+      insertReq.input('price', sql.Decimal(18, 2), retailPrice);
+      insertReq.input('charge', sql.Decimal(18, 4), 0);
+      insertReq.input('disc', sql.Decimal(18, 2), discNum);
+      insertReq.input('netDisc', sql.Decimal(18, 2), discNum);
+      insertReq.input('gstPrec', sql.Decimal(18, 2), gstPerc);
+      insertReq.input('gst', sql.Decimal(18, 2), gstAmount);
+      insertReq.input('amount', sql.Decimal(18, 2), lineTotal);
+      insertReq.input('salesman', sql.VarChar(20), effectiveSalesman);
+      insertReq.input('promoName', sql.VarChar(100), effectivePromoName);
+      insertReq.input('memDisc', sql.Decimal(18, 2), 0);
+      insertReq.input('itemType', sql.VarChar(50), 'NORMAL');
+      insertReq.input('memName', sql.VarChar(100), '');
+
+      await insertReq.query(`
+        INSERT INTO tblTempSales (
+          TerminalCode, InventoryCode, Description, Qty, Department, Brand, Category,
+          AverageCost, Price, Charge, Discount, NetDiscount, GstPrec, GST, Amount,
+          Salesman, PromoName, MemDiscount, ItemType, MemName
+        )
+        VALUES (
+          @term, @code, @desc, @qty, @dept, @brand, @cat,
+          @avgCost, @price, @charge, @disc, @netDisc, @gstPrec, @gst, @amount,
+          @salesman, @promoName, @memDisc, @itemType, @memName
+        )
+      `);
+    }
+
+    // Step 5: Fetch fresh cart items for this terminal to return directly
+    const cartReq = pool.request();
+    cartReq.input('term', sql.VarChar(20), termCode);
+    const cartRes = await cartReq.query(`
+      SELECT 
+        ts.TempID,
+        RTRIM(LTRIM(ts.TerminalCode)) AS TerminalCode,
+        RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
+        RTRIM(LTRIM(ISNULL(ts.Description, inv.Description))) AS Description,
+        ISNULL(ts.Qty, 1) AS Qty,
+        ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price,
+        ISNULL(ts.Discount, 0) AS Discount,
+        ISNULL(ts.NetDiscount, 0) AS NetDiscount,
+        ISNULL(ts.Amount, 0) AS Amount,
+        ISNULL(ts.GstPrec, 0) AS GstPrec,
+        ISNULL(ts.GST, 0) AS GST,
+        RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
+        RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
+      FROM tblTempSales ts
+      LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
+      WHERE RTRIM(LTRIM(ts.TerminalCode)) = @term
+      ORDER BY ts.TempID ASC
+    `);
+
+    const cartItems = cartRes.recordset.map((row) => ({
+      id: String(row.TempID),
+      code: row.InventoryCode,
+      description: row.Description,
+      qty: Number(row.Qty),
+      price: Number(row.Price),
+      disc: Number(row.Discount),
+      amount: Number(row.Amount),
+      gst: Number(row.GST),
+      salesman: row.Salesman || '',
+      uom: row.UOM || 'PCS',
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: 'Item inserted into tblTempSales successfully.',
+      item: {
+        InventoryCode: invCode,
+        Description: lineDesc,
+        RetailPrice: retailPrice,
+        SellingPrice: Number(item.SellingPrice) || retailPrice,
+        Price: retailPrice,
+        UOM: item.UOM || 'PCS',
+        Stock: qoh,
+        Salesman: effectiveSalesman,
+      },
+      salesman: effectiveSalesman,
+      cartItems,
+    });
+  } catch (err) {
+    console.error('❌ [DIRECT SKU ERROR]:', err.message);
+    return res.status(500).json({ success: false, message: 'Direct SKU processing failed: ' + err.message });
   }
 });
 

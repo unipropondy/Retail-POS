@@ -16,6 +16,7 @@
 const express = require('express');
 const router = express.Router();
 const { sql, getPool } = require('../config/db');
+const { resolveSalesmanValue } = require('../services/salesmanService');
 
 // Helper to normalize terminal code passed from the client session
 const getCleanTerminalCode = (code) => {
@@ -58,6 +59,7 @@ router.get('/temp-sales', async (req, res) => {
         ISNULL(ts.Amount, 0) AS Amount,
         ISNULL(ts.GstPrec, 0) AS GstPrec,
         ISNULL(ts.GST, 0) AS GST,
+        RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
         RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
       FROM tblTempSales ts
       LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
@@ -75,6 +77,7 @@ router.get('/temp-sales', async (req, res) => {
       disc: Number(row.Discount),
       amount: Number(row.Amount),
       gst: Number(row.GST),
+      salesman: row.Salesman || '',
       uom: row.UOM || 'PCS',
     }));
 
@@ -145,7 +148,8 @@ router.post('/temp-sales/add', async (req, res) => {
         RTRIM(LTRIM(ISNULL(BrandCode, ''))) AS Brand,
         RTRIM(LTRIM(ISNULL(CategoryCode, ''))) AS Category,
         ISNULL(AverageCost, 0) AS AverageCost,
-        ISNULL(OutputTax, 0) AS TaxPerc
+        ISNULL(OutputTax, 0) AS TaxPerc,
+        ISNULL(SalesmanRequired, 0) AS SalesmanRequired
       FROM tblInventory
       WHERE RTRIM(LTRIM(InventoryCode)) = @code
     `);
@@ -216,7 +220,22 @@ router.post('/temp-sales/add', async (req, res) => {
 
       const insertReq = pool.request();
       const lineDesc = (description && String(description).trim()) || item.Description;
-      const effectiveSalesman = (salesman && String(salesman).trim()) || 'UPS';
+
+      // Determine Salesman column value based on:
+      // 1. tblMaParamMaster where Value = 1
+      // 2. tblMaUserMaster where IsSalesMan = 1
+      // 3. tblInventory where SalesmanRequired = 1
+      // 4. tblInvDepartment where SalesmanRequired = 1
+      // If SalesmanRequired = 1: User Name
+      // If SalesmanRequired = 0: Location Name
+      const salesmanResolution = await resolveSalesmanValue(pool, {
+        inventoryCode: invCode,
+        departmentCode: item.Department,
+        itemSalesmanRequired: item.SalesmanRequired,
+        cashierId: salesman || 'UPS',
+        terminalCode: termCode,
+      });
+      const effectiveSalesman = salesmanResolution.salesman;
 
       insertReq.input('term', sql.VarChar(20), termCode);
       insertReq.input('code', sql.VarChar(50), invCode);
@@ -333,6 +352,148 @@ router.post('/temp-sales/update-qty', async (req, res) => {
 });
 
 // ------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
+// POST /api/cart/temp-sales/update-desc
+// Updates description for an item by code or TempID in tblTempSales & tblDisplaySales
+// ------------------------------------------------------------------------------
+
+// ------------------------------------------------------------------------------
+// POST /api/cart/temp-sales/update-discount
+// Updates item discount amount or percentage for an item by code in tblTempSales & tblDisplaySales
+// ------------------------------------------------------------------------------
+router.post('/temp-sales/update-discount', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'DB unreachable' });
+
+    const { terminalCode, inventoryCode, discountAmount, discountPerc } = req.body;
+    const termCode = getCleanTerminalCode(terminalCode);
+    if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
+
+    const invCode = String(inventoryCode || '').trim();
+    if (!invCode) return res.status(400).json({ success: false, message: 'inventoryCode is required' });
+
+    const request = pool.request();
+    request.input('term', sql.VarChar(20), termCode);
+    request.input('code', sql.VarChar(50), invCode);
+
+    const existing = await request.query(`
+      SELECT TOP 1 TempID, Qty, Price, Discount, Amount, GstPrec
+      FROM tblTempSales
+      WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
+      ORDER BY TempID DESC
+    `);
+
+    if (existing.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Item not in cart' });
+    }
+
+    const row = existing.recordset[0];
+    const qty = Number(row.Qty) || 1;
+    const price = Number(row.Price) || 0;
+    const grossTotal = qty * price;
+
+    let finalDisc = 0;
+    if (discountPerc !== undefined && discountPerc !== null && discountPerc !== '') {
+      const perc = Number(discountPerc) || 0;
+      finalDisc = parseFloat(((grossTotal * perc) / 100).toFixed(2));
+    } else if (discountAmount !== undefined && discountAmount !== null && discountAmount !== '') {
+      finalDisc = parseFloat(Number(discountAmount).toFixed(2)) || 0;
+    }
+
+    if (finalDisc > grossTotal) {
+      finalDisc = grossTotal;
+    }
+
+    const newAmount = parseFloat((grossTotal - finalDisc).toFixed(2));
+    const gstPerc = Number(row.GstPrec) || 0;
+    const gstAmount = parseFloat(((newAmount * gstPerc) / (100 + gstPerc)).toFixed(2));
+
+    const upReq = pool.request();
+    upReq.input('tempId', sql.Int, row.TempID);
+    upReq.input('disc', sql.Decimal(18, 2), finalDisc);
+    upReq.input('amt', sql.Decimal(18, 2), newAmount);
+    upReq.input('gst', sql.Decimal(18, 2), gstAmount);
+
+    await upReq.query(`
+      UPDATE tblTempSales
+      SET Discount = @disc,
+          NetDiscount = @disc,
+          Amount = @amt,
+          GST = @gst
+      WHERE TempID = @tempId
+    `);
+
+    return res.status(200).json({
+      success: true,
+      action: 'updated',
+      discount: finalDisc,
+      amount: newAmount,
+    });
+  } catch (error) {
+    console.error('❌ [CART ERROR] Failed to update discount in tblTempSales:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/temp-sales/update-desc', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'DB unreachable' });
+
+    const { terminalCode, inventoryCode, description, tempId } = req.body;
+    const termCode = getCleanTerminalCode(terminalCode);
+    if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
+
+    const newDesc = String(description || '').trim();
+    if (!newDesc) return res.status(400).json({ success: false, message: 'description is required' });
+
+    const request = pool.request();
+    request.input('term', sql.VarChar(20), termCode);
+    request.input('desc', sql.VarChar(200), newDesc);
+
+    if (tempId) {
+      request.input('tempId', sql.Int, tempId);
+      await request.query(`
+        UPDATE tblTempSales
+        SET Description = @desc
+        WHERE TempID = @tempId AND RTRIM(LTRIM(TerminalCode)) = @term;
+
+        UPDATE tblDisplaySales
+        SET Description = @desc
+        WHERE TempID = @tempId AND RTRIM(LTRIM(TerminalCode)) = @term;
+      `);
+    } else {
+      const invCode = String(inventoryCode || '').trim();
+      if (!invCode) return res.status(400).json({ success: false, message: 'inventoryCode or tempId is required' });
+      request.input('code', sql.VarChar(50), invCode);
+
+      await request.query(`
+        UPDATE tblTempSales
+        SET Description = @desc
+        WHERE TempID = (
+          SELECT TOP 1 TempID FROM tblTempSales
+          WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
+          ORDER BY TempID DESC
+        );
+
+        UPDATE tblDisplaySales
+        SET Description = @desc
+        WHERE TempID = (
+          SELECT TOP 1 TempID FROM tblDisplaySales
+          WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
+          ORDER BY TempID DESC
+        );
+      `);
+    }
+
+    return res.status(200).json({ success: true, action: 'updated', description: newDesc });
+  } catch (error) {
+    console.error('Failed to update description in tblTempSales:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // DELETE /api/cart/temp-sales/item
 // Exact VB.NET POS subVoidItem() execution:
 // 1. Validates selected item (BCRS DEPOSIT check)

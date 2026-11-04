@@ -58,6 +58,7 @@ export interface CashierProfile {
   userGroup: string;
   isAdmin: boolean;
   isCashier: boolean;
+  isSalesMan?: boolean;
 }
 
 // Interface representing terminal configuration from tblmaTerminal

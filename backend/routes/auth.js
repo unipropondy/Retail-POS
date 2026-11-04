@@ -418,6 +418,7 @@ module.exports = function (jwtSecret) {
             RTRIM(LTRIM(UserGroupCode)) AS UserGroupCode,
             IsAdmin,
             IsCashier,
+            ISNULL(IsSalesMan, 0) AS IsSalesMan,
             ExpiryDate
           FROM tblMausermaster
           WHERE UPPER(RTRIM(LTRIM(UserCode))) = @username 
@@ -465,6 +466,7 @@ module.exports = function (jwtSecret) {
           userGroup: user.UserGroupCode,
           isAdmin: user.IsAdmin === 1 || user.IsAdmin === true,
           isCashier: user.IsCashier === 1 || user.IsCashier === true,
+          isSalesMan: user.IsSalesMan === 1 || user.IsSalesMan === true,
           terminalCode: terminal.TerminalCode,
           locationCode: terminal.LocationCode,
           computerName: terminal.ComputerName,
@@ -498,6 +500,7 @@ module.exports = function (jwtSecret) {
           userGroup: user.UserGroupCode,
           isAdmin: user.IsAdmin === 1 || user.IsAdmin === true,
           isCashier: user.IsCashier === 1 || user.IsCashier === true,
+          isSalesMan: user.IsSalesMan === 1 || user.IsSalesMan === true,
         },
       });
     } catch (error) {
