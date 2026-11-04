@@ -316,20 +316,37 @@ router.post('/lookup', async (req, res) => {
       effectiveQty = scaleRes.weightKg;
     }
 
-    // 8. Determine Salesman value automatically based on the 4 conditions:
-    const salesmanResolution = await resolveSalesmanValue(pool, {
-      inventoryCode: item.InventoryCode,
-      departmentCode: item.DepartmentCode,
-      itemSalesmanRequired: item.SalesmanRequired,
-      cashierId: req.body.salesmanCode || 'UPS',
-      locationCode: locationCode,
-    });
+    // 8. Determine Salesman value:
+    // If an explicit salesman was passed in request, use it directly.
+    // Otherwise compute based on the 4 conditions:
+    const explicitSalesmanParam = (req.body.salesmanCode && String(req.body.salesmanCode).trim()) || '';
+    let finalSalesmanCode = explicitSalesmanParam;
+    
+    // Resolve terminal location code from DB if not passed
+    let termLoc = (locationCode && String(locationCode).trim()) || '';
+    if (!termLoc && req.body.terminalCode) {
+      const tReq = pool.request();
+      tReq.input('tCode', sql.VarChar(20), String(req.body.terminalCode).trim());
+      const tRes = await tReq.query('SELECT TOP 1 RTRIM(LTRIM(LocationCode)) AS LocationCode FROM tblmaTerminal WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@tCode)');
+      termLoc = tRes.recordset[0]?.LocationCode || '';
+    }
+
+    if (!finalSalesmanCode || (termLoc && finalSalesmanCode.toUpperCase() === termLoc.toUpperCase())) {
+      const salesmanResolution = await resolveSalesmanValue(pool, {
+        inventoryCode: item.InventoryCode,
+        departmentCode: item.DepartmentCode,
+        itemSalesmanRequired: item.SalesmanRequired,
+        cashierId: req.body.cashierId || '',
+        locationCode: termLoc,
+      });
+      finalSalesmanCode = salesmanResolution.salesman;
+    }
 
     return res.status(200).json({
       success: true,
       requiresSalesman: false, // Never open popup, auto-assigned
-      salesman: salesmanResolution.salesman,
-      salesmanCode: salesmanResolution.salesman,
+      salesman: finalSalesmanCode,
+      salesmanCode: finalSalesmanCode,
       item: {
         InventoryCode: item.InventoryCode,
         Description: item.Description,
@@ -441,11 +458,13 @@ router.post('/validate-salesman', async (req, res) => {
     if (sm) {
       return res.status(200).json({
         success: true,
+        isValid: true,
         salesman: sm,
       });
     } else {
       return res.status(404).json({
         success: false,
+        isValid: false,
         message: 'Please check the sales man code. Not found in master.',
       });
     }
@@ -478,7 +497,8 @@ router.post('/direct-sku', async (req, res) => {
       qty = 1,
       disc = 0,
       salesmanCode,
-      locationCode = 'HQ',
+      cashierId,
+      locationCode = '',
     } = req.body;
 
     const trimmedSku = String(skuCode || '').trim();
@@ -560,22 +580,37 @@ router.post('/direct-sku', async (req, res) => {
     const posItemService = require('../services/posItemService');
     const qoh = await posItemService.getItemStock(pool, item.InventoryCode, locationCode);
 
-    // Determine Salesman column value based on:
+    // Determine Salesman column value:
+    // If an explicit salesman was chosen (and is not terminal Location Code), use it directly.
+    // Otherwise, determine Salesman column value based on the 4 DB conditions:
     // 1. tblMaParamMaster where Value = 1
     // 2. tblMaUserMaster where IsSalesMan = 1
     // 3. tblInventory where SalesmanRequired = 1
     // 4. tblInvDepartment where SalesmanRequired = 1
     // If SalesmanRequired = 1: User Name
     // If SalesmanRequired = 0: Location Name
-    const salesmanResolution = await resolveSalesmanValue(pool, {
-      inventoryCode: item.InventoryCode,
-      departmentCode: item.DepartmentCode,
-      itemSalesmanRequired: item.SalesmanRequired,
-      cashierId: salesmanCode || 'UPS',
-      terminalCode: termCode,
-      locationCode: locationCode,
-    });
-    const effectiveSalesman = salesmanResolution.salesman;
+    let effectiveSalesman = (salesmanCode && String(salesmanCode).trim()) || '';
+    
+    // Resolve terminal LocationCode from tblmaTerminal if not provided
+    let loc = (locationCode && String(locationCode).trim()) || '';
+    if (!loc && termCode) {
+      const tReq = pool.request();
+      tReq.input('tCode', sql.VarChar(20), termCode);
+      const tRes = await tReq.query('SELECT TOP 1 RTRIM(LTRIM(LocationCode)) AS LocationCode FROM tblmaTerminal WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@tCode)');
+      loc = tRes.recordset[0]?.LocationCode || '';
+    }
+
+    if (!effectiveSalesman || (loc && effectiveSalesman.toUpperCase() === loc.toUpperCase())) {
+      const salesmanResolution = await resolveSalesmanValue(pool, {
+        inventoryCode: item.InventoryCode,
+        departmentCode: item.DepartmentCode,
+        itemSalesmanRequired: item.SalesmanRequired,
+        cashierId: cashierId || '',
+        terminalCode: termCode,
+        locationCode: loc,
+      });
+      effectiveSalesman = salesmanResolution.salesman;
+    }
 
     // Step 4: Insert / update into tblTempSales
     const invCode = String(item.InventoryCode).trim();

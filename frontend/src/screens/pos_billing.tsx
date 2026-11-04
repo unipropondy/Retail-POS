@@ -112,6 +112,7 @@ interface PosBillingProps {
   onLogout?: () => void;
   cashierName?: string;
   terminalCode?: string;
+  locationCode?: string;
   isSalesMan?: boolean;
 }
 
@@ -166,6 +167,7 @@ export default function PosBillingScreen({
   onLogout,
   cashierName,
   terminalCode,
+  locationCode,
   isSalesMan,
 }: PosBillingProps) {
   // ---------------------------------------------------------------------------
@@ -224,17 +226,15 @@ export default function PosBillingScreen({
   const [fastQty, setFastQty] = useState("1");
   const [fastDisc, setFastDisc] = useState("0.00");
   const [fastDiscPerc, setFastDiscPerc] = useState("0");
-  const [salesMan, setSalesMan] = useState(() => {
-    if (isSalesMan === true && cashierName) return cashierName;
-    return "HQ";
-  });
+  const effectiveLocation = (locationCode || "").trim() || "HQ";
+  const [salesMan, setSalesMan] = useState(effectiveLocation);
 
-  // Keep salesMan in sync when props update
+  // Default show Location Code from DB terminal profile in Sales Man for all users
   useEffect(() => {
-    if (isSalesMan === true && cashierName) {
-      setSalesMan(cashierName);
+    if (effectiveLocation) {
+      setSalesMan(effectiveLocation);
     }
-  }, [isSalesMan, cashierName]);
+  }, [effectiveLocation, isSalesMan, cashierName]);
 
   // VB.NET Item-Entry Pipeline State
   const [descSearchResults, setDescSearchResults] = useState<any[]>([]);
@@ -582,7 +582,7 @@ export default function PosBillingScreen({
     : parseFloat(tenderAmount) || 0.0;
   const balance = Math.max(0, currentTender - grandTotal);
 
-  // Sync active item and Salesman indicator when cart selection changes
+  // Sync active item when cart selection changes
   useEffect(() => {
     if (selectedCartIndex >= 0 && selectedCartIndex < cart.length) {
       const item = cart[selectedCartIndex];
@@ -592,9 +592,6 @@ export default function PosBillingScreen({
         price: item.price,
         stock: 0,
       });
-      if (item.salesman) {
-        setSalesMan(item.salesman);
-      }
     }
   }, [selectedCartIndex, cart]);
 
@@ -617,7 +614,7 @@ export default function PosBillingScreen({
     const discToAdd = parseFloat(fastDisc) || 0;
     const finalPrice = explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
     const finalDesc = explicitDesc || item.Description;
-    const finalSalesman = explicitSalesman || salesMan || cashierName || "HQ";
+    const finalSalesman = explicitSalesman || salesMan || effectiveLocation;
 
     // App.config Conditions: AbovePrice, Aboveqty, ISValueAbove validation alerts
     const isValueAboveCheck = isEnabled("ISValueAbove");
@@ -1462,8 +1459,10 @@ export default function PosBillingScreen({
           rawInput: rawInput,
           currentQty: fastQty,
           currentCartItems: currentCartItems,
-          locationCode: "HQ",
-          salesmanCode: forcedSalesman || salesMan || "UPS",
+          locationCode: effectiveLocation,
+          salesmanCode: forcedSalesman || salesMan || effectiveLocation,
+          cashierId: cashierName || "",
+          terminalCode: (terminalCode || "").trim(),
           allowWeighingScale: true,
         }),
       });
@@ -1489,7 +1488,7 @@ export default function PosBillingScreen({
   };
 
   const finalizeValidatedItemAdd = (data: any, chosenSalesman?: string) => {
-    const finalSalesman = chosenSalesman || data.salesmanCode || salesMan || cashierName || "HQ";
+    const finalSalesman = chosenSalesman || data.salesmanCode || salesMan || effectiveLocation;
     const itemData = data.item;
     const finalQty = Number(data.quantity) || 1;
     const finalPrice = Number(data.price) !== undefined ? Number(data.price) : Number(itemData.SellingPrice);
@@ -1547,7 +1546,6 @@ export default function PosBillingScreen({
 
     try {
       const activeTerm = (terminalCode || "").trim() || "HQPC1";
-      const activeCashier = (cashierName || "").trim();
       const currentQtyNum = parseFloat(fastQty) || 1;
       const currentDiscNum = parseFloat(fastDisc) || 0;
 
@@ -1559,8 +1557,9 @@ export default function PosBillingScreen({
           terminalCode: activeTerm,
           qty: currentQtyNum,
           disc: currentDiscNum,
-          salesmanCode: activeCashier || salesMan || "AMITH",
-          locationCode: "HQ",
+          salesmanCode: salesMan || effectiveLocation,
+          cashierId: cashierName || "",
+          locationCode: effectiveLocation,
         }),
       });
 
@@ -1953,10 +1952,32 @@ export default function PosBillingScreen({
           />
         </TouchableOpacity>
 
-        {/* SalesMan / Sales M Display Pill (Direct indicator - no modal popup) */}
-        <View style={styles.salesManBtn}>
-          <Text style={styles.salesManBtnText}>{salesMan ? `SM: ${salesMan}` : "SM: HQ"}</Text>
-        </View>
+        {/* SalesMan / Sales M Display Pill */}
+        {/* If isSalesMan === true: allow clicking to edit/change salesman code via modal. */}
+        {/* If isSalesMan === false (e.g. AMITH): static non-clickable pill with default location code. */}
+        {isSalesMan === true ? (
+          <TouchableOpacity
+            style={[styles.salesManBtn, { borderColor: currentTheme.primary, backgroundColor: "#f8fafc" }]}
+            onPress={() => {
+              setTempSalesmanCode(salesMan || effectiveLocation);
+              setShowSalesmanModal(true);
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+              <MaterialCommunityIcons name="account-edit-outline" size={14} color={currentTheme.primary} />
+              <Text style={[styles.salesManBtnText, { color: currentTheme.primary }]}>
+                {salesMan ? `SM: ${salesMan}` : `SM: ${effectiveLocation}`}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <View style={[styles.salesManBtn, { backgroundColor: "#f1f5f9", borderColor: "#e2e8f0" }]}>
+            <Text style={[styles.salesManBtnText, { color: "#64748b" }]}>
+              {salesMan ? `SM: ${salesMan}` : `SM: ${effectiveLocation}`}
+            </Text>
+          </View>
+        )}
 
         {/* Plus / Minus Quick Buttons */}
         <TouchableOpacity
@@ -3542,11 +3563,12 @@ export default function PosBillingScreen({
                       return;
                     }
 
-                    setSalesMan(data.salesman.SalesManCode);
+                    const assignedSalesman = data.salesman.SalesManCode;
+                    setSalesMan(assignedSalesman);
                     setShowSalesmanModal(false);
 
                     if (pendingItemAdd) {
-                      finalizeValidatedItemAdd(pendingItemAdd, data.salesman.SalesManCode);
+                      finalizeValidatedItemAdd(pendingItemAdd, assignedSalesman);
                       setPendingItemAdd(null);
                     }
                   } catch (err: any) {

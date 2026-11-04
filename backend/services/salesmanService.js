@@ -32,13 +32,13 @@ async function resolveSalesmanValue(pool, options = {}) {
     inventoryCode = '',
     departmentCode = '',
     itemSalesmanRequired = null,
-    cashierId = 'UPS',
+    cashierId = '',
     terminalCode = '',
     locationCode = '',
   } = options;
 
-  let effectiveLocationName = 'HQ';
-  let effectiveUserName = String(cashierId || 'UPS').trim();
+  let effectiveLocationName = '';
+  let effectiveUserName = '';
   let paramSalesmanRequired = false;
   let isInvSalesmanRequired = false;
   let isDeptSalesmanRequired = false;
@@ -47,7 +47,7 @@ async function resolveSalesmanValue(pool, options = {}) {
     const req = pool.request();
     const invCode = String(inventoryCode || '').trim();
     const deptCode = String(departmentCode || '').trim();
-    const cId = String(cashierId || 'UPS').trim();
+    const cId = String(cashierId || '').trim();
     const termCode = String(terminalCode || '').trim();
     const locCode = String(locationCode || '').trim();
 
@@ -57,7 +57,7 @@ async function resolveSalesmanValue(pool, options = {}) {
     req.input('termCode', sql.VarChar(20), termCode);
     req.input('locCode', sql.VarChar(20), locCode);
 
-    // Run unified query to gather all 4 conditions and location name in one round trip:
+    // Run unified query to gather all 4 conditions and location name from the database:
     const query = `
       -- 1. Check tblMaParamMaster where Value = 1 for SALESMAN REQUIRED
       SELECT TOP 1 RTRIM(LTRIM(ISNULL(Value, '0'))) AS ParamVal
@@ -71,8 +71,9 @@ async function resolveSalesmanValue(pool, options = {}) {
         RTRIM(LTRIM(ISNULL(UserName, UserCode))) AS UserName,
         ISNULL(IsSalesMan, 0) AS IsSalesMan
       FROM tblMaUserMaster
-      WHERE UPPER(RTRIM(LTRIM(UserCode))) = UPPER(@cId)
-         OR UPPER(RTRIM(LTRIM(UserName))) = UPPER(@cId);
+      WHERE (UPPER(RTRIM(LTRIM(UserCode))) = UPPER(@cId)
+         OR UPPER(RTRIM(LTRIM(UserName))) = UPPER(@cId))
+        AND (@cId <> '');
 
       -- Fallback if current user is not marked IsSalesMan=1: find default active salesman
       SELECT TOP 1 
@@ -94,15 +95,15 @@ async function resolveSalesmanValue(pool, options = {}) {
       WHERE UPPER(RTRIM(LTRIM(DeptCode))) = UPPER(@deptCode)
          OR UPPER(RTRIM(LTRIM(DeptName))) = UPPER(@deptCode);
 
-      -- 5. Location Name resolution
+      -- 5. Location Name resolution from tblMaLocation, tblmaTerminal, or tblMaCompany
       SELECT TOP 1 
         RTRIM(LTRIM(ISNULL(LocationName, LocationCode))) AS LocationName
       FROM tblMaLocation
-      WHERE UPPER(RTRIM(LTRIM(LocationCode))) = UPPER(@locCode)
+      WHERE (UPPER(RTRIM(LTRIM(LocationCode))) = UPPER(@locCode) AND @locCode <> '')
          OR UPPER(RTRIM(LTRIM(LocationCode))) IN (
               SELECT UPPER(RTRIM(LTRIM(LocationCode))) 
               FROM tblmaTerminal 
-              WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@termCode)
+              WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@termCode) AND @termCode <> ''
          );
     `;
 
@@ -160,16 +161,12 @@ async function resolveSalesmanValue(pool, options = {}) {
     if (locRow && locRow.LocationName) {
       effectiveLocationName = locRow.LocationName;
     } else {
-      // Fallback: check tblMaLocation for HQ or first location
-      const fallbackLoc = await pool.request().query(`
-        SELECT TOP 1 RTRIM(LTRIM(ISNULL(LocationName, LocationCode))) AS LocationName
-        FROM tblMaLocation
-        WHERE IsActive = '1' OR IsActive = 1
-        ORDER BY CASE WHEN UPPER(RTRIM(LTRIM(LocationCode))) = 'HQ' THEN 0 ELSE 1 END;
+      // Query database for location from tblMaCompany or active tblMaLocation
+      const dbLoc = await pool.request().query(`
+        SELECT TOP 1 RTRIM(LTRIM(ISNULL(LocationCode, ''))) AS LocationCode FROM tblMaCompany;
+        SELECT TOP 1 RTRIM(LTRIM(ISNULL(LocationName, LocationCode))) AS LocationName FROM tblMaLocation WHERE IsActive = '1' OR IsActive = 1;
       `);
-      if (fallbackLoc.recordset[0]?.LocationName) {
-        effectiveLocationName = fallbackLoc.recordset[0].LocationName;
-      }
+      effectiveLocationName = dbLoc.recordsets[0]?.[0]?.LocationCode || dbLoc.recordsets[1]?.[0]?.LocationName || '';
     }
   } catch (err) {
     console.error('Error resolving salesman value:', err.message);

@@ -192,6 +192,9 @@ router.post('/temp-sales/add', async (req, res) => {
       updateReq.input('gst', sql.Decimal(18, 2), gstAmount);
       updateReq.input('gstPrec', sql.Decimal(18, 2), gstPerc);
       updateReq.input('promoName', sql.VarChar(100), effectivePromoName);
+      
+      const updateSalesman = (salesman && String(salesman).trim()) || '';
+      updateReq.input('salesman', sql.VarChar(20), updateSalesman);
 
       await updateReq.query(`
         UPDATE tblTempSales
@@ -201,7 +204,8 @@ router.post('/temp-sales/add', async (req, res) => {
             Amount = @amount,
             GST = @gst,
             GstPrec = @gstPrec,
-            PromoName = @promoName
+            PromoName = @promoName,
+            Salesman = CASE WHEN @salesman <> '' THEN @salesman ELSE Salesman END
         WHERE TempID = @tempId
       `);
 
@@ -221,21 +225,24 @@ router.post('/temp-sales/add', async (req, res) => {
       const insertReq = pool.request();
       const lineDesc = (description && String(description).trim()) || item.Description;
 
-      // Determine Salesman column value based on:
-      // 1. tblMaParamMaster where Value = 1
-      // 2. tblMaUserMaster where IsSalesMan = 1
-      // 3. tblInventory where SalesmanRequired = 1
-      // 4. tblInvDepartment where SalesmanRequired = 1
-      // If SalesmanRequired = 1: User Name
-      // If SalesmanRequired = 0: Location Name
-      const salesmanResolution = await resolveSalesmanValue(pool, {
-        inventoryCode: invCode,
-        departmentCode: item.Department,
-        itemSalesmanRequired: item.SalesmanRequired,
-        cashierId: salesman || 'UPS',
-        terminalCode: termCode,
-      });
-      const effectiveSalesman = salesmanResolution.salesman;
+      let effectiveSalesman = (salesman && String(salesman).trim()) || '';
+      if (!effectiveSalesman) {
+        // Determine Salesman column value based on:
+        // 1. tblMaParamMaster where Value = 1
+        // 2. tblMaUserMaster where IsSalesMan = 1
+        // 3. tblInventory where SalesmanRequired = 1
+        // 4. tblInvDepartment where SalesmanRequired = 1
+        // If SalesmanRequired = 1: User Name
+        // If SalesmanRequired = 0: Location Name
+        const salesmanResolution = await resolveSalesmanValue(pool, {
+          inventoryCode: invCode,
+          departmentCode: item.Department,
+          itemSalesmanRequired: item.SalesmanRequired,
+          cashierId: '',
+          terminalCode: termCode,
+        });
+        effectiveSalesman = salesmanResolution.salesman;
+      }
 
       insertReq.input('term', sql.VarChar(20), termCode);
       insertReq.input('code', sql.VarChar(50), invCode);
@@ -490,6 +497,55 @@ router.post('/temp-sales/update-desc', async (req, res) => {
     return res.status(200).json({ success: true, action: 'updated', description: newDesc });
   } catch (error) {
     console.error('Failed to update description in tblTempSales:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/cart/temp-sales/update-salesman
+// Updates the assigned Salesman for a specific cart row in tblTempSales
+// ------------------------------------------------------------------------------
+router.post('/temp-sales/update-salesman', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'DB unreachable' });
+
+    const { terminalCode, inventoryCode, tempId, salesman } = req.body;
+    const termCode = getCleanTerminalCode(terminalCode);
+    if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
+
+    const newSalesman = String(salesman || '').trim();
+    if (!newSalesman) return res.status(400).json({ success: false, message: 'salesman is required' });
+
+    const request = pool.request();
+    request.input('term', sql.VarChar(20), termCode);
+    request.input('salesman', sql.VarChar(20), newSalesman);
+
+    if (tempId) {
+      request.input('tempId', sql.Int, tempId);
+      await request.query(`
+        UPDATE tblTempSales
+        SET Salesman = @salesman
+        WHERE TempID = @tempId AND UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term);
+      `);
+    } else {
+      const invCode = String(inventoryCode || '').trim();
+      if (!invCode) return res.status(400).json({ success: false, message: 'inventoryCode or tempId is required' });
+      request.input('code', sql.VarChar(50), invCode);
+
+      await request.query(`
+        UPDATE tblTempSales
+        SET Salesman = @salesman
+        WHERE TempID = (
+          SELECT TOP 1 TempID FROM tblTempSales
+          WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term) AND UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
+          ORDER BY TempID DESC
+        );
+      `);
+    }
+
+    return res.status(200).json({ success: true, action: 'salesman_updated', salesman: newSalesman });
+  } catch (error) {
+    console.error('Failed to update salesman in tblTempSales:', error.message);
     return res.status(500).json({ success: false, message: error.message });
   }
 });

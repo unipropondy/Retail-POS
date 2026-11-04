@@ -128,6 +128,7 @@ export default function App() {
             onLogout={handleLogout}
             cashierName={currentUser.userName}
             terminalCode={currentTerminal?.terminalCode}
+            locationCode={currentTerminal?.locationCode}
             isSalesMan={currentUser.isSalesMan}
           />
         )}
