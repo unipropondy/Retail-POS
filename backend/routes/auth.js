@@ -310,7 +310,8 @@ module.exports = function (jwtSecret) {
           RTRIM(LTRIM(UserCode)) AS UserCode,
           RTRIM(LTRIM(UserName)) AS UserName,
           IsAdmin,
-          IsCashier
+          IsCashier,
+          ISNULL(IsSalesMan, 0) AS IsSalesMan
         FROM tblMausermaster
         WHERE (IsCashier = 1 OR IsAdmin = 1)
         ORDER BY UserCode ASC
@@ -321,6 +322,7 @@ module.exports = function (jwtSecret) {
         userName: row.UserName,
         isAdmin: row.IsAdmin === 1 || row.IsAdmin === true,
         isCashier: row.IsCashier === 1 || row.IsCashier === true,
+        isSalesMan: row.IsSalesMan === 1 || row.IsSalesMan === true,
       }));
 
       return res.status(200).json({

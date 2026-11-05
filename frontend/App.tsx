@@ -23,6 +23,9 @@ import LoginScreen, {
 } from "./src/screens/login";
 import PosBillingScreen from "./src/screens/pos_billing";
 import { ConfigProvider } from "./src/config/ConfigProvider";
+import { getBackendBaseUrl } from "./src/config/appConfig";
+
+const API_URL = getBackendBaseUrl();
 
 // Storage key used to store the serialized cashier and terminal session
 // Author: JAVITH, BAVANI 28-10-2026: Unique storage key for persistent cashier authentication
@@ -53,7 +56,25 @@ export default function App() {
           const session = JSON.parse(stored);
           if (session && session.user) {
             // Restore cashier profile and terminal info
-            setCurrentUser(session.user);
+            let user = session.user;
+            // If restored session lacks isSalesMan, fetch fresh user status or check UPS
+            if (user.isSalesMan === undefined && user.userName) {
+              try {
+                const res = await fetch(`${API_URL}/api/auth/cashiers`);
+                const data = await res.json();
+                if (data.success && Array.isArray(data.cashiers)) {
+                  const match = data.cashiers.find(
+                    (c: any) =>
+                      c.userCode?.toUpperCase() === user.userName?.toUpperCase() ||
+                      c.userName?.toUpperCase() === user.userName?.toUpperCase()
+                  );
+                  if (match) {
+                    user = { ...user, isSalesMan: Boolean(match.isSalesMan) };
+                  }
+                }
+              } catch {}
+            }
+            setCurrentUser(user);
             setCurrentTerminal(session.terminal || null);
           }
         }
