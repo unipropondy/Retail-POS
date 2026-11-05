@@ -254,16 +254,27 @@ export default function PosBillingScreen({
   const imageErrorCodes = useRef<Set<string>>(new Set());
   const [imageErrorTick, setImageErrorTick] = useState<number>(0);
   const prevCartLengthRef = useRef<number>(0);
+  // Sequence counter to prevent stale out-of-order API responses from overwriting latest cart selection
+  const cartMutationSeqRef = useRef<number>(0);
+
+  // Helper to scroll cart view to the bottom cleanly across native and web
+  const scrollToCartBottom = (animated = true) => {
+    shouldAutoScrollRef.current = true;
+    requestAnimationFrame(() => {
+      cartScrollRef.current?.scrollToEnd({ animated });
+      setTimeout(() => {
+        cartScrollRef.current?.scrollToEnd({ animated });
+      }, 50);
+      setTimeout(() => {
+        cartScrollRef.current?.scrollToEnd({ animated });
+      }, 150);
+    });
+  };
 
   // Auto-scroll cart grid to newly added items
   useEffect(() => {
     if (cart.length > prevCartLengthRef.current) {
-      shouldAutoScrollRef.current = true;
-      const timer = setTimeout(() => {
-        cartScrollRef.current?.scrollToEnd({ animated: true });
-      }, 60);
-      prevCartLengthRef.current = cart.length;
-      return () => clearTimeout(timer);
+      scrollToCartBottom(true);
     }
     prevCartLengthRef.current = cart.length;
   }, [cart.length]);
@@ -412,9 +423,16 @@ export default function PosBillingScreen({
 
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
+  const skuCodeRef = useRef<string>(skuCode);
+  skuCodeRef.current = skuCode;
   const fastQtyInputRef = useRef<any>(null);
   const fastPriceInputRef = useRef<any>(null);
   const fastDiscInputRef = useRef<any>(null);
+  const isCommittingPriceRef = useRef<boolean>(false);
+  const fastPriceRef = useRef<string>(fastPrice);
+  fastPriceRef.current = fastPrice;
+  const pendingZeroPriceItemRef = useRef<any>(pendingZeroPriceItem);
+  pendingZeroPriceItemRef.current = pendingZeroPriceItem;
 
   // Load saved theme & typography preferences on mount
   useEffect(() => {
@@ -671,8 +689,6 @@ export default function PosBillingScreen({
       const item = cart[selectedCartIndex];
       if (!item) return;
 
-      setSkuCode(item.code);
-      setSkuDesc(item.description);
       setActiveItem((prev) => ({
         name: item.description,
         qty: item.qty,
@@ -699,48 +715,14 @@ export default function PosBillingScreen({
     const finalSalesman = explicitSalesman || salesMan || effectiveLocation;
     const initialStock = item.Stock !== undefined ? Number(item.Stock) : 0;
 
-    // Always display clicked/scanned item details in top SKU bar & description bar
-    setSkuCode(item.InventoryCode);
-    setSkuDesc(finalDesc);
 
-    // Fetch live stock for this item to ensure top 'Stock : X' is 100% accurate & live
-    try {
-      const loc = (effectiveLocation || locationCode || "").trim();
-      const activeTerm = (terminalCode || "").trim();
-      fetch(`${API_URL}/api/inventory/lookup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rawCode: item.InventoryCode,
-          currentQty: qtyToAdd,
-          terminalCode: activeTerm,
-          locationCode: loc,
-        }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data && data.success && data.item) {
-            const liveQoh = data.item.QOH !== undefined ? Number(data.item.QOH) : (data.item.Stock !== undefined ? Number(data.item.Stock) : 0);
-            setActiveItem((prev) => ({
-              ...prev,
-              stock: liveQoh,
-            }));
-            if (pendingZeroPriceItem && pendingZeroPriceItem.InventoryCode === item.InventoryCode) {
-              setPendingZeroPriceItem((prev: any) => (prev ? { ...prev, Stock: liveQoh } : null));
-            }
-            setCart((prevCart) =>
-              prevCart.map((c) =>
-                c.code === item.InventoryCode ? { ...c, stock: liveQoh } : c
-              )
-            );
-          }
-        })
-        .catch(() => {});
-    } catch {}
+
 
     // Check if item has $0.00 price (Zero-Price Item workflow) OR if Price Change mode is ON:
     // If bPriceChange is active, prompt manual price entry
     if (bPriceChange) {
+      setSkuCode(item.InventoryCode);
+      setSkuDesc(finalDesc);
       if (item.IsFixedPrice) {
         showAlert("Fixed Price Item", "This item is marked as Fixed Price. Price Change is not allowed.", "warning");
         return;
@@ -773,6 +755,8 @@ export default function PosBillingScreen({
     // Check if item has $0.00 price (Zero-Price Item workflow):
     // Do NOT add to cart immediately. Populate SKU, Description, and prompt in 2nd box (Price)!
     if (Number(finalPrice) <= 0) {
+      setSkuCode(item.InventoryCode);
+      setSkuDesc(finalDesc);
       setPendingZeroPriceItem({
         InventoryCode: item.InventoryCode,
         Description: finalDesc,
@@ -813,6 +797,8 @@ export default function PosBillingScreen({
       showAlert("High Quantity Warning", warnMsg, "warning");
     }
 
+    const currentSeq = ++cartMutationSeqRef.current;
+
     setActiveItem({
       name: finalDesc,
       qty: qtyToAdd,
@@ -821,7 +807,15 @@ export default function PosBillingScreen({
     });
 
     setCart((prev) => {
-      const existingIdx = prev.findIndex((c) => c.code === item.InventoryCode);
+      // Find existing item from the end (latest line)
+      let existingIdx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].code === item.InventoryCode) {
+          existingIdx = i;
+          break;
+        }
+      }
+
       if (existingIdx > -1) {
         const updated = prev.map((c, i) =>
           i === existingIdx
@@ -882,29 +876,52 @@ export default function PosBillingScreen({
         .then((res) => res.json())
         .then((data) => {
           if (data && data.success && Array.isArray(data.cartItems)) {
-            setCart((prev) =>
-              data.cartItems.map((c: CartItem) => {
+            // Drop older out-of-order responses if a newer cart addition has already occurred
+            if (currentSeq !== cartMutationSeqRef.current) {
+              return;
+            }
+
+            setCart((prev) => {
+              // Preserve existing item IDs so React does not re-mount table rows
+              const serverCodes = new Set(data.cartItems.map((c: CartItem) => c.code));
+              const missingOptimistic = prev.filter((p) => !serverCodes.has(p.code));
+              const merged = data.cartItems.map((c: CartItem) => {
                 const existing = prev.find((p) => p.code === c.code);
                 return {
                   ...c,
+                  id: existing?.id || c.id,
                   stock: c.stock !== undefined ? c.stock : existing?.stock,
                 };
-              })
-            );
+              });
+              return [...merged, ...missingOptimistic];
+            });
+
             // Highlight the exact matching item row (yellow highlight)
-            const matchedIdx = data.cartItems.findIndex(
-              (c: CartItem) => c.code === item.InventoryCode
-            );
+            // Use reverse loop so it targets the latest row
+            let matchedIdx = -1;
+            for (let i = data.cartItems.length - 1; i >= 0; i--) {
+              if (data.cartItems[i].code === item.InventoryCode) {
+                matchedIdx = i;
+                break;
+              }
+            }
             if (matchedIdx !== -1) {
               setSelectedCartIndex(matchedIdx);
+            } else {
+              setSelectedCartIndex(data.cartItems.length - 1);
             }
+            scrollToCartBottom(true);
           }
         })
         .catch(() => {});
     } catch {}
 
-    // Reset fast quantity back to 1 for the next item
+    // Reset top item-entry fields back to default for the next item
+    setSkuCode("");
+    setSkuDesc("");
+    setShowDescDropdown(false);
     setFastQty("1");
+    setFastPrice("0.00");
     setFastDisc("0.00");
     setFastDiscPerc("0");
   };
@@ -912,6 +929,7 @@ export default function PosBillingScreen({
   
   // Commits price for pending zero-price item and adds it to cart
   const handleFastPriceCommit = async (enteredPriceStr: string) => {
+    if (isCommittingPriceRef.current) return;
     const enteredPrice = parseFloat(enteredPriceStr);
     if (isNaN(enteredPrice) || enteredPrice <= 0) {
       if (pendingZeroPriceItem) {
@@ -922,6 +940,7 @@ export default function PosBillingScreen({
     }
 
     if (pendingZeroPriceItem) {
+      isCommittingPriceRef.current = true;
       const targetItem = pendingZeroPriceItem;
       const targetQty = parseFloat(fastQty) || 1;
       const targetDisc = parseFloat(fastDisc) || 0;
@@ -935,15 +954,17 @@ export default function PosBillingScreen({
           if (enteredPrice < minAllowedPrice) {
             showAlert(
               "Price Change Limit Exceeded",
-              `More Price Change cannot be allowed !!! ... Max Discount : ${maxPriceChangeAllowed.toFixed(2)}% (Min Price: $${minAllowedPrice.toFixed(2)})`,
+              `More Price Change cannot be allowed !!! ... Max Discount : ${maxPriceChangeAllowed.toFixed(2)}% (Min Price: ${minAllowedPrice.toFixed(2)})`,
               "warning"
             );
+            isCommittingPriceRef.current = false;
             fastPriceInputRef.current?.focus();
             return;
           }
         }
       }
 
+      const currentSeq = ++cartMutationSeqRef.current;
       try {
         const res = await fetch(`${API_URL}/api/inventory/direct-sku`, {
           method: "POST",
@@ -962,12 +983,18 @@ export default function PosBillingScreen({
 
         const data = await res.json();
         if (data && data.success && Array.isArray(data.cartItems)) {
-          setCart(data.cartItems);
-          const matchedIdx = data.cartItems.findIndex(
-            (c: CartItem) => c.code.toUpperCase() === targetItem.InventoryCode.toUpperCase()
-          );
-          setSelectedCartIndex(matchedIdx !== -1 ? matchedIdx : data.cartItems.length - 1);
-          shouldAutoScrollRef.current = true;
+          if (currentSeq === cartMutationSeqRef.current) {
+            setCart(data.cartItems);
+            let matchedIdx = -1;
+            for (let i = data.cartItems.length - 1; i >= 0; i--) {
+              if (data.cartItems[i].code.toUpperCase() === targetItem.InventoryCode.toUpperCase()) {
+                matchedIdx = i;
+                break;
+              }
+            }
+            setSelectedCartIndex(matchedIdx !== -1 ? matchedIdx : data.cartItems.length - 1);
+            scrollToCartBottom(true);
+          }
         }
 
         // Clear pending item and reset input bar
@@ -980,6 +1007,8 @@ export default function PosBillingScreen({
         skuInputRef.current?.focus();
       } catch (err: any) {
         showAlert("Error", "Failed to add item with price: " + err.message, "error");
+      } finally {
+        isCommittingPriceRef.current = false;
       }
     } else if (cart.length > 0) {
       // If an existing cart item is selected, update its price (Price Change)
@@ -1851,6 +1880,7 @@ export default function PosBillingScreen({
     setSkuDesc("");
     setShowDescDropdown(false);
     setFastQty("1");
+    setFastPrice("0.00");
     setFastDisc("0.00");
     setFastDiscPerc("0");
     skuInputRef.current?.focus();
@@ -1874,6 +1904,7 @@ export default function PosBillingScreen({
       const currentQtyNum = parseFloat(fastQty) || 1;
       const currentDiscNum = parseFloat(fastDisc) || 0;
 
+      const currentSeq = ++cartMutationSeqRef.current;
       const res = await fetch(`${API_URL}/api/inventory/direct-sku`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1938,22 +1969,33 @@ export default function PosBillingScreen({
         });
         setFastQty(String(currentQtyNum));
         setFastPrice("");
+        showAlert(
+          "Amount Required",
+          data.message || "Please enter a valid Amount for this item. Amount cannot be 0.",
+          "warning"
+        );
         setTimeout(() => {
           fastPriceInputRef.current?.focus();
-        }, 50);
+        }, 80);
         return;
       }
 
       // Step 4: Successful Insertion into tblTempSales
       if (Array.isArray(data.cartItems)) {
-        setCart(data.cartItems);
-        // If the item was already in cart, highlight its respective row; otherwise highlight the newly added row
-        const targetCode = data.item?.InventoryCode || enteredSku;
-        const matchedIdx = data.cartItems.findIndex(
-          (c: CartItem) => c.code.toUpperCase() === targetCode.toUpperCase()
-        );
-        setSelectedCartIndex(matchedIdx !== -1 ? matchedIdx : data.cartItems.length - 1);
-        shouldAutoScrollRef.current = true;
+        if (currentSeq === cartMutationSeqRef.current) {
+          setCart(data.cartItems);
+          // If the item was already in cart, highlight its respective row; otherwise highlight the newly added row
+          const targetCode = data.item?.InventoryCode || enteredSku;
+          let matchedIdx = -1;
+          for (let i = data.cartItems.length - 1; i >= 0; i--) {
+            if (data.cartItems[i].code.toUpperCase() === targetCode.toUpperCase()) {
+              matchedIdx = i;
+              break;
+            }
+          }
+          setSelectedCartIndex(matchedIdx !== -1 ? matchedIdx : data.cartItems.length - 1);
+          scrollToCartBottom(true);
+        }
       }
 
       // Update HUD active item
@@ -1971,7 +2013,10 @@ export default function PosBillingScreen({
 
       // Reset SKU input and reset fast inputs
       setSkuCode("");
+      setSkuDesc("");
+      setShowDescDropdown(false);
       setFastQty("1");
+      setFastPrice("0.00");
       setFastDisc("0.00");
       setFastDiscPerc("0");
       skuInputRef.current?.focus();
@@ -2147,6 +2192,31 @@ export default function PosBillingScreen({
         if (onLogout) onLogout();
       } else if (e.key === "Delete") {
         handleDeleteItem();
+      } else if (e.key === "Tab") {
+        const isSkuFocused = typeof document !== "undefined" && document.activeElement && (
+          document.activeElement.getAttribute("data-test-id") === "sku-code-input" ||
+          document.activeElement === (skuInputRef.current as any)
+        );
+        const isFastPriceFocused = typeof document !== "undefined" && document.activeElement && (
+          document.activeElement.getAttribute("data-test-id") === "fast-price-input" ||
+          document.activeElement === (fastPriceInputRef.current as any)
+        );
+
+        if (isSkuFocused) {
+          e.preventDefault();
+          if (skuCodeRef.current.trim()) {
+            processDirectSkuCode();
+          }
+        } else if (isFastPriceFocused || pendingZeroPriceItemRef.current) {
+          e.preventDefault();
+          const priceVal = fastPriceRef.current;
+          if (priceVal && parseFloat(priceVal) > 0) {
+            handleFastPriceCommit(priceVal);
+          } else {
+            showAlert("Amount Required", "Please enter a valid Amount greater than $0.00.", "warning");
+            fastPriceInputRef.current?.focus();
+          }
+        }
       }
     };
 
@@ -2245,8 +2315,15 @@ export default function PosBillingScreen({
             style={styles.skuInput}
             value={skuCode}
             onChangeText={setSkuCode}
+            onKeyPress={(e: any) => {
+              if (e.nativeEvent && (e.nativeEvent.key === "Tab" || e.key === "Tab")) {
+                if (typeof e.preventDefault === "function") e.preventDefault();
+                processDirectSkuCode();
+              }
+            }}
             onSubmitEditing={processDirectSkuCode}
             editable={!isProcessingSku}
+            {...({ "data-test-id": "sku-code-input" } as any)}
           />
         </View>
 
@@ -2374,12 +2451,19 @@ export default function PosBillingScreen({
             placeholderTextColor="#94a3b8"
             value={fastPrice}
             onChangeText={setFastPrice}
+            onKeyPress={(e: any) => {
+              if (e.nativeEvent && (e.nativeEvent.key === "Tab" || e.key === "Tab")) {
+                if (typeof e.preventDefault === "function") e.preventDefault();
+                handleFastPriceCommit(fastPriceRef.current);
+              }
+            }}
             onEndEditing={(e) => handleFastPriceCommit(e.nativeEvent.text)}
             onSubmitEditing={(e) => {
               handleFastPriceCommit(e.nativeEvent.text);
             }}
             keyboardType="numeric"
             selectTextOnFocus
+            {...({ "data-test-id": "fast-price-input" } as any)}
           />
         </TouchableOpacity>
 
@@ -2669,7 +2753,7 @@ export default function PosBillingScreen({
 
                   return (
                     <TouchableOpacity
-                      key={item.id}
+                      key={item.id ? `cart_item_${item.id}` : `cart_item_${item.code}_${idx}`}
                       style={[styles.tableRow, rowCustomStyle]}
                       onPress={() => setSelectedCartIndex(idx)}
                       activeOpacity={0.85}
