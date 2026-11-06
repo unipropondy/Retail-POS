@@ -221,7 +221,7 @@ router.post('/temp-sales/add', async (req, res) => {
         SELECT 
           ts.TempID, RTRIM(LTRIM(ts.TerminalCode)) AS TerminalCode, RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
           RTRIM(LTRIM(ISNULL(ts.Description, inv.Description))) AS Description, ISNULL(ts.Qty, 1) AS Qty,
-          ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(inv.SellingPrice, 0) AS NormalPrice,
+          ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS NormalPrice,
           ISNULL(ts.Discount, 0) AS Discount, ISNULL(ts.NetDiscount, 0) AS NetDiscount, ISNULL(ts.Amount, 0) AS Amount,
           ISNULL(ts.GstPrec, 0) AS GstPrec, ISNULL(ts.GST, 0) AS GST, RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
           RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
@@ -336,7 +336,7 @@ router.post('/temp-sales/add', async (req, res) => {
         SELECT 
           ts.TempID, RTRIM(LTRIM(ts.TerminalCode)) AS TerminalCode, RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
           RTRIM(LTRIM(ISNULL(ts.Description, inv.Description))) AS Description, ISNULL(ts.Qty, 1) AS Qty,
-          ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(inv.SellingPrice, 0) AS NormalPrice,
+          ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS NormalPrice,
           ISNULL(ts.Discount, 0) AS Discount, ISNULL(ts.NetDiscount, 0) AS NetDiscount, ISNULL(ts.Amount, 0) AS Amount,
           ISNULL(ts.GstPrec, 0) AS GstPrec, ISNULL(ts.GST, 0) AS GST, RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
           RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
@@ -397,7 +397,7 @@ router.post('/temp-sales/update-qty', async (req, res) => {
     const pool = await getPool();
     if (!pool) return res.status(503).json({ success: false, message: 'DB unreachable' });
 
-    const { terminalCode, inventoryCode, delta, exactQty } = req.body;
+    const { terminalCode, inventoryCode, delta, exactQty, tempId } = req.body;
     const termCode = getCleanTerminalCode(terminalCode);
     if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
 
@@ -405,37 +405,62 @@ router.post('/temp-sales/update-qty', async (req, res) => {
 
     const request = pool.request();
     request.input('term', sql.VarChar(20), termCode);
-    request.input('code', sql.VarChar(50), invCode);
 
-    const existing = await request.query(`
-      SELECT TOP 1 TempID, Qty, Price, Discount, Amount
+    let findQuery = `
+      SELECT TOP 1 TempID, Qty, Price, Discount, Amount, GstPrec
       FROM tblTempSales
-      WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
-      ORDER BY TempID DESC
-    `);
+      WHERE RTRIM(LTRIM(TerminalCode)) = @term
+    `;
+
+    const parsedTempId = tempId !== undefined && tempId !== null ? parseInt(String(tempId), 10) : NaN;
+    const isValidDbTempId = !isNaN(parsedTempId) && parsedTempId > 0 && parsedTempId < 2147483647;
+
+    if (isValidDbTempId) {
+      request.input('tempId', sql.Int, parsedTempId);
+      findQuery += ` AND TempID = @tempId`;
+    } else if (invCode) {
+      request.input('code', sql.VarChar(50), invCode);
+      findQuery += ` AND RTRIM(LTRIM(InventoryCode)) = @code ORDER BY TempID DESC`;
+    } else {
+      return res.status(400).json({ success: false, message: 'inventoryCode or tempId is required' });
+    }
+
+    const existing = await request.query(findQuery);
 
     if (existing.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Item not in cart' });
     }
 
     const row = existing.recordset[0];
-    let nextQty = exactQty !== undefined ? Number(exactQty) : Number(row.Qty) + Number(delta || 0);
+    let nextQty = exactQty !== undefined && exactQty !== null
+      ? Number(exactQty)
+      : Number(row.Qty) + Number(delta || 0);
 
     if (nextQty <= 0) {
       // Remove item if qty drops to 0 or less
       const delReq = pool.request();
       delReq.input('tempId', sql.Int, row.TempID);
       await delReq.query(`DELETE FROM tblTempSales WHERE TempID = @tempId`);
-      return res.status(200).json({ success: true, action: 'deleted' });
+      return res.status(200).json({ success: true, action: 'deleted', deletedTempId: row.TempID });
     }
+
+    const itemPrice = Number(row.Price) || 0;
+    const itemDisc = Number(row.Discount) || 0;
+    const itemGstPrec = Number(row.GstPrec) || 0;
+    const baseAmount = Math.max(0, parseFloat((nextQty * itemPrice - itemDisc).toFixed(2)));
+    const baseGst = itemGstPrec > 0 ? parseFloat(((baseAmount * itemGstPrec) / (100 + itemGstPrec)).toFixed(2)) : 0;
 
     const upReq = pool.request();
     upReq.input('tempId', sql.Int, row.TempID);
     upReq.input('qty', sql.Decimal(18, 2), nextQty);
+    upReq.input('amt', sql.Decimal(18, 2), baseAmount);
+    upReq.input('gst', sql.Decimal(18, 2), baseGst);
 
     await upReq.query(`
       UPDATE tblTempSales
-      SET Qty = @qty
+      SET Qty = @qty,
+          Amount = @amt,
+          GST = @gst
       WHERE TempID = @tempId
     `);
 
@@ -447,7 +472,7 @@ router.post('/temp-sales/update-qty', async (req, res) => {
       SELECT 
         ts.TempID, RTRIM(LTRIM(ts.TerminalCode)) AS TerminalCode, RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
         RTRIM(LTRIM(ISNULL(ts.Description, inv.Description))) AS Description, ISNULL(ts.Qty, 1) AS Qty,
-        ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(inv.SellingPrice, 0) AS NormalPrice,
+        ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price, ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS NormalPrice,
         ISNULL(ts.Discount, 0) AS Discount, ISNULL(ts.NetDiscount, 0) AS NetDiscount, ISNULL(ts.Amount, 0) AS Amount,
         ISNULL(ts.GstPrec, 0) AS GstPrec, ISNULL(ts.GST, 0) AS GST, RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
         RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
@@ -569,6 +594,118 @@ router.post('/temp-sales/update-discount', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ [CART ERROR] Failed to update discount in tblTempSales:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ------------------------------------------------------------------------------
+// POST /api/cart/temp-sales/update-price
+// Updates price for an item by code or TempID in tblTempSales & recalculates promotions
+// ------------------------------------------------------------------------------
+router.post('/temp-sales/update-price', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'DB unreachable' });
+
+    const { terminalCode, inventoryCode, newPrice, tempId } = req.body;
+    const termCode = getCleanTerminalCode(terminalCode);
+    if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
+
+    const priceNum = parseFloat(newPrice);
+    if (isNaN(priceNum) || priceNum < 0) {
+      return res.status(400).json({ success: false, message: 'Valid newPrice is required' });
+    }
+
+    const request = pool.request();
+    request.input('term', sql.VarChar(20), termCode);
+    request.input('price', sql.Decimal(18, 2), priceNum);
+
+    let targetTempId = null;
+    const parsedPriceTempId = tempId !== undefined && tempId !== null ? parseInt(String(tempId), 10) : NaN;
+    if (!isNaN(parsedPriceTempId) && parsedPriceTempId > 0 && parsedPriceTempId < 2147483647) {
+      targetTempId = parsedPriceTempId;
+    }
+
+    if (!targetTempId) {
+      const invCode = String(inventoryCode || '').trim();
+      if (!invCode) return res.status(400).json({ success: false, message: 'inventoryCode or tempId is required' });
+      request.input('code', sql.VarChar(50), invCode);
+      const findRes = await request.query(`
+        SELECT TOP 1 TempID, Qty, Discount, GstPrec
+        FROM tblTempSales
+        WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
+        ORDER BY TempID DESC
+      `);
+      if (findRes.recordset.length === 0) {
+        return res.status(404).json({ success: false, message: 'Item not in cart' });
+      }
+      targetTempId = findRes.recordset[0].TempID;
+    }
+
+    // Update item price & amount in tblTempSales
+    const upReq = pool.request();
+    upReq.input('tempId', sql.Int, targetTempId);
+    upReq.input('price', sql.Decimal(18, 2), priceNum);
+    await upReq.query(`
+      UPDATE tblTempSales
+      SET Price = @price,
+          Amount = (Qty * @price) - Discount,
+          GST = ROUND((((Qty * @price) - Discount) * GstPrec) / (100 + GstPrec), 2)
+      WHERE TempID = @tempId
+    `);
+
+    // Recalculate promotions for entire cart
+    const { recalculateCartPromotions } = require('../services/promotionService');
+    const allRowsReq = pool.request();
+    allRowsReq.input('term', sql.VarChar(20), termCode);
+    const allRowsRes = await allRowsReq.query(`
+      SELECT 
+        ts.TempID, RTRIM(LTRIM(ts.TerminalCode)) AS TerminalCode, RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
+        RTRIM(LTRIM(ISNULL(ts.Description, inv.Description))) AS Description, ISNULL(ts.Qty, 1) AS Qty,
+        ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS Price,
+        ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS NormalPrice,
+        ISNULL(ts.Discount, 0) AS Discount, ISNULL(ts.NetDiscount, 0) AS NetDiscount, ISNULL(ts.Amount, 0) AS Amount,
+        ISNULL(ts.GstPrec, 0) AS GstPrec, ISNULL(ts.GST, 0) AS GST, RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
+        RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM
+      FROM tblTempSales ts
+      LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
+      WHERE RTRIM(LTRIM(ts.TerminalCode)) = @term
+      ORDER BY ts.TempID ASC
+    `);
+
+    const rawItems = allRowsRes.recordset.map((r) => ({
+      id: String(r.TempID), code: r.InventoryCode, description: r.Description, qty: Number(r.Qty),
+      price: Number(r.Price), normalPrice: Number(r.NormalPrice || r.Price), disc: Number(r.Discount),
+      amount: Number(r.Amount), gst: Number(r.GST), gstPrec: Number(r.GstPrec), salesman: r.Salesman || '', uom: r.UOM || 'PCS',
+    }));
+
+    const recalculated = await recalculateCartPromotions(pool, rawItems, 'HQ');
+
+    // Persist recalculated promotions/discounts back to tblTempSales
+    for (const c of recalculated) {
+      const up = pool.request();
+      up.input('tId', sql.Int, parseInt(c.id, 10));
+      up.input('d', sql.Decimal(18, 2), Number(c.disc) || 0);
+      up.input('nd', sql.Decimal(18, 2), Number(c.disc) || 0);
+      up.input('a', sql.Decimal(18, 2), Number(c.amount) || 0);
+      up.input('g', sql.Decimal(18, 2), Number(c.gst) || 0);
+      up.input('dpc', sql.VarChar(50), String(c.discountPriceCode || '').trim());
+      up.input('pn', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
+      await up.query(`
+        UPDATE tblTempSales
+        SET Discount = @d, NetDiscount = @nd, Amount = @a, GST = @g, DiscountPriceCode = @dpc, PromoName = @pn
+        WHERE TempID = @tId
+      `);
+    }
+
+    return res.status(200).json({
+      success: true,
+      action: 'price_updated',
+      newPrice: priceNum,
+      cartItems: recalculated,
+    });
+  } catch (error) {
+    console.error('❌ [CART ERROR] Failed to update price in tblTempSales:', error.message);
     return res.status(500).json({ success: false, message: error.message });
   }
 });

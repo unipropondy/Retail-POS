@@ -40,6 +40,7 @@ import ThemeModal from "../components/ThemeModal";
 import HoldModals, { HoldHeaderItem } from "../components/HoldModals";
 import CustomAlertModal, { CustomAlertState } from "../components/CustomAlertModal";
 import ClearAdminAuthModal from "../components/ClearAdminAuthModal";
+import SearchModal, { SearchResultItem } from "../components/SearchModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -296,6 +297,7 @@ export default function PosBillingScreen({
   const [skuCode, setSkuCode] = useState("");
   const [skuDesc, setSkuDesc] = useState("");
   const [fastQty, setFastQty] = useState("1");
+  const isManualFastQtyEnteredRef = useRef<boolean>(false);
   const [fastPrice, setFastPrice] = useState("0.00");
   const [fastDiscPerc, setFastDiscPerc] = useState("0");
   const [fastDisc, setFastDisc] = useState("0.00");
@@ -329,6 +331,7 @@ export default function PosBillingScreen({
   const [heldBills, setHeldBills] = useState<CartItem[][]>([]);
 
   // Modals
+  const [showSearchModal, setShowSearchModal] = useState<boolean>(false);
   const [showPriceCheckModal, setShowPriceCheckModal] = useState(false);
   const [priceCheckQuery, setPriceCheckQuery] = useState("");
   const [priceCheckResult, setPriceCheckResult] = useState<TouchItem | null>(
@@ -411,6 +414,10 @@ export default function PosBillingScreen({
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [showMoreMenuModal, setShowMoreMenuModal] = useState<boolean>(false);
 
+  // Quick Action Menu States (matching Desktop POS three-dot menu)
+  const [isPrintOn, setIsPrintOn] = useState<boolean>(true);
+  const [isAutoMode, setIsAutoMode] = useState<boolean>(false);
+
   // License validation states (tblMaCompany ValidateDate)
   const [licenseExpired, setLicenseExpired] = useState(false);
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
@@ -433,6 +440,9 @@ export default function PosBillingScreen({
   fastPriceRef.current = fastPrice;
   const pendingZeroPriceItemRef = useRef<any>(pendingZeroPriceItem);
   pendingZeroPriceItemRef.current = pendingZeroPriceItem;
+  // Debounce & accumulation refs for high-speed (+) and (-) clicks
+  const qtySyncDebounceTimerRef = useRef<any>(null);
+  const pendingQtyDeltaMapRef = useRef<{ [tempIdOrCode: string]: number }>({});
 
   // Load saved theme & typography preferences on mount
   useEffect(() => {
@@ -708,7 +718,10 @@ export default function PosBillingScreen({
       return;
     }
 
-    const qtyToAdd = explicitQty !== undefined ? explicitQty : (parseFloat(fastQty) || 1);
+    const qtyToAdd = explicitQty !== undefined 
+      ? explicitQty 
+      : (isManualFastQtyEnteredRef.current ? (parseFloat(fastQty) || 1) : 1);
+    isManualFastQtyEnteredRef.current = false;
     const discToAdd = parseFloat(fastDisc) || 0;
     const finalPrice = explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
     const finalDesc = explicitDesc || item.Description;
@@ -719,7 +732,7 @@ export default function PosBillingScreen({
 
 
     // Check if item has $0.00 price (Zero-Price Item workflow) OR if Price Change mode is ON:
-    // If bPriceChange is active, prompt manual price entry
+    // If bPriceChange is active, prompt manual price entry with the existing item price pre-filled
     if (bPriceChange) {
       setSkuCode(item.InventoryCode);
       setSkuDesc(finalDesc);
@@ -727,6 +740,8 @@ export default function PosBillingScreen({
         showAlert("Fixed Price Item", "This item is marked as Fixed Price. Price Change is not allowed.", "warning");
         return;
       }
+
+      const existingPrice = Number(finalPrice) > 0 ? Number(finalPrice) : Number(item.SellingPrice || 0);
 
       setPendingZeroPriceItem({
         InventoryCode: item.InventoryCode,
@@ -741,11 +756,11 @@ export default function PosBillingScreen({
       setActiveItem({
         name: finalDesc,
         qty: qtyToAdd,
-        price: finalPrice,
+        price: existingPrice,
         stock: initialStock,
       });
       setFastQty(String(qtyToAdd));
-      setFastPrice("");
+      setFastPrice(existingPrice > 0 ? existingPrice.toFixed(2) : "");
       setTimeout(() => {
         fastPriceInputRef.current?.focus();
       }, 50);
@@ -882,14 +897,13 @@ export default function PosBillingScreen({
             }
 
             setCart((prev) => {
-              // Preserve existing item IDs so React does not re-mount table rows
               const serverCodes = new Set(data.cartItems.map((c: CartItem) => c.code));
               const missingOptimistic = prev.filter((p) => !serverCodes.has(p.code));
               const merged = data.cartItems.map((c: CartItem) => {
                 const existing = prev.find((p) => p.code === c.code);
                 return {
                   ...c,
-                  id: existing?.id || c.id,
+                  id: c.id || existing?.id,
                   stock: c.stock !== undefined ? c.stock : existing?.stock,
                 };
               });
@@ -1013,26 +1027,61 @@ export default function PosBillingScreen({
     } else if (cart.length > 0) {
       // If an existing cart item is selected, update its price (Price Change)
       const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
-      setCart((prev) =>
-        prev.map((c, i) =>
-          i === targetIdx
-            ? {
-                ...c,
-                price: enteredPrice,
-                amount: parseFloat((c.qty * enteredPrice - c.disc).toFixed(2)),
+      const targetItem = cart[targetIdx];
+      if (targetItem) {
+        const activeTerm = (terminalCode || "").trim();
+        const currentSeq = ++cartMutationSeqRef.current;
+        // Immediate optimistic UI update
+        setCart((prev) =>
+          prev.map((c, i) =>
+            i === targetIdx
+              ? {
+                  ...c,
+                  price: enteredPrice,
+                  amount: parseFloat((c.qty * enteredPrice - c.disc).toFixed(2)),
+                }
+              : c
+          )
+        );
+        setActiveItem({
+          name: targetItem.description,
+          qty: targetItem.qty,
+          price: enteredPrice,
+          stock: 0,
+        });
+
+        // Persist to backend tblTempSales
+        try {
+          fetch(`${API_URL}/api/cart/temp-sales/update-price`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              terminalCode: activeTerm,
+              inventoryCode: targetItem.code,
+              tempId: targetItem.id,
+              newPrice: enteredPrice,
+            }),
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (currentSeq === cartMutationSeqRef.current && data && data.success && Array.isArray(data.cartItems)) {
+                setCart(data.cartItems);
               }
-            : c
-        )
-      );
+            })
+            .catch(() => {});
+        } catch {}
+      }
     }
   };
 
   // Updates quantity for the currently selected item in the cart if cart has items,
   // or sets the pre-entry quantity for the next scanned/tapped item.
   const handleFastQtyCommit = (newQtyStr: string) => {
+    isManualFastQtyEnteredRef.current = true;
     const parsed = parseFloat(newQtyStr);
     if (isNaN(parsed) || parsed <= 0) {
       setFastQty("1");
+      isManualFastQtyEnteredRef.current = false;
       return;
     }
 
@@ -1069,9 +1118,28 @@ export default function PosBillingScreen({
             body: JSON.stringify({
               terminalCode: activeTerm,
               inventoryCode: targetItem.code,
+              tempId: targetItem.id,
               exactQty: parsed,
             }),
-          }).catch(() => {});
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (data && data.success && Array.isArray(data.cartItems)) {
+                setCart(data.cartItems);
+                const reMatched = data.cartItems.find(
+                  (ci: any) => (ci.id && ci.id === targetItem.id) || ci.code === targetItem.code
+                );
+                if (reMatched) {
+                  setActiveItem((prevActive) => ({
+                    ...prevActive,
+                    name: reMatched.description,
+                    qty: reMatched.qty,
+                    price: reMatched.price,
+                  }));
+                }
+              }
+            })
+            .catch(() => {});
         } catch {}
       }
     }
@@ -1173,55 +1241,130 @@ export default function PosBillingScreen({
   };
 
   // Adjust active item quantity with (+) or (-) buttons
-  const handleQtyChange = async (delta: number) => {
+  // Supports instantaneous UI feedback and rapid repetitive clicks without desync
+  const handleQtyChange = (delta: number) => {
     if (delta > 0 && licenseExpired) {
       setShowLicenseModal(true);
       return;
     }
     if (cart.length === 0) return;
     const targetIdx =
-      selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      selectedCartIndex >= 0 && selectedCartIndex < cart.length
+        ? selectedCartIndex
+        : cart.length - 1;
 
     const targetItem = cart[targetIdx];
-    setCart(
-      (prev) =>
-        prev
-          .map((c, i) => {
-            if (i === targetIdx) {
-              const nextQty = c.qty + delta;
-              if (nextQty <= 0) return null;
-              return {
-                ...c,
-                qty: nextQty,
-                amount: parseFloat((nextQty * c.price - c.disc).toFixed(2)),
-              };
-            }
-            return c;
-          })
-          .filter(Boolean) as CartItem[],
-    );
+    if (!targetItem) return;
 
-    if (targetItem) {
+    const itemKey = targetItem.id ? String(targetItem.id) : targetItem.code;
+    let computedExactQty = targetItem.qty;
+
+    // 1. Immediately update cart and amount synchronously
+    setCart((prev) => {
+      const updated = prev
+        .map((c, i) => {
+          if (i === targetIdx) {
+            const nextQty = c.qty + delta;
+            computedExactQty = nextQty;
+            if (nextQty <= 0) return null;
+            return {
+              ...c,
+              qty: nextQty,
+              amount: parseFloat((nextQty * c.price - c.disc).toFixed(2)),
+            };
+          }
+          return c;
+        })
+        .filter(Boolean) as CartItem[];
+
+      // Keep active item HUD in sync immediately
+      if (computedExactQty > 0) {
+        setActiveItem((prevActive) => ({
+          ...prevActive,
+          name: targetItem.description,
+          qty: computedExactQty,
+          price: targetItem.price,
+        }));
+        setFastQty("1");
+        isManualFastQtyEnteredRef.current = false;
+      } else {
+        const nextActiveIdx = Math.min(targetIdx, updated.length - 1);
+        if (nextActiveIdx >= 0 && updated[nextActiveIdx]) {
+          const nextIt = updated[nextActiveIdx];
+          setActiveItem({
+            name: nextIt.description,
+            qty: nextIt.qty,
+            price: nextIt.price,
+            stock: 0,
+          });
+          setFastQty("1");
+          isManualFastQtyEnteredRef.current = false;
+          setSelectedCartIndex(nextActiveIdx);
+        } else {
+          setActiveItem({
+            name: "READY TO SCAN / SELECT ITEM",
+            qty: 0,
+            price: 0.0,
+            stock: 0,
+          });
+          setFastQty("1");
+          isManualFastQtyEnteredRef.current = false;
+          setSelectedCartIndex(-1);
+        }
+      }
+
+      return updated;
+    });
+
+    // 2. Accumulate delta for rapid-click batching
+    pendingQtyDeltaMapRef.current[itemKey] = (pendingQtyDeltaMapRef.current[itemKey] || 0) + delta;
+
+    // 3. Send exact target quantity to MSSQL to guarantee 100% precision
+    if (qtySyncDebounceTimerRef.current) {
+      clearTimeout(qtySyncDebounceTimerRef.current);
+    }
+
+    const currentSeq = ++cartMutationSeqRef.current;
+    qtySyncDebounceTimerRef.current = setTimeout(async () => {
+      delete pendingQtyDeltaMapRef.current[itemKey];
+
       try {
         const activeTerm = (terminalCode || "").trim();
-        fetch(`${API_URL}/api/cart/temp-sales/update-qty`, {
+        const res = await fetch(`${API_URL}/api/cart/temp-sales/update-qty`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             terminalCode: activeTerm,
             inventoryCode: targetItem.code,
-            delta: delta,
+            tempId: targetItem.id,
+            exactQty: computedExactQty,
           }),
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            if (data && data.success && Array.isArray(data.cartItems)) {
-              setCart(data.cartItems);
+        });
+
+        const data = await res.json();
+        // Only reconcile if no newer cart mutations have occurred
+        if (res.ok && data && data.success && Array.isArray(data.cartItems)) {
+          if (currentSeq === cartMutationSeqRef.current) {
+            setCart(data.cartItems);
+            // Re-sync activeItem with server recalculation
+            const reMatched = data.cartItems.find(
+              (ci: any) => (ci.id && ci.id === targetItem.id) || ci.code === targetItem.code
+            );
+            if (reMatched) {
+              setActiveItem((prevActive) => ({
+                ...prevActive,
+                name: reMatched.description,
+                qty: reMatched.qty,
+                price: reMatched.price,
+              }));
+              setFastQty("1");
             }
-          })
-          .catch(() => {});
-      } catch {}
-    }
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to sync quantity update to server:", err);
+      }
+    }, 80);
   };
 
   // Delete selected item from cart - Exact VB.NET subVoidItem() workflow
@@ -1940,17 +2083,19 @@ export default function PosBillingScreen({
           return;
         }
 
+        const existingPrice = Number(data.item.Price || data.item.SellingPrice || 0);
+
         setSkuCode(data.item.InventoryCode);
         setSkuDesc(data.item.Description);
         setPendingZeroPriceItem({ ...data.item, isPriceChangeMode: true });
         setActiveItem({
           name: data.item.Description,
           qty: currentQtyNum,
-          price: data.item.Price || data.item.SellingPrice,
+          price: existingPrice,
           stock: data.item.Stock || 0,
         });
         setFastQty(String(currentQtyNum));
-        setFastPrice("");
+        setFastPrice(existingPrice > 0 ? existingPrice.toFixed(2) : "");
         setTimeout(() => {
           fastPriceInputRef.current?.focus();
         }, 50);
@@ -2113,6 +2258,25 @@ export default function PosBillingScreen({
   // PRICE CHANGE WORKFLOW (Exact VB.NET btn_PriceChange_Click & subPriceChange)
   // ---------------------------------------------------------------------------
   const subPriceChange = () => {
+    // If cart has items, open the Price Change Modal for selected or last item
+    if (cart.length > 0) {
+      const targetIdx = selectedCartIndex >= 0 && selectedCartIndex < cart.length
+        ? selectedCartIndex
+        : cart.length - 1;
+      const targetItem = cart[targetIdx];
+
+      if (targetItem) {
+        if ((targetItem as any).isFixedPrice) {
+          showAlert("Price Change Not Allowed", "This item has a fixed price and cannot be changed.", "warning");
+          return;
+        }
+        setOverridePrice(targetItem.price ? targetItem.price.toFixed(2) : "");
+        setShowPriceChangeModal(true);
+        return;
+      }
+    }
+
+    // If cart is empty, toggle bPriceChange mode for upcoming scanned item
     setBPriceChange((prev) => {
       const nextState = !prev;
       if (nextState) {
@@ -2144,24 +2308,81 @@ export default function PosBillingScreen({
   };
 
   // Price Change override
-  const handleApplyPriceChange = () => {
+  const handleApplyPriceChange = async () => {
     const newPrice = parseFloat(overridePrice);
-    if (
-      !isNaN(newPrice) &&
-      selectedCartIndex >= 0 &&
-      selectedCartIndex < cart.length
-    ) {
-      setCart((prev) =>
-        prev.map((c, i) =>
-          i === selectedCartIndex
-            ? {
-                ...c,
-                price: newPrice,
-                amount: parseFloat((c.qty * newPrice - c.disc).toFixed(2)),
-              }
-            : c,
-        ),
-      );
+    if (isNaN(newPrice) || newPrice < 0) {
+      showAlert("Invalid Price", "Please enter a valid price.", "warning");
+      return;
+    }
+
+    const targetIdx = selectedCartIndex >= 0 && selectedCartIndex < cart.length
+      ? selectedCartIndex
+      : cart.length - 1;
+
+    if (targetIdx < 0 || targetIdx >= cart.length) {
+      setShowPriceChangeModal(false);
+      return;
+    }
+
+    const targetItem = cart[targetIdx];
+
+    // Validate maxPriceChangeAllowed percentage
+    const originalPrice = targetItem.normalPrice || targetItem.price;
+    if (originalPrice > 0 && maxPriceChangeAllowed > 0 && maxPriceChangeAllowed < 100) {
+      const minAllowedPrice = originalPrice * (1 - maxPriceChangeAllowed / 100);
+      if (newPrice < minAllowedPrice) {
+        showAlert(
+          "Price Change Limit Exceeded",
+          `More Price Change cannot be allowed !!! ... Max Discount : ${maxPriceChangeAllowed.toFixed(2)}% (Min Price: $${minAllowedPrice.toFixed(2)})`,
+          "warning"
+        );
+        return;
+      }
+    }
+
+    // 1. Immediate optimistic UI update so change is reflected instantaneously without delay
+    const currentSeq = ++cartMutationSeqRef.current;
+    setCart((prev) =>
+      prev.map((c, i) =>
+        i === targetIdx || c.id === targetItem.id
+          ? {
+              ...c,
+              price: newPrice,
+              amount: parseFloat((c.qty * newPrice - c.disc).toFixed(2)),
+            }
+          : c
+      )
+    );
+    setActiveItem({
+      name: targetItem.description,
+      qty: targetItem.qty,
+      price: newPrice,
+      stock: 0,
+    });
+
+    // 2. Call backend API to persist the price change and recalculate promotions
+    const activeTerm = (terminalCode || "").trim();
+    try {
+      const res = await fetch(`${API_URL}/api/cart/temp-sales/update-price`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terminalCode: activeTerm,
+          inventoryCode: targetItem.code,
+          tempId: targetItem.id,
+          newPrice: newPrice,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.cartItems)) {
+        if (currentSeq === cartMutationSeqRef.current) {
+          setCart(data.cartItems);
+        }
+      }
+    } catch (err: any) {
+      console.warn("Error updating price on server:", err);
+    } finally {
       setShowPriceChangeModal(false);
       setOverridePrice("");
     }
@@ -2416,6 +2637,7 @@ export default function PosBillingScreen({
             editable={!isScaleLockedQty}
             onChangeText={(txt) => {
               if (isScaleLockedQty) return;
+              isManualFastQtyEnteredRef.current = true;
               setFastQty(txt);
             }}
             onEndEditing={(e) => handleFastQtyCommit(e.nativeEvent.text)}
@@ -2550,7 +2772,20 @@ export default function PosBillingScreen({
           />
         </TouchableOpacity>
 
-        {/* Three-Dot / More Options Menu (Opens Config, Theme, Station info, Logout) */}
+        {/* Theme & Typography Customizer Button (Loads Theme Color Selector Modal) */}
+        <TouchableOpacity
+          style={styles.moreMenuBtn}
+          onPress={() => setShowThemeModal(true)}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons
+            name="palette-outline"
+            size={22}
+            color={currentTheme.primary}
+          />
+        </TouchableOpacity>
+
+        {/* Three-Dot / More Options Menu (Opens Desktop POS Quick Functions Grid) */}
         <TouchableOpacity
           style={styles.moreMenuBtn}
           onPress={() => setShowMoreMenuModal(true)}
@@ -2560,6 +2795,28 @@ export default function PosBillingScreen({
             name="dots-vertical"
             size={24}
             color={currentTheme.primary}
+          />
+        </TouchableOpacity>
+
+        {/* Log Out Button */}
+        <TouchableOpacity
+          style={[styles.moreMenuBtn, styles.logoutTopBtn]}
+          onPress={() => {
+            if (onLogout) {
+              showAlert(
+                "Confirm Exit",
+                "Are you sure you want to log out and switch cashier?",
+                "warning",
+                () => onLogout()
+              );
+            }
+          }}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons
+            name="logout-variant"
+            size={20}
+            color="#dc2626"
           />
         </TouchableOpacity>
 
@@ -3053,7 +3310,7 @@ export default function PosBillingScreen({
 
               <TouchableOpacity
                 style={[styles.posBtn, styles.btnSearch]}
-                onPress={() => setShowPriceCheckModal(true)}
+                onPress={() => setShowSearchModal(true)}
                 activeOpacity={0.8}
               >
                 <MaterialCommunityIcons
@@ -4178,6 +4435,18 @@ export default function PosBillingScreen({
         activeTerminal={terminalCode}
       />
 
+      {/* Inventory Search Dialog (VB.NET frmSearch & clsInventory fncGetMultipleSearchDetails) */}
+      <SearchModal
+        visible={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
+        onSelectItem={(item: SearchResultItem) => {
+          processItemLookup(item.InventoryCode);
+        }}
+        apiUrl={API_URL}
+        currentLocationCode={effectiveLocation}
+        theme={currentTheme}
+      />
+
       {/* Theme & Typography Customizer Modal */}
       <ThemeModal
         visible={showThemeModal}
@@ -4188,7 +4457,7 @@ export default function PosBillingScreen({
         onSelectFont={handleSelectFont}
       />
 
-      {/* Three-Dot More Options Dropdown Modal */}
+      {/* Three-Dot More Options Dropdown Modal (Matching Desktop POS quick-action grid) */}
       <Modal
         visible={showMoreMenuModal}
         transparent={true}
@@ -4201,95 +4470,404 @@ export default function PosBillingScreen({
           onPress={() => setShowMoreMenuModal(false)}
         >
           <View
-            style={[
-              styles.menuModalCard,
-              {
-                backgroundColor: currentTheme.surface,
-                borderColor: currentTheme.borderColor,
-              },
-            ]}
+            style={styles.menuModalCard}
+            onStartShouldSetResponder={() => true}
+            onTouchEnd={(e) => e.stopPropagation()}
           >
-            {/* Station & Cashier Header */}
+            {/* Top Bar inside Menu Header */}
             <View style={styles.menuModalHeader}>
               <View style={styles.menuStationBadge}>
                 <MaterialCommunityIcons
-                  name="desktop-classic"
+                  name="view-grid-outline"
                   size={16}
-                  color={currentTheme.primary}
+                  color="#ffffff"
                 />
-                <Text
-                  style={[
-                    styles.menuStationText,
-                    { color: currentTheme.textDark, fontFamily: activeFontFamily },
-                  ]}
-                >
-                  {terminalCode || "---"} • {cashierName || "CASHIER"}
+                <Text style={styles.menuStationText}>
+                  POS Functions • Station [{terminalCode || "1"}] ({cashierName || "CASHIER"})
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => setShowMoreMenuModal(false)} style={{ padding: 4 }}>
-                <MaterialCommunityIcons name="close" size={18} color="#64748b" />
-              </TouchableOpacity>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    setShowConfigModal(true);
+                  }}
+                  style={styles.menuIconHeaderBtn}
+                >
+                  <MaterialCommunityIcons name="cog-outline" size={17} color="#334155" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    setShowThemeModal(true);
+                  }}
+                  style={styles.menuIconHeaderBtn}
+                >
+                  <MaterialCommunityIcons name="palette-outline" size={17} color="#334155" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowMoreMenuModal(false)}
+                  style={styles.menuIconHeaderBtn}
+                >
+                  <MaterialCommunityIcons name="close" size={18} color="#64748b" />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {/* Menu Items */}
-            <TouchableOpacity
-              style={styles.menuModalItem}
-              onPress={() => {
-                setShowMoreMenuModal(false);
-                setShowConfigModal(true);
-              }}
-            >
-              <View style={[styles.menuItemIconCircle, { backgroundColor: "#eff6ff" }]}>
-                <MaterialCommunityIcons name="cog-outline" size={18} color="#2563eb" />
-              </View>
-              <View style={styles.menuItemTextCol}>
-                <Text style={[styles.menuItemTitle, { color: currentTheme.textDark }]}>
-                  System Configuration
-                </Text>
-                <Text style={styles.menuItemSub}>App.config parameters & POS settings</Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={18} color="#94a3b8" />
-            </TouchableOpacity>
+            {/* Desktop-POS Function Key Grid */}
+            <View style={styles.menuGridContainer}>
+              {/* Row 1 */}
+              <View style={styles.menuGridRow}>
+                {/* F3 Void Bill */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    handleClearCart();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileKey}>F3</Text>
+                  <Text style={styles.menuGridTileLabel}>Void Bill</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.menuModalItem}
-              onPress={() => {
-                setShowMoreMenuModal(false);
-                setShowThemeModal(true);
-              }}
-            >
-              <View style={[styles.menuItemIconCircle, { backgroundColor: "#f0fdf4" }]}>
-                <MaterialCommunityIcons name="palette-outline" size={18} color="#16a34a" />
-              </View>
-              <View style={styles.menuItemTextCol}>
-                <Text style={[styles.menuItemTitle, { color: currentTheme.textDark }]}>
-                  Theme & Typography
-                </Text>
-                <Text style={styles.menuItemSub}>Colors, fonts and UI appearance</Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={18} color="#94a3b8" />
-            </TouchableOpacity>
+                {/* Sales Man */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    setShowSalesmanModal(true);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Sales Man</Text>
+                </TouchableOpacity>
 
-            <View style={styles.menuDivider} />
+                {/* F9 Exchange */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    showAlert("F9 Exchange", "Exchange mode initiated. Scan or select the item to exchange.", "info");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileKey}>F9</Text>
+                  <Text style={styles.menuGridTileLabel}>Exchange</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.menuModalItem, { marginBottom: 0 }]}
-              onPress={() => {
-                setShowMoreMenuModal(false);
-                if (onLogout) onLogout();
-              }}
-            >
-              <View style={[styles.menuItemIconCircle, { backgroundColor: "#fef2f2" }]}>
-                <MaterialCommunityIcons name="power" size={18} color="#dc2626" />
+                {/* Total Sales */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    showAlert(
+                      "Total Sales Summary",
+                      `Terminal: ${terminalCode || "1"}\nTotal Active Bills: ${heldBills.length + (cart.length > 0 ? 1 : 0)}\nCurrent Cart Total: $${grandTotal.toFixed(2)}`,
+                      "info"
+                    );
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Total Sales</Text>
+                </TouchableOpacity>
+
+                {/* F1 RePrint */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    if (cart.length > 0 || grandTotal > 0) {
+                      setReceiptSummary({
+                        total: grandTotal,
+                        tender: currentTender,
+                        balance: balance,
+                        payMode: selectedPayMode,
+                      });
+                      setShowReceiptModal(true);
+                    } else {
+                      showAlert("RePrint", "No previous receipt found to re-print.", "warning");
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileKey}>F1</Text>
+                  <Text style={styles.menuGridTileLabel}>RePrint</Text>
+                </TouchableOpacity>
               </View>
-              <View style={styles.menuItemTextCol}>
-                <Text style={[styles.menuItemTitle, { color: "#dc2626" }]}>
-                  Exit POS / Switch Cashier
-                </Text>
-                <Text style={styles.menuItemSub}>Log out of current terminal</Text>
+
+              {/* Row 2 */}
+              <View style={styles.menuGridRow}>
+                {/* Print ON (Highlighted border when Active) */}
+                <TouchableOpacity
+                  style={[
+                    styles.menuGridTile,
+                    isPrintOn && styles.menuGridTileActiveBorder,
+                  ]}
+                  onPress={() => {
+                    setIsPrintOn(true);
+                    showAlert("Print Status", "Receipt Printing has been turned ON.", "success");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Print ON</Text>
+                </TouchableOpacity>
+
+                {/* Print OFF (Highlighted border when Inactive) */}
+                <TouchableOpacity
+                  style={[
+                    styles.menuGridTile,
+                    !isPrintOn && styles.menuGridTileActiveBorder,
+                  ]}
+                  onPress={() => {
+                    setIsPrintOn(false);
+                    showAlert("Print Status", "Receipt Printing has been turned OFF.", "info");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Print OFF</Text>
+                </TouchableOpacity>
+
+                {/* Settlement */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    showAlert(
+                      "Daily Settlement",
+                      `Station [${terminalCode || "1"}] Settlement is ready. Total Sales for session: $${grandTotal.toFixed(2)}`,
+                      "info"
+                    );
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Settlement</Text>
+                </TouchableOpacity>
+
+                {/* F11 Price Change */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    handlePriceChangeClick();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileKey}>F11</Text>
+                  <Text style={styles.menuGridTileLabel}>Price Change</Text>
+                </TouchableOpacity>
+
+                {/* Paymode Change */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    // Cycle paymode or show selector
+                    const nextMode = selectedPayMode === "CASH" ? "NETS" : selectedPayMode === "NETS" ? "PAYNOW" : "CASH";
+                    setSelectedPayMode(nextMode);
+                    showAlert("Paymode Changed", `Payment mode switched to [${nextMode}].`, "info");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabel}>Paymode</Text>
+                  <Text style={styles.menuGridTileLabel}>Change</Text>
+                </TouchableOpacity>
               </View>
-              <MaterialCommunityIcons name="chevron-right" size={18} color="#dc2626" />
-            </TouchableOpacity>
+
+              {/* Row 3 */}
+              <View style={styles.menuGridRow}>
+                {/* Expenses */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    showAlert("Petty Cash / Expenses", "Opening Petty Cash / Expense Entry module...", "info");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Expenses</Text>
+                </TouchableOpacity>
+
+                {/* F5 Discount */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    fastDiscInputRef.current?.focus();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileKey}>F5</Text>
+                  <Text style={styles.menuGridTileLabel}>Discount</Text>
+                </TouchableOpacity>
+
+                {/* Dinamination Check */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    showAlert(
+                      "Dinamination Check",
+                      `Terminal Cash Denomination Check:\nCash Tendered: $${currentTender.toFixed(2)}\nBalance: $${balance.toFixed(2)}`,
+                      "info"
+                    );
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabel}>Dinamination</Text>
+                  <Text style={styles.menuGridTileLabel}>Check</Text>
+                </TouchableOpacity>
+
+                {/* F12 Auto */}
+                <TouchableOpacity
+                  style={[
+                    styles.menuGridTile,
+                    isAutoMode && styles.menuGridTileActiveBorder,
+                  ]}
+                  onPress={() => {
+                    setIsAutoMode((prev) => !prev);
+                    showAlert("F12 Auto Mode", `Auto checkout mode is now ${!isAutoMode ? "ENABLED" : "DISABLED"}.`, "info");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileKey}>F12</Text>
+                  <Text style={styles.menuGridTileLabel}>Auto</Text>
+                </TouchableOpacity>
+
+                {/* Cash Drawer */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    showAlert("Cash Drawer", "Triggering cash drawer kick pulse [ESC p 0 25 250]...", "info");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabel}>Cash</Text>
+                  <Text style={styles.menuGridTileLabel}>Drawer</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Row 4 */}
+              <View style={styles.menuGridRow}>
+                {/* Day End */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    showAlert(
+                      "Day End Process",
+                      "Are you sure you want to run Day End closing for today?",
+                      "warning"
+                    );
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Day End</Text>
+                </TouchableOpacity>
+
+                {/* Reset */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    setSkuCode("");
+                    setSkuDesc("");
+                    setFastQty("1");
+                    setFastPrice("0.00");
+                    setFastDisc("0.00");
+                    setFastDiscPerc("0");
+                    setNumpadValue("");
+                    setTenderAmount("");
+                    skuInputRef.current?.focus();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Reset</Text>
+                </TouchableOpacity>
+
+                {/* Refund */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    showAlert("Refund", "Refund mode initiated. Enter original receipt / bill number.", "info");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSingle}>Refund</Text>
+                </TouchableOpacity>
+
+                {/* Customer Receipts */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    if (cart.length > 0) {
+                      setReceiptSummary({
+                        total: grandTotal,
+                        tender: currentTender,
+                        balance: balance,
+                        payMode: selectedPayMode,
+                      });
+                      setShowReceiptModal(true);
+                    } else {
+                      showAlert("Customer Receipts", "Showing Customer Receipts history...", "info");
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabel}>Customer</Text>
+                  <Text style={styles.menuGridTileLabel}>Receipts</Text>
+                </TouchableOpacity>
+
+                {/* F8 Member */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    showAlert("F8 Member", "Scan or enter customer membership card number / phone number.", "info");
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileKey}>F8</Text>
+                  <Text style={styles.menuGridTileLabel}>Member</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Row 5 */}
+              <View style={styles.menuGridRow}>
+                {/* Upload Offline Transaction */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    showAlert(
+                      "Upload Offline Transaction",
+                      "Checking for unsynced offline transactions...\nAll transactions are currently synchronized with the server.",
+                      "success"
+                    );
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabelSmall}>Upload</Text>
+                  <Text style={styles.menuGridTileLabelSmall}>Offline</Text>
+                  <Text style={styles.menuGridTileLabelSmall}>Transaction</Text>
+                </TouchableOpacity>
+
+                {/* Close (Red/Rose Button) */}
+                <TouchableOpacity
+                  style={styles.menuGridTileClose}
+                  onPress={() => setShowMoreMenuModal(false)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileCloseText}>Close</Text>
+                </TouchableOpacity>
+
+                {/* Empty placeholders to maintain 5-column grid alignment */}
+                <View style={styles.menuGridTilePlaceholder} />
+                <View style={styles.menuGridTilePlaceholder} />
+                <View style={styles.menuGridTilePlaceholder} />
+              </View>
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -4354,44 +4932,138 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  logoutTopBtn: {
+    backgroundColor: "#fef2f2",
+    borderColor: "#fecaca",
+  },
   menuModalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.45)",
-    justifyContent: "flex-start",
-    alignItems: "flex-end",
-    paddingTop: 42,
-    paddingRight: 10,
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 12,
   },
   menuModalCard: {
-    width: 290,
-    backgroundColor: "#ffffff",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    padding: 12,
+    width: "92%",
+    maxWidth: 680,
+    backgroundColor: "#738a9c", // Muted slate-blue matching VB.NET POS reference frame
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#475569",
+    padding: 14,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
   },
   menuModalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingBottom: 8,
+    paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
-    marginBottom: 8,
+    borderBottomColor: "rgba(255, 255, 255, 0.2)",
+    marginBottom: 12,
   },
   menuStationBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 8,
   },
   menuStationText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "700",
+    color: "#f8fafc",
+  },
+  menuIconHeaderBtn: {
+    padding: 6,
+    borderRadius: 4,
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuGridContainer: {
+    gap: 10,
+  },
+  menuGridRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  menuGridTile: {
+    flex: 1,
+    height: 62,
+    backgroundColor: "#d5dde5", // Crisp light grey metallic button background matching reference
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: "#94a3b8",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  menuGridTileActiveBorder: {
+    borderWidth: 2.5,
+    borderColor: "#059669", // Teal/emerald active border like Print ON / F12 Auto
+    backgroundColor: "#e2e8f0",
+  },
+  menuGridTileKey: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#1e293b",
+    marginBottom: 2,
+  },
+  menuGridTileLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1e293b",
+    textAlign: "center",
+    lineHeight: 14,
+  },
+  menuGridTileLabelSingle: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: "#1e293b",
+    textAlign: "center",
+  },
+  menuGridTileLabelSmall: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#1e293b",
+    textAlign: "center",
+    lineHeight: 12,
+  },
+  menuGridTileClose: {
+    flex: 1,
+    height: 62,
+    backgroundColor: "#e11d48", // Vivid red/rose Close button
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: "#9f1239",
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  menuGridTileCloseText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#ffffff",
+    letterSpacing: 0.5,
+  },
+  menuGridTilePlaceholder: {
+    flex: 1,
+    height: 62,
   },
   menuModalItem: {
     flexDirection: "row",

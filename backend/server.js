@@ -82,6 +82,10 @@ app.use("/api/cart", cartRoutes);
 const holdRoutes = require("./routes/holdRoutes");
 app.use("/api/hold", holdRoutes);
 
+// Mount Inventory Search routes (VB.NET frmSearch & clsInventory fncGetMultipleSearchDetails)
+const searchRoutes = require("./routes/searchRoutes");
+app.use("/api/search", searchRoutes);
+
 // Mount POS Clear routes (F2 Clear) - Exact VB.NET Clear Process
 const posClearRoutes = require("./routes/posClearRoutes");
 app.use("/api/pos/clear", posClearRoutes);

@@ -746,7 +746,7 @@ router.post('/direct-sku', async (req, res) => {
         ISNULL(ts.GST, 0) AS GST,
         RTRIM(LTRIM(ISNULL(ts.Salesman, ''))) AS Salesman,
         RTRIM(LTRIM(ISNULL(inv.UOM, 'PCS'))) AS UOM,
-        ISNULL(inv.SellingPrice, 0) AS NormalPrice
+        ISNULL(ts.Price, ISNULL(inv.SellingPrice, 0)) AS NormalPrice
       FROM tblTempSales ts
       LEFT JOIN tblInventory inv ON RTRIM(LTRIM(ts.InventoryCode)) = RTRIM(LTRIM(inv.InventoryCode))
       WHERE RTRIM(LTRIM(ts.TerminalCode)) = @term
