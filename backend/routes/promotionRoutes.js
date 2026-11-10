@@ -14,6 +14,7 @@ const {
   getPairPromotions,
   getBreakPrices,
   recalculateCartPromotions,
+  invalidatePromotionCache,
 } = require('../services/promotionService');
 
 /**
@@ -59,6 +60,19 @@ router.post('/recalculate', async (req, res) => {
     console.error('❌ [PROMOTION RECALCULATE ERROR]:', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
+});
+
+/**
+ * POST /api/promotions/invalidate-cache
+ * Flushes active in-memory promotion rules cache (e.g. called after back-office promo edit)
+ */
+router.post('/invalidate-cache', (req, res) => {
+  invalidatePromotionCache();
+  return res.status(200).json({
+    success: true,
+    message: 'Promotion rules cache invalidated successfully',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 module.exports = router;

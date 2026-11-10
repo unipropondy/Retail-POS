@@ -238,22 +238,8 @@ router.post('/temp-sales/add', async (req, res) => {
       }));
 
       const recalculated = await recalculateCartPromotions(pool, rawItems, 'HQ');
-
-      for (const c of recalculated) {
-        const up = pool.request();
-        up.input('tId', sql.Int, parseInt(c.id, 10));
-        up.input('d', sql.Decimal(18, 2), Number(c.disc) || 0);
-        up.input('nd', sql.Decimal(18, 2), Number(c.disc) || 0);
-        up.input('a', sql.Decimal(18, 2), Number(c.amount) || 0);
-        up.input('g', sql.Decimal(18, 2), Number(c.gst) || 0);
-        up.input('dpc', sql.VarChar(50), String(c.discountPriceCode || '').trim());
-        up.input('pn', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
-        await up.query(`
-          UPDATE tblTempSales
-          SET Discount = @d, NetDiscount = @nd, Amount = @a, GST = @g, DiscountPriceCode = @dpc, PromoName = @pn
-          WHERE TempID = @tId
-        `);
-      }
+      const { batchUpdateTempSalesPromotions } = require('../services/promotionService');
+      await batchUpdateTempSalesPromotions(pool, recalculated);
 
       return res.status(200).json({
         success: true,
@@ -353,22 +339,8 @@ router.post('/temp-sales/add', async (req, res) => {
       }));
 
       const recalculated = await recalculateCartPromotions(pool, rawItems, 'HQ');
-
-      for (const c of recalculated) {
-        const up = pool.request();
-        up.input('tId', sql.Int, parseInt(c.id, 10));
-        up.input('d', sql.Decimal(18, 2), Number(c.disc) || 0);
-        up.input('nd', sql.Decimal(18, 2), Number(c.disc) || 0);
-        up.input('a', sql.Decimal(18, 2), Number(c.amount) || 0);
-        up.input('g', sql.Decimal(18, 2), Number(c.gst) || 0);
-        up.input('dpc', sql.VarChar(50), String(c.discountPriceCode || '').trim());
-        up.input('pn', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
-        await up.query(`
-          UPDATE tblTempSales
-          SET Discount = @d, NetDiscount = @nd, Amount = @a, GST = @g, DiscountPriceCode = @dpc, PromoName = @pn
-          WHERE TempID = @tId
-        `);
-      }
+      const { batchUpdateTempSalesPromotions } = require('../services/promotionService');
+      await batchUpdateTempSalesPromotions(pool, recalculated);
 
       return res.status(201).json({
         success: true,
@@ -489,22 +461,8 @@ router.post('/temp-sales/update-qty', async (req, res) => {
     }));
 
     const recalculated = await recalculateCartPromotions(pool, rawItems, 'HQ');
-
-    for (const c of recalculated) {
-      const up = pool.request();
-      up.input('tId', sql.Int, parseInt(c.id, 10));
-      up.input('d', sql.Decimal(18, 2), Number(c.disc) || 0);
-      up.input('nd', sql.Decimal(18, 2), Number(c.disc) || 0);
-      up.input('a', sql.Decimal(18, 2), Number(c.amount) || 0);
-      up.input('g', sql.Decimal(18, 2), Number(c.gst) || 0);
-      up.input('dpc', sql.VarChar(50), String(c.discountPriceCode || '').trim());
-      up.input('pn', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
-      await up.query(`
-        UPDATE tblTempSales
-        SET Discount = @d, NetDiscount = @nd, Amount = @a, GST = @g, DiscountPriceCode = @dpc, PromoName = @pn
-        WHERE TempID = @tId
-      `);
-    }
+    const { batchUpdateTempSalesPromotions } = require('../services/promotionService');
+    await batchUpdateTempSalesPromotions(pool, recalculated);
 
     return res.status(200).json({ success: true, action: 'updated', qty: nextQty, cartItems: recalculated });
   } catch (error) {
@@ -682,21 +640,8 @@ router.post('/temp-sales/update-price', async (req, res) => {
     const recalculated = await recalculateCartPromotions(pool, rawItems, 'HQ');
 
     // Persist recalculated promotions/discounts back to tblTempSales
-    for (const c of recalculated) {
-      const up = pool.request();
-      up.input('tId', sql.Int, parseInt(c.id, 10));
-      up.input('d', sql.Decimal(18, 2), Number(c.disc) || 0);
-      up.input('nd', sql.Decimal(18, 2), Number(c.disc) || 0);
-      up.input('a', sql.Decimal(18, 2), Number(c.amount) || 0);
-      up.input('g', sql.Decimal(18, 2), Number(c.gst) || 0);
-      up.input('dpc', sql.VarChar(50), String(c.discountPriceCode || '').trim());
-      up.input('pn', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
-      await up.query(`
-        UPDATE tblTempSales
-        SET Discount = @d, NetDiscount = @nd, Amount = @a, GST = @g, DiscountPriceCode = @dpc, PromoName = @pn
-        WHERE TempID = @tId
-      `);
-    }
+    const { batchUpdateTempSalesPromotions } = require('../services/promotionService');
+    await batchUpdateTempSalesPromotions(pool, recalculated);
 
     return res.status(200).json({
       success: true,

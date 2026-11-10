@@ -769,30 +769,11 @@ router.post('/direct-sku', async (req, res) => {
     }));
 
     // Recalculate promotions server-side so direct SKU entry gets exact promo results
-    const { recalculateCartPromotions } = require('../services/promotionService');
+    const { recalculateCartPromotions, batchUpdateTempSalesPromotions } = require('../services/promotionService');
     const cartItems = await recalculateCartPromotions(pool, rawCartItems, locationCode);
 
-    // Sync recalculated promotions back into tblTempSales
-    for (const c of cartItems) {
-      const upTemp = pool.request();
-      upTemp.input('tempId', sql.Int, parseInt(c.id, 10));
-      upTemp.input('disc', sql.Decimal(18, 2), Number(c.disc) || 0);
-      upTemp.input('netDisc', sql.Decimal(18, 2), Number(c.disc) || 0);
-      upTemp.input('amount', sql.Decimal(18, 2), Number(c.amount) || 0);
-      upTemp.input('gst', sql.Decimal(18, 2), Number(c.gst) || 0);
-      upTemp.input('dpCode', sql.VarChar(50), String(c.discountPriceCode || '').trim());
-      upTemp.input('promoName', sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
-      await upTemp.query(`
-        UPDATE tblTempSales
-        SET Discount = @disc,
-            NetDiscount = @netDisc,
-            Amount = @amount,
-            GST = @gst,
-            DiscountPriceCode = @dpCode,
-            PromoName = @promoName
-        WHERE TempID = @tempId
-      `);
-    }
+    // Sync recalculated promotions back into tblTempSales in a single batch
+    await batchUpdateTempSalesPromotions(pool, cartItems);
 
     return res.status(200).json({
       success: true,

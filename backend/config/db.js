@@ -13,6 +13,8 @@ require("dotenv").config();
 const sql = require("mssql");
 
 // Database connection configuration object
+// Supports both Remote VPN testing (e.g. 26.63.60.58:5799) and Local Customer Deployment (LAN IP or Localhost)
+const dbPortParsed = parseInt(process.env.DB_PORT, 10);
 const dbConfig = {
   // Database user from .env
   user: process.env.DB_USER,
@@ -20,11 +22,11 @@ const dbConfig = {
   // Database password from .env
   password: process.env.DB_PASSWORD,
 
-  // IP address of your SQL Server machine
-  server: process.env.DB_SERVER,
+  // IP address or hostname of your SQL Server machine (e.g. 26.63.60.58, 192.168.1.10, localhost)
+  server: process.env.DB_SERVER || 'localhost',
 
-  // Custom port number for SQL Server
-  port: parseInt(process.env.DB_PORT, 10),
+  // Custom port number for SQL Server (defaults to 1433 if not provided)
+  port: !isNaN(dbPortParsed) && dbPortParsed > 0 ? dbPortParsed : 1433,
 
   // Target database name
   database: process.env.DB_NAME,
@@ -35,12 +37,15 @@ const dbConfig = {
 
     // Trust the server certificate to avoid handshake validation errors
     trustServerCertificate: true,
+
+    // Optional SQL Server instance name (e.g. SQLEXPRESS if configured)
+    instanceName: process.env.DB_INSTANCE || undefined,
   },
 
-  // Connection pool options tuned for low-latency retail POS transactions
+  // Connection pool options tuned for low-latency retail POS transactions across 1-10+ terminals
   pool: {
-    max: 15,
-    min: 2, // Keep warm connections active to eliminate TCP/auth reconnect latency
+    max: parseInt(process.env.DB_POOL_MAX, 10) || 25,
+    min: parseInt(process.env.DB_POOL_MIN, 10) || 2, // Keep warm connections active to eliminate TCP/auth reconnect latency
     idleTimeoutMillis: 60000,
   },
 

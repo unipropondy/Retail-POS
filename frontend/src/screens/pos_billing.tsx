@@ -255,8 +255,78 @@ export default function PosBillingScreen({
   const imageErrorCodes = useRef<Set<string>>(new Set());
   const [imageErrorTick, setImageErrorTick] = useState<number>(0);
   const prevCartLengthRef = useRef<number>(0);
-  // Sequence counter to prevent stale out-of-order API responses from overwriting latest cart selection
+  // Sequence counter to track latest mutation request
   const cartMutationSeqRef = useRef<number>(0);
+
+  /**
+   * Safe Cart Reconciler:
+   * Merges server-calculated promotions, discounts, amounts and promo badges into the active cart
+   * even when rapid mutations have occurred, while preserving optimistic quantities and pending adds.
+   */
+  const reconcileCartWithServer = React.useCallback(
+    (serverItems: CartItem[], requestSeq: number, targetItemCode?: string) => {
+      if (!Array.isArray(serverItems)) return;
+      const isLatest = requestSeq === cartMutationSeqRef.current;
+
+      setCart((prev) => {
+        if (isLatest) {
+          // Exact match with latest mutation: server is source of truth
+          const serverCodes = new Set(serverItems.map((c: CartItem) => c.code));
+          const missingOptimistic = prev.filter((p) => !serverCodes.has(p.code));
+          const merged = serverItems.map((c: CartItem) => {
+            const existing = prev.find((p) => p.code === c.code || (c.id && p.id === c.id));
+            return {
+              ...c,
+              id: String(c.id || existing?.id || Date.now().toString() + Math.random().toString()),
+              stock: c.stock !== undefined ? c.stock : existing?.stock,
+            };
+          });
+          return [...merged, ...missingOptimistic];
+        } else {
+          // Newer mutation was initiated, but we MUST merge promotion discounts from this response
+          // so multi-buy discounts (e.g. 5th Kingfisher) are NOT discarded!
+          return prev.map((localItem) => {
+            const matchingServerItem = serverItems.find(
+              (si) => (si.id && si.id === localItem.id) || si.code === localItem.code
+            );
+            if (!matchingServerItem) return localItem;
+
+            // Merge server-calculated promotion fields while keeping current local qty if local is newer
+            const hasPromo = Boolean(matchingServerItem.promoName || matchingServerItem.disc > 0 || matchingServerItem.discountPriceCode);
+            if (!hasPromo && localItem.disc === 0) return localItem;
+
+            return {
+              ...localItem,
+              disc: matchingServerItem.disc !== undefined ? matchingServerItem.disc : localItem.disc,
+              promoDisc: matchingServerItem.promoDisc !== undefined ? matchingServerItem.promoDisc : localItem.promoDisc,
+              pairDisc: matchingServerItem.pairDisc !== undefined ? matchingServerItem.pairDisc : localItem.pairDisc,
+              promoName: matchingServerItem.promoName || localItem.promoName,
+              promoCode: matchingServerItem.promoCode || localItem.promoCode,
+              discountPriceCode: matchingServerItem.discountPriceCode || localItem.discountPriceCode,
+              amount: parseFloat(Math.max(0, localItem.qty * (matchingServerItem.price || localItem.price) - (matchingServerItem.disc || 0)).toFixed(2)),
+            };
+          });
+        }
+      });
+
+      if (isLatest && targetItemCode) {
+        let matchedIdx = -1;
+        for (let i = serverItems.length - 1; i >= 0; i--) {
+          if (serverItems[i].code.toUpperCase() === targetItemCode.toUpperCase()) {
+            matchedIdx = i;
+            break;
+          }
+        }
+        if (matchedIdx !== -1) {
+          setSelectedCartIndex(matchedIdx);
+        } else {
+          setSelectedCartIndex(serverItems.length - 1);
+        }
+        scrollToCartBottom(true);
+      }
+    },
+    []
+  );
 
   // Helper to scroll cart view to the bottom cleanly across native and web
   const scrollToCartBottom = (animated = true) => {
@@ -891,40 +961,7 @@ export default function PosBillingScreen({
         .then((res) => res.json())
         .then((data) => {
           if (data && data.success && Array.isArray(data.cartItems)) {
-            // Drop older out-of-order responses if a newer cart addition has already occurred
-            if (currentSeq !== cartMutationSeqRef.current) {
-              return;
-            }
-
-            setCart((prev) => {
-              const serverCodes = new Set(data.cartItems.map((c: CartItem) => c.code));
-              const missingOptimistic = prev.filter((p) => !serverCodes.has(p.code));
-              const merged = data.cartItems.map((c: CartItem) => {
-                const existing = prev.find((p) => p.code === c.code);
-                return {
-                  ...c,
-                  id: c.id || existing?.id,
-                  stock: c.stock !== undefined ? c.stock : existing?.stock,
-                };
-              });
-              return [...merged, ...missingOptimistic];
-            });
-
-            // Highlight the exact matching item row (yellow highlight)
-            // Use reverse loop so it targets the latest row
-            let matchedIdx = -1;
-            for (let i = data.cartItems.length - 1; i >= 0; i--) {
-              if (data.cartItems[i].code === item.InventoryCode) {
-                matchedIdx = i;
-                break;
-              }
-            }
-            if (matchedIdx !== -1) {
-              setSelectedCartIndex(matchedIdx);
-            } else {
-              setSelectedCartIndex(data.cartItems.length - 1);
-            }
-            scrollToCartBottom(true);
+            reconcileCartWithServer(data.cartItems, currentSeq, item.InventoryCode);
           }
         })
         .catch(() => {});
@@ -997,18 +1034,7 @@ export default function PosBillingScreen({
 
         const data = await res.json();
         if (data && data.success && Array.isArray(data.cartItems)) {
-          if (currentSeq === cartMutationSeqRef.current) {
-            setCart(data.cartItems);
-            let matchedIdx = -1;
-            for (let i = data.cartItems.length - 1; i >= 0; i--) {
-              if (data.cartItems[i].code.toUpperCase() === targetItem.InventoryCode.toUpperCase()) {
-                matchedIdx = i;
-                break;
-              }
-            }
-            setSelectedCartIndex(matchedIdx !== -1 ? matchedIdx : data.cartItems.length - 1);
-            scrollToCartBottom(true);
-          }
+          reconcileCartWithServer(data.cartItems, currentSeq, targetItem.InventoryCode);
         }
 
         // Clear pending item and reset input bar
@@ -1342,23 +1368,20 @@ export default function PosBillingScreen({
         });
 
         const data = await res.json();
-        // Only reconcile if no newer cart mutations have occurred
+        // Reconcile server promotion calculations safely into cart
         if (res.ok && data && data.success && Array.isArray(data.cartItems)) {
-          if (currentSeq === cartMutationSeqRef.current) {
-            setCart(data.cartItems);
-            // Re-sync activeItem with server recalculation
-            const reMatched = data.cartItems.find(
-              (ci: any) => (ci.id && ci.id === targetItem.id) || ci.code === targetItem.code
-            );
-            if (reMatched) {
-              setActiveItem((prevActive) => ({
-                ...prevActive,
-                name: reMatched.description,
-                qty: reMatched.qty,
-                price: reMatched.price,
-              }));
-              setFastQty("1");
-            }
+          reconcileCartWithServer(data.cartItems, currentSeq, targetItem.code);
+          const reMatched = data.cartItems.find(
+            (ci: any) => (ci.id && ci.id === targetItem.id) || ci.code === targetItem.code
+          );
+          if (reMatched && currentSeq === cartMutationSeqRef.current) {
+            setActiveItem((prevActive) => ({
+              ...prevActive,
+              name: reMatched.description,
+              qty: reMatched.qty,
+              price: reMatched.price,
+            }));
+            setFastQty("1");
           }
         }
       } catch (err) {
@@ -2127,20 +2150,8 @@ export default function PosBillingScreen({
 
       // Step 4: Successful Insertion into tblTempSales
       if (Array.isArray(data.cartItems)) {
-        if (currentSeq === cartMutationSeqRef.current) {
-          setCart(data.cartItems);
-          // If the item was already in cart, highlight its respective row; otherwise highlight the newly added row
-          const targetCode = data.item?.InventoryCode || enteredSku;
-          let matchedIdx = -1;
-          for (let i = data.cartItems.length - 1; i >= 0; i--) {
-            if (data.cartItems[i].code.toUpperCase() === targetCode.toUpperCase()) {
-              matchedIdx = i;
-              break;
-            }
-          }
-          setSelectedCartIndex(matchedIdx !== -1 ? matchedIdx : data.cartItems.length - 1);
-          scrollToCartBottom(true);
-        }
+        const targetCode = data.item?.InventoryCode || enteredSku;
+        reconcileCartWithServer(data.cartItems, currentSeq, targetCode);
       }
 
       // Update HUD active item
@@ -4470,12 +4481,12 @@ export default function PosBillingScreen({
           onPress={() => setShowMoreMenuModal(false)}
         >
           <View
-            style={styles.menuModalCard}
+            style={[styles.menuModalCard, { backgroundColor: currentTheme.surface, borderColor: currentTheme.borderColor }]}
             onStartShouldSetResponder={() => true}
             onTouchEnd={(e) => e.stopPropagation()}
           >
             {/* Top Bar inside Menu Header */}
-            <View style={styles.menuModalHeader}>
+            <View style={[styles.menuModalHeader, { backgroundColor: currentTheme.primary, borderColor: currentTheme.primaryHover }]}>
               <View style={styles.menuStationBadge}>
                 <MaterialCommunityIcons
                   name="view-grid-outline"
@@ -4945,26 +4956,26 @@ const styles = StyleSheet.create({
   },
   menuModalCard: {
     width: "92%",
-    maxWidth: 680,
-    backgroundColor: "#738a9c", // Muted slate-blue matching VB.NET POS reference frame
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#475569",
-    padding: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 12,
+    maxWidth: 720,
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 18,
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 16,
   },
   menuModalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255, 255, 255, 0.2)",
-    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 16,
   },
   menuStationBadge: {
     flexDirection: "row",
@@ -4995,64 +5006,64 @@ const styles = StyleSheet.create({
   },
   menuGridTile: {
     flex: 1,
-    height: 62,
-    backgroundColor: "#d5dde5", // Crisp light grey metallic button background matching reference
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: "#94a3b8",
+    height: 64,
+    backgroundColor: "#f8fafc",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 4,
-    shadowColor: "#000",
+    paddingHorizontal: 6,
+    shadowColor: "#64748b",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
     elevation: 2,
   },
   menuGridTileActiveBorder: {
-    borderWidth: 2.5,
-    borderColor: "#059669", // Teal/emerald active border like Print ON / F12 Auto
-    backgroundColor: "#e2e8f0",
+    borderWidth: 2,
+    borderColor: "#16a34a",
+    backgroundColor: "#f0fdf4",
   },
   menuGridTileKey: {
     fontSize: 13,
     fontWeight: "800",
-    color: "#1e293b",
+    color: "#0f172a",
     marginBottom: 2,
   },
   menuGridTileLabel: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#1e293b",
+    color: "#334155",
     textAlign: "center",
     lineHeight: 14,
   },
   menuGridTileLabelSingle: {
     fontSize: 12.5,
     fontWeight: "700",
-    color: "#1e293b",
+    color: "#334155",
     textAlign: "center",
   },
   menuGridTileLabelSmall: {
-    fontSize: 10.5,
+    fontSize: 11,
     fontWeight: "700",
-    color: "#1e293b",
+    color: "#334155",
     textAlign: "center",
-    lineHeight: 12,
+    lineHeight: 13,
   },
   menuGridTileClose: {
     flex: 1,
-    height: 62,
-    backgroundColor: "#e11d48", // Vivid red/rose Close button
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: "#9f1239",
+    height: 64,
+    backgroundColor: "#e11d48",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#be123c",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
+    shadowColor: "#e11d48",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
     elevation: 3,
   },
   menuGridTileCloseText: {

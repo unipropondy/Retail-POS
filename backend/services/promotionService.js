@@ -13,6 +13,121 @@
 
 const { sql, getPool } = require('../config/db');
 
+// ==============================================================================
+// IN-MEMORY PROMOTION RULES CACHE (30-Second TTL + Single-Flight Refresh)
+// ==============================================================================
+const PROMO_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+
+let promoRulesCache = {
+  timestamp: 0,
+  multiBuyRows: [],
+  pairRows: [],
+  breakRows: [],
+};
+
+let promoRulesRefreshPromise = null;
+
+/**
+ * Invalidate the promotion cache immediately (e.g. when promo rules are saved/modified)
+ */
+function invalidatePromotionCache() {
+  promoRulesCache.timestamp = 0;
+  promoRulesRefreshPromise = null;
+  console.log('🔄 [PROMO CACHE] Promotion rules cache invalidated.');
+}
+
+/**
+ * Retrieve cached active promotion rules with single-flight refresh
+ */
+async function getActivePromotionRules(pool) {
+  const now = Date.now();
+  if (promoRulesCache.timestamp > 0 && now - promoRulesCache.timestamp < PROMO_CACHE_TTL_MS) {
+    return {
+      cached: true,
+      rules: promoRulesCache,
+    };
+  }
+
+  // Single-flight lock: reuse existing in-progress refresh promise to prevent duplicate SQL requests
+  if (promoRulesRefreshPromise) {
+    const rules = await promoRulesRefreshPromise;
+    return { cached: true, rules };
+  }
+
+  promoRulesRefreshPromise = (async () => {
+    const t0 = Date.now();
+    try {
+      const [mbRes, pairRes, breakRes] = await Promise.all([
+        pool.request().query(`
+          SELECT 
+            RTRIM(LTRIM(h.DiscountPriceCode)) AS DiscountPriceCode,
+            RTRIM(LTRIM(h.Description)) AS Description,
+            ISNULL(h.Qty, 1) AS RequiredQty,
+            ISNULL(h.Price, 0) AS BundlePrice,
+            ISNULL(h.ActualPrice, 0) AS ActualPrice,
+            h.ValidFrom,
+            h.ValidTo,
+            RTRIM(LTRIM(d.InventoryCode)) AS InventoryCode,
+            RTRIM(LTRIM(ISNULL(d.Locationcode, 'HQ'))) AS LocationCode
+          FROM tblRMDiscountPriceHeader h
+          INNER JOIN tblRMDiscountPriceDetail d ON RTRIM(LTRIM(h.DiscountPriceCode)) = RTRIM(LTRIM(d.DiscountPriceCode))
+          WHERE (h.ValidFrom IS NULL OR CONVERT(VARCHAR(10), h.ValidFrom, 120) <= CONVERT(VARCHAR(10), GETDATE(), 120))
+            AND (h.ValidTo IS NULL OR CONVERT(VARCHAR(10), h.ValidTo, 120) >= CONVERT(VARCHAR(10), GETDATE(), 120))
+        `),
+        pool.request().query(`
+          SELECT 
+            RTRIM(LTRIM(DiscountPriceCode)) AS DiscountPriceCode,
+            RTRIM(LTRIM(Description)) AS Description,
+            RTRIM(LTRIM(ItemCode1)) AS ItemCode1,
+            ISNULL(ItemPrice1, 0) AS ItemPrice1,
+            RTRIM(LTRIM(ItemCode2)) AS ItemCode2,
+            ISNULL(ItemPrice2, 0) AS ItemPrice2,
+            ISNULL(TotalPrice, 0) AS TotalPrice,
+            ISNULL(DiscountPrice, 0) AS DiscountPrice,
+            ValidFrom,
+            ValidTo
+          FROM tblRMDiscountPairPrice
+          WHERE (ValidFrom IS NULL OR CONVERT(VARCHAR(10), ValidFrom, 120) <= CONVERT(VARCHAR(10), GETDATE(), 120))
+            AND (ValidTo IS NULL OR CONVERT(VARCHAR(10), ValidTo, 120) >= CONVERT(VARCHAR(10), GETDATE(), 120))
+        `),
+        pool.request().query(`
+          SELECT 
+            RTRIM(LTRIM(BreakPriceCode)) AS BreakPriceCode,
+            RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+            ISNULL(BreakQty, 0) AS BreakQty,
+            ISNULL(BreakPrice, 0) AS BreakPrice,
+            BreakFromDate,
+            BreakToDate,
+            RTRIM(LTRIM(ISNULL(LocationCode, 'HQ'))) AS LocationCode
+          FROM tblRMBreakPrice
+          WHERE (BreakFromDate IS NULL OR CONVERT(VARCHAR(10), BreakFromDate, 120) <= CONVERT(VARCHAR(10), GETDATE(), 120))
+            AND (BreakToDate IS NULL OR CONVERT(VARCHAR(10), BreakToDate, 120) >= CONVERT(VARCHAR(10), GETDATE(), 120))
+          ORDER BY BreakQty DESC
+        `),
+      ]);
+
+      promoRulesCache = {
+        timestamp: Date.now(),
+        multiBuyRows: mbRes.recordset || [],
+        pairRows: pairRes.recordset || [],
+        breakRows: breakRes.recordset || [],
+      };
+
+      console.log(`⚡ [PROMO CACHE REFRESH] Loaded ${promoRulesCache.multiBuyRows.length} MultiBuy, ${promoRulesCache.pairRows.length} Pairs, ${promoRulesCache.breakRows.length} Breaks in ${Date.now() - t0}ms`);
+      return promoRulesCache;
+    } catch (err) {
+      console.error('❌ [PROMO CACHE ERROR] Failed to refresh promotion rules:', err.message);
+      // Return stale cache if available, otherwise empty
+      return promoRulesCache;
+    } finally {
+      promoRulesRefreshPromise = null;
+    }
+  })();
+
+  const rules = await promoRulesRefreshPromise;
+  return { cached: false, rules };
+}
+
 /**
  * Helper to get current day of week as 3-letter abbreviation uppercase (e.g. 'MON', 'TUE', 'WED')
  */
@@ -30,21 +145,28 @@ function getCurrentTimeString(date = new Date()) {
 }
 
 /**
- * 1. Check & Retrieve Item-Wise Promotion Price (tblRMPromotionPrice)
+ * 1. Batched Retrieval of Item-Wise Promotion Prices (tblRMPromotionPrice)
  * Mirrors: clsInventory.GetPromotionPriceByItem & GetParticularTimePromotionitem
+ * Uses single parameterized SQL query with IN (...) for all distinct items
  */
-async function getItemPromotionPrice(pool, inventoryCode, currentDate = new Date()) {
-  if (!inventoryCode || typeof inventoryCode !== 'string') return null;
-  const cleanCode = inventoryCode.trim();
+async function getItemPromotionPricesBatch(pool, inventoryCodes = [], currentDate = new Date()) {
+  if (!inventoryCodes || inventoryCodes.length === 0) return new Map();
 
+  const distinctCodes = [...new Set(inventoryCodes.map((c) => String(c).trim().toUpperCase()))].filter(Boolean);
+  if (distinctCodes.length === 0) return new Map();
+
+  const t0 = Date.now();
   const req = pool.request();
-  req.input('code', sql.VarChar(50), cleanCode);
+  const placeholders = distinctCodes.map((c, idx) => {
+    req.input(`c_${idx}`, sql.VarChar(50), c);
+    return `@c_${idx}`;
+  }).join(',');
 
   const query = `
     SELECT 
       RTRIM(LTRIM(PromotionCode)) AS PromotionCode,
       RTRIM(LTRIM(PromoType)) AS PromoType,
-      RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+      UPPER(RTRIM(LTRIM(InventoryCode))) AS InventoryCode,
       FromDate,
       ToDate,
       ISNULL(PromoPrice, 0) AS PromoPrice,
@@ -53,18 +175,29 @@ async function getItemPromotionPrice(pool, inventoryCode, currentDate = new Date
       RTRIM(LTRIM(ISNULL(EndTime, ''))) AS EndTime,
       UPPER(RTRIM(LTRIM(ISNULL(Day, '')))) AS DayOfWeek
     FROM tblRMPromotionPrice
-    WHERE UPPER(RTRIM(LTRIM(InventoryCode))) = UPPER(@code)
+    WHERE UPPER(RTRIM(LTRIM(InventoryCode))) IN (${placeholders})
       AND (PromoType = 'P' OR PromoType = 'PR' OR PromoType IS NULL)
   `;
 
-  const res = await req.query(query);
-  if (!res.recordset || res.recordset.length === 0) return null;
+  let recordset = [];
+  try {
+    const res = await req.query(query);
+    recordset = res.recordset || [];
+  } catch (err) {
+    console.error('❌ [PROMO BATCH ITEM ERROR]:', err.message);
+    return new Map();
+  }
 
   const nowTime = getCurrentTimeString(currentDate);
   const todayDay = getCurrentDayAbbr(currentDate);
   const todayDateStr = currentDate.toISOString().slice(0, 10);
 
-  for (const promo of res.recordset) {
+  // Group records by InventoryCode
+  const resultMap = new Map();
+  for (const promo of recordset) {
+    const code = promo.InventoryCode;
+    if (resultMap.has(code)) continue; // Keep first qualifying promotion
+
     // 1. Date range validation
     if (promo.FromDate) {
       const fromStr = new Date(promo.FromDate).toISOString().slice(0, 10);
@@ -92,128 +225,72 @@ async function getItemPromotionPrice(pool, inventoryCode, currentDate = new Date
 
     const promoPrice = Number(promo.PromoPrice);
     if (promoPrice > 0) {
-      return {
+      resultMap.set(code, {
         promotionCode: promo.PromotionCode,
         promoType: promo.PromoType,
         inventoryCode: promo.InventoryCode,
         promoPrice,
         breakQty: Number(promo.BreakQty) || 0,
-      };
+      });
     }
   }
 
-  return null;
+  console.log(`⏱️ [PROMO BATCH] Fetched item promos for ${distinctCodes.length} items in ${Date.now() - t0}ms`);
+  return resultMap;
 }
 
 /**
- * 2. Retrieve Multi-Buy Discount Header and Details for Items
- * Mirrors: clsInventory.GetDiscountPriceCodeByItem & GetDiscountPriceByCode
+ * Backward compatibility: Single item lookup using the batch engine
+ */
+async function getItemPromotionPrice(pool, inventoryCode, currentDate = new Date()) {
+  if (!inventoryCode) return null;
+  const map = await getItemPromotionPricesBatch(pool, [inventoryCode], currentDate);
+  return map.get(String(inventoryCode).trim().toUpperCase()) || null;
+}
+
+/**
+ * 2. Retrieve Multi-Buy Discounts from in-memory cache or fallback
  */
 async function getMultiBuyPromotions(pool, inventoryCodes = [], locationCode = 'HQ') {
   if (!inventoryCodes || inventoryCodes.length === 0) return [];
+  const cleanCodes = new Set(inventoryCodes.map((c) => String(c).trim().toUpperCase()));
+  const targetLoc = (locationCode || 'HQ').trim().toUpperCase();
 
-  const cleanCodes = inventoryCodes.map((c) => String(c).trim().toUpperCase());
-  const req = pool.request();
-  req.input('loc', sql.VarChar(20), (locationCode || 'HQ').trim());
-
-  // In parameter list
-  const placeholders = cleanCodes.map((c, idx) => {
-    req.input(`code_${idx}`, sql.VarChar(50), c);
-    return `@code_${idx}`;
-  }).join(',');
-
-  const query = `
-    SELECT 
-      RTRIM(LTRIM(h.DiscountPriceCode)) AS DiscountPriceCode,
-      RTRIM(LTRIM(h.Description)) AS Description,
-      ISNULL(h.Qty, 1) AS RequiredQty,
-      ISNULL(h.Price, 0) AS BundlePrice,
-      ISNULL(h.ActualPrice, 0) AS ActualPrice,
-      h.ValidFrom,
-      h.ValidTo,
-      RTRIM(LTRIM(d.InventoryCode)) AS InventoryCode
-    FROM tblRMDiscountPriceHeader h
-    INNER JOIN tblRMDiscountPriceDetail d ON RTRIM(LTRIM(h.DiscountPriceCode)) = RTRIM(LTRIM(d.DiscountPriceCode))
-    WHERE UPPER(RTRIM(LTRIM(d.InventoryCode))) IN (${placeholders})
-      AND (d.Locationcode = @loc OR d.Locationcode = 'HQ' OR d.Locationcode IS NULL OR d.Locationcode = '')
-      AND (h.ValidFrom IS NULL OR CONVERT(VARCHAR(10), h.ValidFrom, 120) <= CONVERT(VARCHAR(10), GETDATE(), 120))
-      AND (h.ValidTo IS NULL OR CONVERT(VARCHAR(10), h.ValidTo, 120) >= CONVERT(VARCHAR(10), GETDATE(), 120))
-  `;
-
-  const res = await req.query(query);
-  return res.recordset || [];
+  const { rules } = await getActivePromotionRules(pool);
+  return rules.multiBuyRows.filter((r) => {
+    if (!cleanCodes.has(r.InventoryCode.toUpperCase())) return false;
+    const rLoc = (r.LocationCode || 'HQ').toUpperCase();
+    return rLoc === targetLoc || rLoc === 'HQ' || rLoc === '';
+  });
 }
 
 /**
- * 3. Retrieve Pair Promotions (tblRMDiscountPairPrice)
- * Mirrors: clsInventory.GetPairPriceCode & GetDiscountPairPrice
+ * 3. Retrieve Pair Promotions from in-memory cache or fallback
  */
 async function getPairPromotions(pool, inventoryCodes = []) {
   if (!inventoryCodes || inventoryCodes.length === 0) return [];
+  const cleanCodes = new Set(inventoryCodes.map((c) => String(c).trim().toUpperCase()));
 
-  const cleanCodes = inventoryCodes.map((c) => String(c).trim().toUpperCase());
-  const req = pool.request();
-  const placeholders = cleanCodes.map((c, idx) => {
-    req.input(`pcode_${idx}`, sql.VarChar(50), c);
-    return `@pcode_${idx}`;
-  }).join(',');
-
-  const query = `
-    SELECT 
-      RTRIM(LTRIM(DiscountPriceCode)) AS DiscountPriceCode,
-      RTRIM(LTRIM(Description)) AS Description,
-      RTRIM(LTRIM(ItemCode1)) AS ItemCode1,
-      ISNULL(ItemPrice1, 0) AS ItemPrice1,
-      RTRIM(LTRIM(ItemCode2)) AS ItemCode2,
-      ISNULL(ItemPrice2, 0) AS ItemPrice2,
-      ISNULL(TotalPrice, 0) AS TotalPrice,
-      ISNULL(DiscountPrice, 0) AS DiscountPrice,
-      ValidFrom,
-      ValidTo
-    FROM tblRMDiscountPairPrice
-    WHERE (UPPER(RTRIM(LTRIM(ItemCode1))) IN (${placeholders}) OR UPPER(RTRIM(LTRIM(ItemCode2))) IN (${placeholders}))
-      AND (ValidFrom IS NULL OR CONVERT(VARCHAR(10), ValidFrom, 120) <= CONVERT(VARCHAR(10), GETDATE(), 120))
-      AND (ValidTo IS NULL OR CONVERT(VARCHAR(10), ValidTo, 120) >= CONVERT(VARCHAR(10), GETDATE(), 120))
-  `;
-
-  const res = await req.query(query);
-  return res.recordset || [];
+  const { rules } = await getActivePromotionRules(pool);
+  return rules.pairRows.filter((p) => {
+    return cleanCodes.has(p.ItemCode1.toUpperCase()) || cleanCodes.has(p.ItemCode2.toUpperCase());
+  });
 }
 
 /**
- * 4. Retrieve Break Price / Volume Tier Pricing (tblRMBreakPrice)
- * Mirrors: clsSales.GetBreakPrice & frmPos1.fncBreakPrice
+ * 4. Retrieve Break Price / Volume Tier Pricing from in-memory cache or fallback
  */
 async function getBreakPrices(pool, inventoryCodes = [], locationCode = 'HQ') {
   if (!inventoryCodes || inventoryCodes.length === 0) return [];
+  const cleanCodes = new Set(inventoryCodes.map((c) => String(c).trim().toUpperCase()));
+  const targetLoc = (locationCode || 'HQ').trim().toUpperCase();
 
-  const cleanCodes = inventoryCodes.map((c) => String(c).trim().toUpperCase());
-  const req = pool.request();
-  req.input('loc', sql.VarChar(20), (locationCode || 'HQ').trim());
-
-  const placeholders = cleanCodes.map((c, idx) => {
-    req.input(`bcode_${idx}`, sql.VarChar(50), c);
-    return `@bcode_${idx}`;
-  }).join(',');
-
-  const query = `
-    SELECT 
-      RTRIM(LTRIM(BreakPriceCode)) AS BreakPriceCode,
-      RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
-      ISNULL(BreakQty, 0) AS BreakQty,
-      ISNULL(BreakPrice, 0) AS BreakPrice,
-      BreakFromDate,
-      BreakToDate
-    FROM tblRMBreakPrice
-    WHERE UPPER(RTRIM(LTRIM(InventoryCode))) IN (${placeholders})
-      AND (LocationCode = @loc OR LocationCode = 'HQ' OR LocationCode IS NULL OR LocationCode = '')
-      AND (BreakFromDate IS NULL OR CONVERT(VARCHAR(10), BreakFromDate, 120) <= CONVERT(VARCHAR(10), GETDATE(), 120))
-      AND (BreakToDate IS NULL OR CONVERT(VARCHAR(10), BreakToDate, 120) >= CONVERT(VARCHAR(10), GETDATE(), 120))
-    ORDER BY BreakQty DESC
-  `;
-
-  const res = await req.query(query);
-  return res.recordset || [];
+  const { rules } = await getActivePromotionRules(pool);
+  return rules.breakRows.filter((b) => {
+    if (!cleanCodes.has(b.InventoryCode.toUpperCase())) return false;
+    const bLoc = (b.LocationCode || 'HQ').toUpperCase();
+    return bLoc === targetLoc || bLoc === 'HQ' || bLoc === '';
+  });
 }
 
 /**
@@ -229,24 +306,17 @@ async function getBreakPrices(pool, inventoryCodes = [], locationCode = 'HQ') {
 async function recalculateCartPromotions(pool, cartItems = [], locationCode = 'HQ') {
   if (!cartItems || cartItems.length === 0) return [];
 
+  const tStartRecalc = Date.now();
   const distinctCodes = [...new Set(cartItems.map((it) => String(it.code || it.InventoryCode || '').trim()))].filter(Boolean);
   if (distinctCodes.length === 0) return cartItems;
 
-  // Pre-fetch active promotions concurrently
-  const [multiBuyRows, pairRows, breakRows] = await Promise.all([
+  // Pre-fetch active promotions concurrently using in-memory cache and single batch query
+  const [multiBuyRows, pairRows, breakRows, itemPromoMap] = await Promise.all([
     getMultiBuyPromotions(pool, distinctCodes, locationCode),
     getPairPromotions(pool, distinctCodes),
     getBreakPrices(pool, distinctCodes, locationCode),
+    getItemPromotionPricesBatch(pool, distinctCodes),
   ]);
-
-  // Fetch individual item promotion prices
-  const itemPromoMap = new Map();
-  await Promise.all(
-    distinctCodes.map(async (code) => {
-      const p = await getItemPromotionPrice(pool, code);
-      if (p) itemPromoMap.set(code.toUpperCase(), p);
-    })
-  );
 
   // Group Multi-Buy rules by DiscountPriceCode
   const multiBuyMap = new Map();
@@ -266,10 +336,12 @@ async function recalculateCartPromotions(pool, cartItems = [], locationCode = 'H
 
   // Deep clone cart items to calculate safely
   const calculatedItems = cartItems.map((it, idx) => {
-    const normalPrice = Number(it.normalPrice !== undefined ? it.normalPrice : it.price) || 0;
-    const manualDiscount = Number(it.manualDisc || 0); // Preserves user manual discount
-    const currentQty = Number(it.qty) || 1;
-    const cleanCode = String(it.code || it.InventoryCode || '').trim().toUpperCase();
+    const rawPrice = it.price !== undefined ? it.price : it.Price;
+    const rawNormalPrice = it.normalPrice !== undefined ? it.normalPrice : (it.NormalPrice !== undefined ? it.NormalPrice : rawPrice);
+    const normalPrice = Number(rawNormalPrice) || 0;
+    const manualDiscount = Number(it.manualDisc !== undefined ? it.manualDisc : (it.ManualDisc || 0)); // Preserves user manual discount
+    const currentQty = Number(it.qty !== undefined ? it.qty : (it.Qty !== undefined ? it.Qty : 1)) || 1;
+    const cleanCode = String(it.code || it.InventoryCode || it.inventoryCode || '').trim().toUpperCase();
 
     return {
       ...it,
@@ -464,7 +536,7 @@ async function recalculateCartPromotions(pool, cartItems = [], locationCode = 'H
   // ----------------------------------------------------------------------------
   // STEP 6: Final Line Totals & Tax Calculation
   // ----------------------------------------------------------------------------
-  return calculatedItems.map((it) => {
+  const finalResult = calculatedItems.map((it) => {
     const totalLineDiscount = parseFloat(
       (it.manualDisc + it.promoDisc + it.pairDisc).toFixed(2)
     );
@@ -478,18 +550,83 @@ async function recalculateCartPromotions(pool, cartItems = [], locationCode = 'H
     return {
       ...it,
       disc: totalLineDiscount,
+      Disc: totalLineDiscount,
       amount: safeAmount,
+      Amount: safeAmount,
       gst: gstAmount,
+      Gst: gstAmount,
       promoName: it.promoName || it.code,
+      DiscountPriceCode: it.discountPriceCode,
+      DiscPriceQty: it.discPriceQty,
     };
   });
+
+  console.log(`⏱️ [PROMO RECALCULATE] Recalculated ${finalResult.length} cart lines in ${Date.now() - tStartRecalc}ms`);
+  return finalResult;
+}
+
+/**
+ * Helper to update tblTempSales records in a single batched database round-trip
+ */
+async function batchUpdateTempSalesPromotions(pool, recalculatedItems = []) {
+  if (!recalculatedItems || recalculatedItems.length === 0) return;
+  const t0 = Date.now();
+
+  const validItems = recalculatedItems.filter((c) => {
+    const parsed = parseInt(c.id, 10);
+    return !isNaN(parsed) && parsed > 0 && parsed < 2147483647;
+  });
+
+  if (validItems.length === 0) return;
+
+  const batchReq = pool.request();
+  let sqlBatch = '';
+
+  validItems.forEach((c, idx) => {
+    const idParam = `tId_${idx}`;
+    const discParam = `d_${idx}`;
+    const amtParam = `a_${idx}`;
+    const gstParam = `g_${idx}`;
+    const dpcParam = `dpc_${idx}`;
+    const pnParam = `pn_${idx}`;
+
+    batchReq.input(idParam, sql.Int, parseInt(c.id, 10));
+    batchReq.input(discParam, sql.Decimal(18, 2), Number(c.disc) || 0);
+    batchReq.input(amtParam, sql.Decimal(18, 2), Number(c.amount) || 0);
+    batchReq.input(gstParam, sql.Decimal(18, 2), Number(c.gst) || 0);
+    batchReq.input(dpcParam, sql.VarChar(50), String(c.discountPriceCode || '').trim().slice(0, 50));
+    batchReq.input(pnParam, sql.VarChar(100), String(c.promoName || c.code || '').trim().slice(0, 100));
+
+    sqlBatch += `
+      UPDATE tblTempSales
+      SET Discount = @${discParam},
+          NetDiscount = @${discParam},
+          Amount = @${amtParam},
+          GST = @${gstParam},
+          DiscountPriceCode = @${dpcParam},
+          PromoName = @${pnParam}
+      WHERE TempID = @${idParam};
+    `;
+  });
+
+  try {
+    await batchReq.query(sqlBatch);
+    console.log(`⏱️ [BATCH UPDATE] Synced ${validItems.length} tblTempSales rows in a single query (${Date.now() - t0}ms)`);
+  } catch (err) {
+    console.error('❌ [BATCH UPDATE ERROR]:', err.message);
+    throw err;
+  }
 }
 
 module.exports = {
   getItemPromotionPrice,
+  getItemPromotionPricesBatch,
   getMultiBuyPromotions,
   getPairPromotions,
   getBreakPrices,
   recalculateCartPromotions,
+  batchUpdateTempSalesPromotions,
+  invalidatePromotionCache,
+  getActivePromotionRules,
 };
 

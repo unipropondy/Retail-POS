@@ -15,15 +15,38 @@ import { AppConfig } from "./configTypes";
  * - Web browser: uses window.location.hostname:5000 or http://localhost:5000
  * - Android Emulator / APK: uses LAN / computer IP or localhost
  */
+/**
+ * Hosted Cloud / Railway Production Backend Endpoint
+ */
+export const CLOUD_BACKEND_URL = "https://retail-pos-production-b9e3.up.railway.app";
+
+/**
+ * Dynamically resolves the backend base URL across platforms:
+ * - Production / Cloud build: uses process.env.EXPO_PUBLIC_API_URL or CLOUD_BACKEND_URL when deployed remotely
+ * - Web browser on local network: uses window.location.hostname:5000
+ * - Android Emulator / APK / Terminal fallback: uses CLOUD_BACKEND_URL or localhost
+ */
 export function getBackendBaseUrl(): string {
+  // 1. Explicit environment variable override
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, "");
+  }
+
+  // 2. Web browser: if deployed on Railway, Vercel, Netlify, or any non-localhost domain, route to Railway
   if (Platform.OS === "web" && typeof window !== "undefined" && window.location) {
     const host = window.location.hostname || "localhost";
+    if (host.includes("railway.app") || host.includes("vercel.app") || host.includes("netlify.app")) {
+      return CLOUD_BACKEND_URL;
+    }
+    // Local development or on-premise LAN server
     return `http://${host}:5000`;
   }
-  // Android APK / React Native default
-  return "http://localhost:5000";
+
+  // 3. Mobile APK / Native Terminal default: configured cloud backend URL
+  return CLOUD_BACKEND_URL;
 }
 
+export const SERVER_URL_STORAGE_KEY = '@pos_backend_server_url';
 export const BACKEND_URL = getBackendBaseUrl();
 
 /**
