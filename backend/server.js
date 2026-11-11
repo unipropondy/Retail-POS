@@ -98,6 +98,10 @@ app.use("/api/promotions", promotionRoutes);
 const priceChangeRoutes = require("./routes/priceChangeRoutes");
 app.use("/api/price-change", priceChangeRoutes);
 
+// Mount View Bill / Last Transaction routes (frmLastTransaction.vb & clsInventory)
+const billRoutes = require("./routes/billRoutes");
+app.use("/api/bills", billRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

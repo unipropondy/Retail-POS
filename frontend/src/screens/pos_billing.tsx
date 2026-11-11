@@ -41,6 +41,7 @@ import HoldModals, { HoldHeaderItem } from "../components/HoldModals";
 import CustomAlertModal, { CustomAlertState } from "../components/CustomAlertModal";
 import ClearAdminAuthModal from "../components/ClearAdminAuthModal";
 import SearchModal, { SearchResultItem } from "../components/SearchModal";
+import ViewBillModal from "../components/ViewBillModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -497,6 +498,7 @@ export default function PosBillingScreen({
   const [currentTheme, setCurrentTheme] = useState<ThemeConfig>(THEMES[0]);
   const [currentFont, setCurrentFont] = useState<FontOption>(FONTS[0]);
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
+  const [showViewBillModal, setShowViewBillModal] = useState<boolean>(false);
 
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
@@ -3299,15 +3301,7 @@ export default function PosBillingScreen({
               {/* Row 3 */}
               <TouchableOpacity
                 style={[styles.posBtn, styles.btnViewBill]}
-                onPress={() => {
-                  setReceiptSummary({
-                    total: grandTotal,
-                    tender: currentTender,
-                    balance: balance,
-                    payMode: selectedPayMode,
-                  });
-                  setShowReceiptModal(true);
-                }}
+                onPress={() => setShowViewBillModal(true)}
                 activeOpacity={0.8}
               >
                 <MaterialCommunityIcons
@@ -4456,6 +4450,21 @@ export default function PosBillingScreen({
         apiUrl={API_URL}
         currentLocationCode={effectiveLocation}
         theme={currentTheme}
+      />
+
+      {/* View Bill / Last Transaction Dialog (VB.NET frmLastTransaction) */}
+      <ViewBillModal
+        visible={showViewBillModal}
+        onClose={() => setShowViewBillModal(false)}
+        apiUrl={API_URL}
+        activeTerminal={(terminalCode || "").trim()}
+        activeCashier={(cashierName || "UPS").trim()}
+        activeLocation={(effectiveLocation || "HQ").trim()}
+        primaryColor={currentTheme?.primary || "#7A1C30"}
+        onReprintBill={(invoiceNo) => {
+          showAlert("Print Receipt", `Printing receipt for invoice #${invoiceNo}...`, "info");
+        }}
+        onAdminAuthRequest={handleAdminAuthSubmit}
       />
 
       {/* Theme & Typography Customizer Modal */}
