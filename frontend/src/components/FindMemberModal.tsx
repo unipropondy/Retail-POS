@@ -1,23 +1,23 @@
 // ==============================================================================
 // Author: JAVITH, BAVANI 11-11-2026
 // Project: Supermarket Retail POS
-// Module: Find Member Screen (frmMemberSearch.vb)
+// Module: Find Member Modal (frmMemberSearch.vb)
 // File: frontend/src/components/FindMemberModal.tsx
-// Description: Implements exact VB.NET Find Member screen UI & business logic:
-//              - Filters panel:
-//                  * Name / Phone No text input
-//                  * Radio options: F1 Starts with, F2 Exact, F3 Contains (default)
-//                  * Refresh button (green glossy gradient style)
-//              - Member List Grid:
-//                  * DataGrid columns: Member Code, Name, Member Type, Phone No
-//                  * Row selection with active highlighting
-//                  * Double click / enter to select
-//              - Bottom action buttons:
-//                  * Add (opens MemberModal for new member creation)
-//                  * Edit (opens MemberModal with selected member)
-//                  * Ok (F4) - returns selected Member to caller
-//                  * Close (Esc) - dismisses without selecting
-//              - Full Keyboard Shortcuts: F1, F2, F3, F4, Esc, Enter
+// Description: Modern POS-Themed Find Member modal matching the application's
+//              Royal Crimson / Active Theme styling with full functionality:
+//              - Filters toolbar:
+//                  * Search query (Name / Phone No / Code)
+//                  * Filter Modes: F1 Starts with, F2 Exact, F3 Contains
+//                  * Search & Refresh action buttons
+//              - Data Grid:
+//                  * Member Code, Name, Member Type, Phone No
+//                  * Row selection with active theme highlight
+//                  * Double click / enter to confirm
+//              - Bottom Action Buttons:
+//                  * Add (New Member)
+//                  * Edit (Selected Member)
+//                  * Ok (F4) - Confirm & Return Member
+//                  * Close (Esc) - Dismiss
 // ==============================================================================
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
@@ -34,6 +34,7 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getBackendBaseUrl } from "../config/appConfig";
+import { ThemeConfig } from "../utils/theme";
 import MemberModal from "./MemberModal";
 
 const API_URL = getBackendBaseUrl();
@@ -60,6 +61,8 @@ interface FindMemberModalProps {
   onClose: () => void;
   onSelectMember: (member: MemberSearchItem) => void;
   initialQuery?: string;
+  primaryColor?: string;
+  theme?: ThemeConfig;
 }
 
 export default function FindMemberModal({
@@ -67,7 +70,11 @@ export default function FindMemberModal({
   onClose,
   onSelectMember,
   initialQuery = "",
+  primaryColor = "#881337",
+  theme,
 }: FindMemberModalProps) {
+  const activePrimary = theme?.primary || primaryColor || "#881337";
+
   // Filter States
   const [query, setQuery] = useState<string>(initialQuery);
   const [searchMode, setSearchMode] = useState<SearchMode>("CONTAINS");
@@ -102,10 +109,11 @@ export default function FindMemberModal({
         if (res.ok && data.success && Array.isArray(data.members)) {
           setMembers(data.members);
           if (data.members.length > 0) {
-            // Keep existing selection if present in new list, else select first row
             setSelectedMember((prev) => {
               if (!prev) return data.members[0];
-              const found = data.members.find((m: MemberSearchItem) => m.MemberCode === prev.MemberCode);
+              const found = data.members.find(
+                (m: MemberSearchItem) => m.MemberCode === prev.MemberCode
+              );
               return found || data.members[0];
             });
           } else {
@@ -143,12 +151,12 @@ export default function FindMemberModal({
     }
   }, [visible, initialQuery, loadMembers]);
 
-  // Keyboard Shortcuts (Web / Desktop listener for F1, F2, F3, F4, Esc)
+  // Keyboard Shortcuts (Web / Desktop listener for F1, F2, F3, F4, Esc, Enter)
   useEffect(() => {
     if (!visible || Platform.OS !== "web") return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (showMemberEditModal) return; // Don't intercept when Add/Edit modal is open
+      if (showMemberEditModal) return;
 
       if (e.key === "F1") {
         e.preventDefault();
@@ -169,7 +177,6 @@ export default function FindMemberModal({
         e.preventDefault();
         onClose();
       } else if (e.key === "Enter") {
-        // If Enter is pressed, execute search or confirm selection
         e.preventDefault();
         if (selectedMember) {
           handleOk();
@@ -234,126 +241,170 @@ export default function FindMemberModal({
       onRequestClose={onClose}
     >
       <View style={styles.modalBackdrop}>
-        <View style={styles.windowFrame}>
-          {/* Windows Classic Style Title Bar */}
-          <View style={styles.titleBar}>
-            <View style={styles.titleLeft}>
-              <View style={styles.titleIcon}>
-                <View style={styles.titleIconYellow} />
-                <View style={styles.titleIconBlue} />
+        <View style={styles.modalContainer}>
+          {/* Header Bar matching POS theme */}
+          <View style={[styles.modalHeader, { backgroundColor: activePrimary }]}>
+            <View style={styles.headerLeft}>
+              <MaterialCommunityIcons name="account-search" size={24} color="#ffffff" />
+              <Text style={styles.headerTitle}>Find Member</Text>
+              <View style={styles.headerBadge}>
+                <Text style={styles.headerBadgeText}>
+                  {members.length} {members.length === 1 ? "Record" : "Records"}
+                </Text>
               </View>
-              <Text style={styles.titleText}>Find Member</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeWindowBtn}>
-              <MaterialCommunityIcons name="close" size={18} color="#000000" />
+
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+              <MaterialCommunityIcons name="close" size={22} color="#ffffff" />
             </TouchableOpacity>
           </View>
 
-          {/* Window Body */}
-          <View style={styles.windowBody}>
-            {/* Filters Group Box matching screenshot */}
-            <View style={styles.filtersGroupBox}>
-              <Text style={styles.filtersGroupLabel}>Filters</Text>
-
-              <View style={styles.filtersContentRow}>
-                {/* Left: Name / Phone No input & Refresh Button */}
-                <View style={styles.filterLeftCol}>
-                  <View style={styles.inputRow}>
-                    <Text style={styles.inputLabel}>Name / Phone No</Text>
-                    <TextInput
-                      ref={inputRef}
-                      style={styles.textInput}
-                      value={query}
-                      onChangeText={(t) => setQuery(t)}
-                      onSubmitEditing={() => loadMembers()}
-                      autoCapitalize="characters"
-                    />
-                  </View>
-
-                  <View style={styles.refreshBtnRow}>
-                    <TouchableOpacity
-                      style={styles.refreshBtn}
-                      onPress={handleRefresh}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.refreshBtnText}>Refresh</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Right: Radio Options (F1 Starts with, F2 Exact, F3 Contains) */}
-                <View style={styles.filterRightCol}>
+          {/* Modal Body */}
+          <View style={styles.modalBody}>
+            {/* Filters Toolbar */}
+            <View style={styles.filtersToolbar}>
+              {/* Search Input Box */}
+              <View style={styles.searchBoxWrap}>
+                <MaterialCommunityIcons name="magnify" size={20} color="#64748b" />
+                <TextInput
+                  ref={inputRef}
+                  style={styles.searchTextInput}
+                  placeholder="Enter Name, Phone No, or Member Code..."
+                  placeholderTextColor="#94a3b8"
+                  value={query}
+                  onChangeText={(t) => setQuery(t)}
+                  onSubmitEditing={() => loadMembers()}
+                  autoCapitalize="characters"
+                />
+                {query ? (
                   <TouchableOpacity
-                    style={styles.radioOption}
-                    onPress={() => handleSelectMode("STARTS_WITH")}
-                    activeOpacity={0.7}
+                    onPress={() => {
+                      setQuery("");
+                      loadMembers("");
+                    }}
                   >
-                    <View style={styles.radioCircle}>
-                      {searchMode === "STARTS_WITH" && <View style={styles.radioDot} />}
-                    </View>
-                    <Text style={styles.radioLabel}>F1 Starts with</Text>
+                    <MaterialCommunityIcons name="close-circle" size={18} color="#94a3b8" />
                   </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.radioOption}
-                    onPress={() => handleSelectMode("EXACT")}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.radioCircle}>
-                      {searchMode === "EXACT" && <View style={styles.radioDot} />}
-                    </View>
-                    <Text style={styles.radioLabel}>F2 Exact</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.radioOption}
-                    onPress={() => handleSelectMode("CONTAINS")}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.radioCircle}>
-                      {searchMode === "CONTAINS" && <View style={styles.radioDot} />}
-                    </View>
-                    <Text style={styles.radioLabel}>F3 Contains</Text>
-                  </TouchableOpacity>
-                </View>
+                ) : null}
               </View>
+
+              {/* Mode Chips (F1 Starts with, F2 Exact, F3 Contains) */}
+              <View style={styles.modesRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.modeChip,
+                    searchMode === "STARTS_WITH" && {
+                      backgroundColor: activePrimary,
+                      borderColor: activePrimary,
+                    },
+                  ]}
+                  onPress={() => handleSelectMode("STARTS_WITH")}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.modeChipText,
+                      searchMode === "STARTS_WITH" && styles.modeChipTextActive,
+                    ]}
+                  >
+                    F1 Starts with
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modeChip,
+                    searchMode === "EXACT" && {
+                      backgroundColor: activePrimary,
+                      borderColor: activePrimary,
+                    },
+                  ]}
+                  onPress={() => handleSelectMode("EXACT")}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.modeChipText,
+                      searchMode === "EXACT" && styles.modeChipTextActive,
+                    ]}
+                  >
+                    F2 Exact
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modeChip,
+                    searchMode === "CONTAINS" && {
+                      backgroundColor: activePrimary,
+                      borderColor: activePrimary,
+                    },
+                  ]}
+                  onPress={() => handleSelectMode("CONTAINS")}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.modeChipText,
+                      searchMode === "CONTAINS" && styles.modeChipTextActive,
+                    ]}
+                  >
+                    F3 Contains
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Refresh Button */}
+              <TouchableOpacity
+                style={[styles.refreshActionBtn, { borderColor: activePrimary }]}
+                onPress={handleRefresh}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons name="refresh" size={16} color={activePrimary} />
+                <Text style={[styles.refreshActionBtnText, { color: activePrimary }]}>
+                  Refresh
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {/* Error or Notice Alert */}
             {errorMsg ? (
-              <View style={styles.errorNotice}>
-                <Text style={styles.errorNoticeText}>{errorMsg}</Text>
+              <View style={styles.errorBanner}>
+                <MaterialCommunityIcons name="alert-circle" size={16} color="#ffffff" />
+                <Text style={styles.errorBannerText}>{errorMsg}</Text>
               </View>
             ) : null}
 
-            {/* Member List Grid matching screenshot */}
-            <View style={styles.gridContainer}>
-              {/* Grid Header */}
-              <View style={styles.gridHeaderRow}>
-                <View style={[styles.gridColHeader, styles.colIndicator]} />
-                <View style={[styles.gridColHeader, styles.colCode]}>
-                  <Text style={styles.gridHeaderText}>Member Code</Text>
+            {/* Members Data Table */}
+            <View style={styles.tableCard}>
+              {/* Table Header */}
+              <View style={styles.tableHeaderRow}>
+                <View style={[styles.thCell, styles.colIndicator]} />
+                <View style={[styles.thCell, styles.colCode]}>
+                  <Text style={styles.thCellText}>Member Code</Text>
                 </View>
-                <View style={[styles.gridColHeader, styles.colName]}>
-                  <Text style={styles.gridHeaderText}>Name</Text>
+                <View style={[styles.thCell, styles.colName]}>
+                  <Text style={styles.thCellText}>Name</Text>
                 </View>
-                <View style={[styles.gridColHeader, styles.colType]}>
-                  <Text style={styles.gridHeaderText}>Member Type</Text>
+                <View style={[styles.thCell, styles.colType]}>
+                  <Text style={styles.thCellText}>Member Type</Text>
                 </View>
-                <View style={[styles.gridColHeader, styles.colPhone]}>
-                  <Text style={styles.gridHeaderText}>Phone No</Text>
+                <View style={[styles.thCell, styles.colPhone]}>
+                  <Text style={styles.thCellText}>Phone No</Text>
                 </View>
               </View>
 
-              {/* Grid Body */}
+              {/* Table Body */}
               {loading ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color="#7bb042" />
-                  <Text style={styles.loadingText}>Loading members...</Text>
+                <View style={styles.stateContainer}>
+                  <ActivityIndicator size="large" color={activePrimary} />
+                  <Text style={styles.stateText}>Loading members...</Text>
                 </View>
               ) : members.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Text style={styles.emptyText}>No matching members found.</Text>
+                <View style={styles.stateContainer}>
+                  <MaterialCommunityIcons name="account-search-outline" size={48} color="#cbd5e1" />
+                  <Text style={styles.stateTitle}>No Members Found</Text>
+                  <Text style={styles.stateText}>Try searching with a different name or phone number.</Text>
                 </View>
               ) : (
                 <FlatList
@@ -364,61 +415,60 @@ export default function FindMemberModal({
                     return (
                       <TouchableOpacity
                         style={[
-                          styles.gridDataRow,
-                          isSelected && styles.gridDataRowSelected,
-                          index % 2 === 1 && !isSelected && styles.gridDataRowAlt,
+                          styles.tableDataRow,
+                          index % 2 === 1 && styles.tableDataRowAlt,
+                          isSelected && [
+                            styles.tableDataRowSelected,
+                            { backgroundColor: `${activePrimary}15`, borderColor: activePrimary },
+                          ],
                         ]}
                         onPress={() => handleRowClick(item)}
-                        // Double tap / double click triggers OK
                         onLongPress={() => handleRowDoubleClick(item)}
+                        activeOpacity={0.8}
                       >
-                        <View style={[styles.gridCell, styles.colIndicator]}>
+                        <View style={[styles.tdCell, styles.colIndicator]}>
                           {isSelected && (
-                            <MaterialCommunityIcons name="play" size={12} color="#000000" />
+                            <MaterialCommunityIcons name="chevron-right" size={18} color={activePrimary} />
                           )}
                         </View>
-                        <View style={[styles.gridCell, styles.colCode]}>
+                        <View style={[styles.tdCell, styles.colCode]}>
                           <Text
                             style={[
-                              styles.gridCellText,
-                              isSelected && styles.gridCellTextSelected,
+                              styles.tdCodeText,
+                              isSelected && { color: activePrimary, fontWeight: "800" },
                             ]}
                             numberOfLines={1}
                           >
                             {item.MemberCode}
                           </Text>
                         </View>
-                        <View style={[styles.gridCell, styles.colName]}>
+                        <View style={[styles.tdCell, styles.colName]}>
                           <Text
                             style={[
-                              styles.gridCellText,
-                              isSelected && styles.gridCellTextSelected,
+                              styles.tdText,
+                              isSelected && { color: "#0f172a", fontWeight: "700" },
                             ]}
                             numberOfLines={1}
                           >
                             {item.MemberName}
                           </Text>
                         </View>
-                        <View style={[styles.gridCell, styles.colType]}>
-                          <Text
-                            style={[
-                              styles.gridCellText,
-                              isSelected && styles.gridCellTextSelected,
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {item.MemberType}
-                          </Text>
+                        <View style={[styles.tdCell, styles.colType]}>
+                          <View style={styles.typeBadge}>
+                            <Text style={styles.typeBadgeText} numberOfLines={1}>
+                              {item.MemberType || "STANDARD"}
+                            </Text>
+                          </View>
                         </View>
-                        <View style={[styles.gridCell, styles.colPhone]}>
+                        <View style={[styles.tdCell, styles.colPhone]}>
                           <Text
                             style={[
-                              styles.gridCellText,
-                              isSelected && styles.gridCellTextSelected,
+                              styles.tdText,
+                              isSelected && { color: "#0f172a", fontWeight: "700" },
                             ]}
                             numberOfLines={1}
                           >
-                            {item.PhoneNo || item.Mobile || ""}
+                            {item.PhoneNo || item.Mobile || item.ResPhone || "—"}
                           </Text>
                         </View>
                       </TouchableOpacity>
@@ -428,50 +478,65 @@ export default function FindMemberModal({
               )}
             </View>
 
-            {/* Bottom Buttons Bar matching screenshot: Add, Edit (Left) | Ok (F4), Close (Esc) (Right) */}
+            {/* Bottom Footer Action Bar */}
             <View style={styles.bottomBar}>
-              <View style={styles.bottomLeftBtns}>
+              <View style={styles.leftBtnGroup}>
                 <TouchableOpacity
-                  style={styles.greenGlossyBtn}
+                  style={[styles.outlineActionBtn, { borderColor: "#cbd5e1" }]}
                   onPress={handleAdd}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.greenGlossyBtnText}>Add</Text>
+                  <MaterialCommunityIcons name="account-plus-outline" size={18} color="#0f172a" />
+                  <Text style={styles.outlineActionBtnText}>Add Member</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[
-                    styles.greenGlossyBtn,
+                    styles.outlineActionBtn,
+                    { borderColor: "#cbd5e1" },
                     !selectedMember && styles.btnDisabled,
                   ]}
                   onPress={handleEdit}
                   disabled={!selectedMember}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.greenGlossyBtnText}>Edit</Text>
+                  <MaterialCommunityIcons
+                    name="account-edit-outline"
+                    size={18}
+                    color={selectedMember ? "#0f172a" : "#94a3b8"}
+                  />
+                  <Text
+                    style={[
+                      styles.outlineActionBtnText,
+                      !selectedMember && { color: "#94a3b8" },
+                    ]}
+                  >
+                    Edit
+                  </Text>
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.bottomRightBtns}>
+              <View style={styles.rightBtnGroup}>
+                <TouchableOpacity
+                  style={styles.cancelFooterBtn}
+                  onPress={onClose}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.cancelFooterBtnText}>Close (Esc)</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   style={[
-                    styles.greenGlossyBtn,
-                    styles.primaryActionBtn,
+                    styles.confirmFooterBtn,
+                    { backgroundColor: activePrimary },
                     !selectedMember && styles.btnDisabled,
                   ]}
                   onPress={handleOk}
                   disabled={!selectedMember}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.greenGlossyBtnText}>Ok (F4)</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.greenGlossyBtn, styles.primaryActionBtn]}
-                  onPress={onClose}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.greenGlossyBtnText}>Close (Esc)</Text>
+                  <MaterialCommunityIcons name="check-bold" size={18} color="#ffffff" />
+                  <Text style={styles.confirmFooterBtnText}>Select Member (F4)</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -486,7 +551,6 @@ export default function FindMemberModal({
         onClose={() => setShowMemberEditModal(false)}
         onMemberSaved={(savedCode) => {
           setShowMemberEditModal(false);
-          // Reload list and select newly saved member
           loadMembers(savedCode, "EXACT");
         }}
       />
@@ -495,235 +559,195 @@ export default function FindMemberModal({
 }
 
 // ------------------------------------------------------------------------------
-// Styles exactly matching the reference VB.NET screenshot
+// Styles matching POS Theme (Clean, Crisp, Modern)
 // ------------------------------------------------------------------------------
 const styles = StyleSheet.create({
   modalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    backgroundColor: "rgba(15, 23, 42, 0.65)",
     justifyContent: "center",
     alignItems: "center",
     padding: 16,
   },
-  windowFrame: {
+  modalContainer: {
     width: "95%",
-    maxWidth: 960,
-    height: "88%",
-    maxHeight: 640,
-    backgroundColor: "#2b2b2b",
+    maxWidth: 980,
+    height: "90%",
+    maxHeight: 650,
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#4a4a4a",
+    borderColor: "#e2e8f0",
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 20,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 16,
+    overflow: "hidden",
     display: "flex",
     flexDirection: "column",
   },
-  titleBar: {
-    height: 32,
-    backgroundColor: "#ffffff",
+  modalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#cccccc",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
   },
-  titleLeft: {
+  headerLeft: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 10,
   },
-  titleIcon: {
-    width: 16,
-    height: 16,
-    marginRight: 6,
-    flexDirection: "row",
+  headerTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 0.3,
   },
-  titleIconYellow: {
-    width: 8,
-    height: 16,
-    backgroundColor: "#eab308",
+  headerBadge: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
   },
-  titleIconBlue: {
-    width: 8,
-    height: 16,
-    backgroundColor: "#2563eb",
+  headerBadgeText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
   },
-  titleText: {
-    color: "#000000",
-    fontSize: 12,
-    fontWeight: "600",
-    fontFamily: Platform.OS === "android" ? "monospace" : "System",
-  },
-  closeWindowBtn: {
+  closeBtn: {
     padding: 4,
   },
-  windowBody: {
+
+  modalBody: {
     flex: 1,
-    backgroundColor: "#2b2b2b",
-    padding: 12,
+    backgroundColor: "#f8fafc",
+    padding: 14,
     display: "flex",
     flexDirection: "column",
   },
 
-  // Filters Group Box
-  filtersGroupBox: {
-    borderWidth: 1,
-    borderColor: "#555555",
-    paddingTop: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    marginBottom: 10,
-    position: "relative",
-    backgroundColor: "#2b2b2b",
-  },
-  filtersGroupLabel: {
-    position: "absolute",
-    top: -8,
-    left: 12,
-    backgroundColor: "#2b2b2b",
-    color: "#e2e8f0",
-    fontSize: 12,
-    fontWeight: "400",
-    paddingHorizontal: 4,
-  },
-  filtersContentRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-  },
-  filterLeftCol: {
-    flex: 1,
-    paddingRight: 20,
-  },
-  inputRow: {
+  // Filters Toolbar
+  filtersToolbar: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
+    gap: 10,
+    backgroundColor: "#ffffff",
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    marginBottom: 10,
   },
-  inputLabel: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "500",
-    width: 120,
-  },
-  textInput: {
+  searchBoxWrap: {
     flex: 1,
-    maxWidth: 260,
-    height: 24,
-    backgroundColor: "#fff0f0", // Very faint pinkish-white matching the screenshot
+    minWidth: 260,
+    height: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
     borderWidth: 1,
-    borderColor: "#7f7f7f",
-    color: "#000000",
-    paddingHorizontal: 6,
-    paddingVertical: 0,
+    borderColor: "#cbd5e1",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    gap: 6,
+  },
+  searchTextInput: {
+    flex: 1,
+    height: "100%",
+    fontSize: 13,
+    color: "#0f172a",
+    padding: 0,
+    outlineStyle: "none" as any,
+  },
+  modesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  modeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  modeChipText: {
     fontSize: 12,
+    fontWeight: "700",
+    color: "#475569",
   },
-  refreshBtnRow: {
-    marginTop: 10,
-    marginLeft: 120,
-  },
-  refreshBtn: {
-    backgroundColor: "#84bd3a",
-    paddingVertical: 5,
-    paddingHorizontal: 26,
-    borderRadius: 3,
-    borderWidth: 1,
-    borderColor: "#6a9c2d",
-    alignSelf: "flex-start",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 1,
-  },
-  refreshBtnText: {
+  modeChipTextActive: {
     color: "#ffffff",
+  },
+  refreshActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+  },
+  refreshActionBtnText: {
     fontSize: 12,
     fontWeight: "700",
   },
 
-  filterRightCol: {
-    width: 150,
-    paddingLeft: 10,
-  },
-  radioOption: {
+  // Error Banner
+  errorBanner: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 6,
+    gap: 8,
+    backgroundColor: "#e11d48",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    marginBottom: 10,
   },
-  radioCircle: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: "#cccccc",
-    backgroundColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 6,
-  },
-  radioDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#000000",
-  },
-  radioLabel: {
+  errorBannerText: {
     color: "#ffffff",
     fontSize: 12,
-  },
-
-  // Error / notice
-  errorNotice: {
-    backgroundColor: "#dc2626",
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    marginBottom: 8,
-    borderRadius: 2,
-  },
-  errorNoticeText: {
-    color: "#ffffff",
-    fontSize: 11,
     fontWeight: "600",
   },
 
-  // Grid
-  gridContainer: {
+  // Table Card
+  tableCard: {
     flex: 1,
     backgroundColor: "#ffffff",
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#7f7f7f",
-    display: "flex",
-    flexDirection: "column",
+    borderColor: "#e2e8f0",
+    overflow: "hidden",
   },
-  gridHeaderRow: {
-    height: 26,
+  tableHeaderRow: {
+    height: 38,
     backgroundColor: "#f1f5f9",
     flexDirection: "row",
+    alignItems: "center",
     borderBottomWidth: 1,
     borderBottomColor: "#cbd5e1",
   },
-  gridColHeader: {
+  thCell: {
+    paddingHorizontal: 10,
     justifyContent: "center",
-    paddingHorizontal: 8,
-    borderRightWidth: 1,
-    borderRightColor: "#cbd5e1",
   },
-  gridHeaderText: {
-    color: "#1e293b",
-    fontSize: 11,
-    fontWeight: "700",
+  thCellText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
   },
   colIndicator: {
-    width: 26,
+    width: 32,
     alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 0,
   },
   colCode: {
-    width: 160,
-    backgroundColor: "#e0f2fe", // Light blue column header tint matching screenshot
+    width: 170,
   },
   colName: {
     flex: 2,
@@ -735,91 +759,129 @@ const styles = StyleSheet.create({
     flex: 1.2,
   },
 
-  // Grid Data Rows
-  gridDataRow: {
+  // Data Rows
+  tableDataRow: {
     flexDirection: "row",
-    height: 26,
+    height: 42,
+    alignItems: "center",
     borderBottomWidth: 1,
     borderBottomColor: "#f1f5f9",
-    alignItems: "center",
+    borderLeftWidth: 3,
+    borderLeftColor: "transparent",
   },
-  gridDataRowAlt: {
-    backgroundColor: "#fafafa",
+  tableDataRowAlt: {
+    backgroundColor: "#fafbfc",
   },
-  gridDataRowSelected: {
-    backgroundColor: "#0078d7", // Classic Windows blue row selection
+  tableDataRowSelected: {
+    borderLeftWidth: 3,
   },
-  gridCell: {
-    paddingHorizontal: 8,
+  tdCell: {
+    paddingHorizontal: 10,
     justifyContent: "center",
   },
-  gridCellText: {
-    color: "#000000",
-    fontSize: 11,
-  },
-  gridCellTextSelected: {
-    color: "#ffffff",
+  tdCodeText: {
+    color: "#0f172a",
+    fontSize: 12.5,
     fontWeight: "600",
+    fontFamily: Platform.OS === "android" ? "monospace" : "System",
+  },
+  tdText: {
+    color: "#334155",
+    fontSize: 12.5,
+  },
+  typeBadge: {
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    alignSelf: "flex-start",
+  },
+  typeBadgeText: {
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "700",
   },
 
-  loadingContainer: {
+  // State Container
+  stateContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    padding: 24,
   },
-  loadingText: {
-    marginTop: 8,
-    fontSize: 12,
+  stateTitle: {
+    marginTop: 10,
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#334155",
+  },
+  stateText: {
+    marginTop: 4,
+    fontSize: 12.5,
     color: "#64748b",
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  emptyText: {
-    color: "#64748b",
-    fontSize: 12,
+    textAlign: "center",
   },
 
-  // Bottom Buttons Bar
+  // Bottom Footer
   bottomBar: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginTop: 10,
-    paddingTop: 4,
-  },
-  bottomLeftBtns: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  bottomRightBtns: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  greenGlossyBtn: {
-    backgroundColor: "#84bd3a",
-    paddingVertical: 10,
-    paddingHorizontal: 28,
-    borderRadius: 4,
+    backgroundColor: "#ffffff",
+    padding: 12,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#659928",
+    borderColor: "#e2e8f0",
+  },
+  leftBtnGroup: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  rightBtnGroup: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  outlineActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 6,
+    borderWidth: 1,
+    backgroundColor: "#ffffff",
+  },
+  outlineActionBtnText: {
+    fontSize: 12.5,
+    fontWeight: "700",
+    color: "#0f172a",
+  },
+  cancelFooterBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 6,
+    backgroundColor: "#f1f5f9",
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 90,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 1,
   },
-  primaryActionBtn: {
-    minWidth: 110,
-  },
-  greenGlossyBtnText: {
-    color: "#ffffff",
-    fontSize: 12,
+  cancelFooterBtnText: {
+    fontSize: 12.5,
     fontWeight: "700",
+    color: "#475569",
+  },
+  confirmFooterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 6,
+  },
+  confirmFooterBtnText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#ffffff",
   },
   btnDisabled: {
     opacity: 0.5,

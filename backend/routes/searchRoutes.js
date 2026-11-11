@@ -156,21 +156,32 @@ router.post('/items', async (req, res) => {
 
     // 1. Barcode filtering
     // VB.NET logic: If barcode length is 6, search using InventoryCode directly;
-    // otherwise search tblInventoryBarcode
+    // otherwise search tblInventoryBarcode.
+    // Optimized for MSSQL index performance to prevent table-scan timeouts:
     if (cleanBarcode) {
-      if (cleanBarcode.length === 6) {
-        request.input('invCode', sql.VarChar(50), cleanBarcode);
-        whereClauses.push('(RTRIM(LTRIM(a.InventoryCode)) = @invCode OR EXISTS (SELECT 1 FROM tblInventoryBarcode bc WHERE bc.InventoryCode = a.InventoryCode AND RTRIM(LTRIM(bc.BarCode)) = @invCode))');
+      const bcReq = pool.request();
+      bcReq.input('bc', sql.VarChar(50), cleanBarcode);
+      const bcRes = await bcReq.query(`
+        SELECT DISTINCT RTRIM(LTRIM(InventoryCode)) AS InventoryCode 
+        FROM tblInventoryBarcode 
+        WHERE RTRIM(LTRIM(BarCode)) = @bc OR BarCode = @bc
+      `);
+
+      const matchedCodes = new Set(bcRes.recordset.map((r) => r.InventoryCode));
+      // In VB.NET logic: 6-character input is also matched directly as InventoryCode
+      matchedCodes.add(cleanBarcode);
+
+      const codesArr = Array.from(matchedCodes);
+      if (codesArr.length === 1) {
+        request.input('invCodeParam', sql.VarChar(50), codesArr[0]);
+        whereClauses.push('(a.InventoryCode = @invCodeParam OR RTRIM(LTRIM(a.InventoryCode)) = @invCodeParam)');
       } else {
-        request.input('barcodeInput', sql.VarChar(50), cleanBarcode);
-        whereClauses.push(`(
-          EXISTS (
-            SELECT 1 FROM tblInventoryBarcode bc 
-            WHERE bc.InventoryCode = a.InventoryCode 
-              AND RTRIM(LTRIM(bc.BarCode)) = @barcodeInput
-          )
-          OR RTRIM(LTRIM(a.InventoryCode)) = @barcodeInput
-        )`);
+        const inParams = codesArr.map((c, i) => {
+          const paramName = `invCodeParam_${i}`;
+          request.input(paramName, sql.VarChar(50), c);
+          return `@${paramName}`;
+        });
+        whereClauses.push(`(a.InventoryCode IN (${inParams.join(',')}) OR RTRIM(LTRIM(a.InventoryCode)) IN (${inParams.join(',')}))`);
       }
     }
 

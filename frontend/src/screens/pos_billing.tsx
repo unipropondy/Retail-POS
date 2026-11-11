@@ -1960,6 +1960,7 @@ export default function PosBillingScreen({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          rawCode: rawInput,
           rawInput: rawInput,
           currentQty: fastQty,
           currentCartItems: currentCartItems,
@@ -2011,9 +2012,14 @@ export default function PosBillingScreen({
 
   const finalizeValidatedItemAdd = (data: any, chosenSalesman?: string) => {
     const finalSalesman = chosenSalesman || data.salesmanCode || salesMan || effectiveLocation;
-    const itemData = data.item;
-    const finalQty = Number(data.quantity) || 1;
-    const finalPrice = Number(data.price) !== undefined ? Number(data.price) : Number(itemData.SellingPrice);
+    const itemData = data.item || {};
+    const finalQty = Number(data.quantity || itemData.Qty || fastQty) || 1;
+    const finalPrice =
+      data.price !== undefined && !isNaN(Number(data.price))
+        ? Number(data.price)
+        : itemData.Price !== undefined && !isNaN(Number(itemData.Price))
+        ? Number(itemData.Price)
+        : Number(itemData.SellingPrice || itemData.RetailPrice || 0);
 
     // Update active item HUD
     setActiveItem({
@@ -2401,32 +2407,76 @@ export default function PosBillingScreen({
     }
   };
 
+  // Ref to hold the latest action functions and state to prevent stale closures and missed hotkeys
+  const keyboardActionsRef = useRef({
+    handleClearCart,
+    handleCheckout,
+    handleHoldBill,
+    handleReleaseBill,
+    handlePriceChangeClick,
+    onLogout,
+    handleDeleteItem,
+    processDirectSkuCode,
+    handleFastPriceCommit,
+  });
+
+  useEffect(() => {
+    keyboardActionsRef.current = {
+      handleClearCart,
+      handleCheckout,
+      handleHoldBill,
+      handleReleaseBill,
+      handlePriceChangeClick,
+      onLogout,
+      handleDeleteItem,
+      processDirectSkuCode,
+      handleFastPriceCommit,
+    };
+  });
+
   // Keyboard Shortcuts (Web/Desktop EXE)
+  // Uses capture phase { capture: true } and matches both e.key and e.code so browser defaults
+  // (F6 address bar, F7 caret browsing, F10 menubar, F11 fullscreen) do not hijack POS function keys.
   useEffect(() => {
     if (Platform.OS !== "web") return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "F2") {
+      const key = (e.key || "").toUpperCase();
+      const code = (e.code || "").toUpperCase();
+
+      // Check if function key or shortcut
+      if (key === "F2" || code === "F2") {
         e.preventDefault();
-        handleClearCart();
-      } else if (e.key === "F4") {
+        e.stopPropagation();
+        keyboardActionsRef.current.handleClearCart();
+      } else if (key === "F4" || code === "F4") {
         e.preventDefault();
-        handleCheckout();
-      } else if (e.key === "F6") {
+        e.stopPropagation();
+        keyboardActionsRef.current.handleCheckout();
+      } else if (key === "F6" || code === "F6") {
         e.preventDefault();
-        handleHoldBill();
-      } else if (e.key === "F7") {
+        e.stopPropagation();
+        keyboardActionsRef.current.handleHoldBill();
+      } else if (key === "F7" || code === "F7") {
         e.preventDefault();
-        handleReleaseBill();
-      } else if (e.key === "F11") {
+        e.stopPropagation();
+        keyboardActionsRef.current.handleReleaseBill();
+      } else if (key === "F10" || code === "F10") {
         e.preventDefault();
-        handlePriceChangeClick();
-      } else if (e.key === "F10") {
+        e.stopPropagation();
+        if (keyboardActionsRef.current.onLogout) keyboardActionsRef.current.onLogout();
+      } else if (key === "F11" || code === "F11") {
         e.preventDefault();
-        if (onLogout) onLogout();
-      } else if (e.key === "Delete") {
-        handleDeleteItem();
-      } else if (e.key === "Tab") {
+        e.stopPropagation();
+        keyboardActionsRef.current.handlePriceChangeClick();
+      } else if (key === "DELETE" || code === "DELETE") {
+        // Only trigger delete item if not inside a text input/textarea
+        const tag = (document.activeElement?.tagName || "").toLowerCase();
+        if (tag !== "input" && tag !== "textarea") {
+          e.preventDefault();
+          keyboardActionsRef.current.handleDeleteItem();
+        }
+      } else if (key === "TAB" || code === "TAB") {
         const isSkuFocused = typeof document !== "undefined" && document.activeElement && (
           document.activeElement.getAttribute("data-test-id") === "sku-code-input" ||
           document.activeElement === (skuInputRef.current as any)
@@ -2439,13 +2489,13 @@ export default function PosBillingScreen({
         if (isSkuFocused) {
           e.preventDefault();
           if (skuCodeRef.current.trim()) {
-            processDirectSkuCode();
+            keyboardActionsRef.current.processDirectSkuCode();
           }
         } else if (isFastPriceFocused || pendingZeroPriceItemRef.current) {
           e.preventDefault();
           const priceVal = fastPriceRef.current;
           if (priceVal && parseFloat(priceVal) > 0) {
-            handleFastPriceCommit(priceVal);
+            keyboardActionsRef.current.handleFastPriceCommit(priceVal);
           } else {
             showAlert("Amount Required", "Please enter a valid Amount greater than $0.00.", "warning");
             fastPriceInputRef.current?.focus();
@@ -2454,9 +2504,9 @@ export default function PosBillingScreen({
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [cart, heldBills, grandTotal, currentTender, selectedPayMode]);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, []);
 
   const activeFontFamily = currentFont.fontFamily;
 

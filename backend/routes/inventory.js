@@ -233,8 +233,9 @@ router.post('/lookup', async (req, res) => {
     const pool = await getPool();
     if (!pool) return res.status(503).json({ success: false, message: 'Database unavailable' });
 
-    const { rawCode, currentQty, locationCode, terminalCode } = req.body;
-    if (!rawCode || !String(rawCode).trim()) {
+    const { rawCode, rawInput, currentQty, locationCode, terminalCode } = req.body;
+    const inputCode = String(rawCode || rawInput || '').trim();
+    if (!inputCode) {
       return res.status(400).json({ success: false, message: 'Item code is required' });
     }
 
@@ -243,7 +244,7 @@ router.post('/lookup', async (req, res) => {
     const posItemService = require('../services/posItemService');
 
     // 1. Check quantity prefix (e.g. 5*8888001)
-    const { code: unprefixCode, qty: parsedQty } = posItemService.parseQtyPrefix(rawCode, currentQty);
+    const { code: unprefixCode, qty: parsedQty } = posItemService.parseQtyPrefix(inputCode, currentQty);
 
     // 2. Check weighing scale barcodes (20...)
     const allowScale = configService.get('ALLOWWEIGHINSCALE') !== '0';

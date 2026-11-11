@@ -1331,6 +1331,8 @@ export default function ViewBillModal({
       <FindMemberModal
         visible={showMemberSearchModal}
         initialQuery={memberSearchQuery}
+        primaryColor={primaryColor}
+        theme={theme}
         onClose={() => setShowMemberSearchModal(false)}
         onSelectMember={(member) => {
           handleSelectMemberForDelivery(member.MemberCode);
