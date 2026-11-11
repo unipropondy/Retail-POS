@@ -74,23 +74,8 @@ router.get('/transactions', async (req, res) => {
     // Filter by Date Range if dateFilter enabled (matching chkDate in frmLastTransaction)
     const useDateFilter = String(dateFilter) === 'true';
     if (useDateFilter && fromDate && toDate) {
-      let fromDt, toDt;
-      if (fromDate.includes('/')) {
-        const [fd, fm, fy] = fromDate.split('/');
-        fromDt = new Date(`${fy}-${fm.padStart(2, '0')}-${fd.padStart(2, '0')} 00:00:00`);
-      } else {
-        fromDt = new Date(`${fromDate} 00:00:00`);
-      }
-
-      if (toDate.includes('/')) {
-        const [td, tm, ty] = toDate.split('/');
-        toDt = new Date(`${ty}-${tm.padStart(2, '0')}-${td.padStart(2, '0')} 23:59:59`);
-      } else {
-        toDt = new Date(`${toDate} 23:59:59`);
-      }
-
-      request.input('fromDate', sql.DateTime, fromDt);
-      request.input('toDate', sql.DateTime, toDt);
+      request.input('fromDate', sql.DateTime, new Date(`${fromDate} 00:00:00`));
+      request.input('toDate', sql.DateTime, new Date(`${toDate} 23:59:59`));
       whereConditions.push('A.ModifyDate BETWEEN @fromDate AND @toDate');
     }
 
