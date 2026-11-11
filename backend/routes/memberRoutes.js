@@ -311,5 +311,96 @@ router.get('/special-price', async (req, res) => {
   }
 });
 
+// ------------------------------------------------------------------------------
+// 7. GET /api/members/search
+// Find Member screen search matching frmMemberSearch.vb & clsMember.vb:
+// Filters:
+//   - query: string to match Name or Phone No (Mobile / ResPhone / OffPhone) or MemberCode
+//   - mode: 'STARTS_WITH' (F1), 'EXACT' (F2), or 'CONTAINS' (F3, default)
+// Grid columns:
+//   - Member Code, Name, Member Type, Phone No
+// ------------------------------------------------------------------------------
+router.get('/search', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+
+    const q = String(req.query.query || '').trim();
+    const mode = String(req.query.mode || 'CONTAINS').trim().toUpperCase();
+
+    const request = pool.request();
+    let whereClause = "WHERE RTRIM(LTRIM(MemberCode)) != 'CASH'";
+
+    if (q) {
+      request.input('q', sql.VarChar(100), q);
+
+      if (mode === 'EXACT') {
+        // F2 Exact match
+        whereClause += ` AND (
+          UPPER(RTRIM(LTRIM(MemberName))) = UPPER(@q)
+          OR RTRIM(LTRIM(Mobile)) = @q
+          OR RTRIM(LTRIM(ResPhone)) = @q
+          OR RTRIM(LTRIM(OffPhone)) = @q
+          OR UPPER(RTRIM(LTRIM(MemberCode))) = UPPER(@q)
+          OR UPPER(RTRIM(LTRIM(NricNo))) = UPPER(@q)
+        )`;
+      } else if (mode === 'STARTS_WITH') {
+        // F1 Starts with match
+        request.input('qLike', sql.VarChar(102), `${q}%`);
+        whereClause += ` AND (
+          MemberName LIKE @qLike
+          OR Mobile LIKE @qLike
+          OR ResPhone LIKE @qLike
+          OR OffPhone LIKE @qLike
+          OR MemberCode LIKE @qLike
+          OR NricNo LIKE @qLike
+        )`;
+      } else {
+        // F3 Contains match (Default)
+        request.input('qLike', sql.VarChar(102), `%${q}%`);
+        whereClause += ` AND (
+          MemberName LIKE @qLike
+          OR Mobile LIKE @qLike
+          OR ResPhone LIKE @qLike
+          OR OffPhone LIKE @qLike
+          OR MemberCode LIKE @qLike
+          OR NricNo LIKE @qLike
+        )`;
+      }
+    }
+
+    const sqlQuery = `
+      SELECT TOP 200
+        RTRIM(LTRIM(MemberCode)) AS MemberCode,
+        RTRIM(LTRIM(MemberName)) AS MemberName,
+        RTRIM(LTRIM(ISNULL(MemberType, ''))) AS MemberType,
+        RTRIM(LTRIM(COALESCE(NULLIF(Mobile, ''), NULLIF(ResPhone, ''), NULLIF(OffPhone, ''), ''))) AS PhoneNo,
+        RTRIM(LTRIM(ISNULL(Mobile, ''))) AS Mobile,
+        RTRIM(LTRIM(ISNULL(ResPhone, ''))) AS ResPhone,
+        RTRIM(LTRIM(ISNULL(OffPhone, ''))) AS OffPhone,
+        RTRIM(LTRIM(ISNULL(NricNo, ''))) AS NricNo,
+        RTRIM(LTRIM(ISNULL(Address1, ''))) AS Address1,
+        RTRIM(LTRIM(ISNULL(Address2, ''))) AS Address2,
+        RTRIM(LTRIM(ISNULL(Address3, ''))) AS Address3,
+        ISNULL(Active, 1) AS Active
+      FROM tblMember
+      ${whereClause}
+      ORDER BY MemberName ASC, MemberCode ASC
+    `;
+
+    const result = await request.query(sqlQuery);
+
+    return res.status(200).json({
+      success: true,
+      mode,
+      members: result.recordset,
+    });
+  } catch (err) {
+    console.error('❌ [MEMBER ERROR - SEARCH]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;
+
 

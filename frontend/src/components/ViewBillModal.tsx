@@ -16,6 +16,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ThemeConfig } from "../utils/theme";
 import ClearAdminAuthModal from "./ClearAdminAuthModal";
 import MemberModal from "./MemberModal";
+import FindMemberModal from "./FindMemberModal";
 
 export interface TransactionHeaderItem {
   invoiceNo: string;
@@ -1321,83 +1322,20 @@ export default function ViewBillModal({
       </Modal>
 
       {/* =========================================================================
-          SUB-MODAL: Member Search Dialog (frmMemberSearch for Convert Delivery)
+          SUB-MODAL: Find Member Screen (frmMemberSearch.vb for Convert Delivery)
+          Matches exact UI from reference screenshot:
+          - Filters: Name / Phone No input, F1 Starts with, F2 Exact, F3 Contains, Refresh
+          - Member List Grid: Member Code, Name, Member Type, Phone No
+          - Bottom Buttons: Add, Edit, Ok (F4), Close (Esc)
       ========================================================================= */}
-      <Modal
+      <FindMemberModal
         visible={showMemberSearchModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowMemberSearchModal(false)}
-      >
-        <View style={styles.memberModalBackdrop}>
-          <View style={styles.memberModalCard}>
-            <View style={[styles.memberModalHeader, { backgroundColor: primaryColor }]}>
-              <Text style={styles.memberModalTitle}>Scan / Select Member for Delivery</Text>
-              <TouchableOpacity onPress={() => setShowMemberSearchModal(false)}>
-                <MaterialCommunityIcons name="close" size={20} color="#ffffff" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.memberSearchInputRow}>
-              <MaterialCommunityIcons name="magnify" size={20} color="#64748b" />
-              <TextInput
-                style={styles.memberSearchInput}
-                placeholder="Search Member Code, Name, or Mobile..."
-                value={memberSearchQuery}
-                onChangeText={(text) => {
-                  setMemberSearchQuery(text);
-                  searchMembers(text);
-                }}
-                autoFocus={true}
-                placeholderTextColor="#94a3b8"
-              />
-            </View>
-
-            {memberSearchLoading ? (
-              <ActivityIndicator size="small" color={primaryColor} style={{ margin: 20 }} />
-            ) : memberSearchResults.length === 0 ? (
-              <View style={{ padding: 20, alignItems: "center" }}>
-                <Text style={{ color: "#64748b", fontSize: 13 }}>
-                  No members matched "{memberSearchQuery}".
-                </Text>
-                <TouchableOpacity
-                  style={{
-                    marginTop: 12,
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
-                    backgroundColor: primaryColor,
-                    borderRadius: 6,
-                  }}
-                  onPress={() => handleSelectMemberForDelivery(memberSearchQuery.trim() || "CASH")}
-                >
-                  <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 12 }}>
-                    Assign "{memberSearchQuery.trim() || "CASH"}" Anyway
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <FlatList
-                data={memberSearchResults}
-                keyExtractor={(item) => item.MemberCode}
-                style={{ maxHeight: 280 }}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.memberResultRow}
-                    onPress={() => handleSelectMemberForDelivery(item.MemberCode)}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.memberCodeText}>{item.MemberCode}</Text>
-                      <Text style={styles.memberNameText}>{item.MemberName}</Text>
-                    </View>
-                    <Text style={styles.memberPhoneText}>{item.Mobile || ""}</Text>
-                    <MaterialCommunityIcons name="chevron-right" size={20} color="#94a3b8" />
-                  </TouchableOpacity>
-                )}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
+        initialQuery={memberSearchQuery}
+        onClose={() => setShowMemberSearchModal(false)}
+        onSelectMember={(member) => {
+          handleSelectMemberForDelivery(member.MemberCode);
+        }}
+      />
 
       {/* =========================================================================
           SUB-MODAL: Member Master Modal (frmMember.vb cmdMember_Click)
