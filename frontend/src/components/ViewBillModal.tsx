@@ -15,6 +15,7 @@ import {
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ThemeConfig } from "../utils/theme";
 import ClearAdminAuthModal from "./ClearAdminAuthModal";
+import MemberModal from "./MemberModal";
 
 export interface TransactionHeaderItem {
   invoiceNo: string;
@@ -144,6 +145,10 @@ export default function ViewBillModal({
   const [memberSearchResults, setMemberSearchResults] = useState<MemberSearchItem[]>([]);
   const [memberSearchLoading, setMemberSearchLoading] = useState<boolean>(false);
 
+  // Full Member Master Modal State (cmdMember_Click in frmLastTransaction.vb)
+  const [showMemberModal, setShowMemberModal] = useState<boolean>(false);
+  const [selectedMemberCodeForModal, setSelectedMemberCodeForModal] = useState<string>("");
+
   // Bill Cancel Confirmation & Void Print Dialog State
   const [cancelLoading, setCancelLoading] = useState<boolean>(false);
   const [showVoidConfirmModal, setShowVoidConfirmModal] = useState<boolean>(false);
@@ -179,7 +184,7 @@ export default function ViewBillModal({
   }, [visible, transactionLimit, isCreditMode, isAllSales]);
 
   // Fetch header list from /api/bills/transactions
-  const fetchTransactions = async () => {
+  const fetchTransactions = async (preserveSelectedInvoice?: string) => {
     setLoadingList(true);
     try {
       const queryParams = new URLSearchParams({
@@ -203,9 +208,16 @@ export default function ViewBillModal({
       if (res.ok && data.success && Array.isArray(data.transactions)) {
         setTransactions(data.transactions);
         if (data.transactions.length > 0) {
-          const firstInv = data.transactions[0].invoiceNo;
-          setSelectedInvoiceNo(firstInv);
-          fetchBillDetails(firstInv);
+          // If a specific invoice should be preserved/selected (e.g. after member update), select it
+          const targetInv =
+            preserveSelectedInvoice && data.transactions.some((t: any) => t.invoiceNo === preserveSelectedInvoice)
+              ? preserveSelectedInvoice
+              : (selectedInvoiceNo && data.transactions.some((t: any) => t.invoiceNo === selectedInvoiceNo)
+                ? selectedInvoiceNo
+                : data.transactions[0].invoiceNo);
+
+          setSelectedInvoiceNo(targetInv);
+          fetchBillDetails(targetInv);
         } else {
           setSelectedInvoiceNo("");
           setBillHeader(null);
@@ -472,25 +484,41 @@ export default function ViewBillModal({
   };
 
   // Member Search Confirmation (Matching VB.NET flow for CASH Customer):
-  // Update tblPOSSalesHeaderCur Set CustomerCode = @memberCode Where InvoiceNo = @sInvoiceNo
+  // Update tblPOSSalesHeaderCur / tblPOSSalesHeader Set CustomerCode = @memberCode Where InvoiceNo = @sInvoiceNo
   // Then cmdFetch_Click (refresh list) and Exit Sub without creating delivery yet.
   const handleSelectMemberForDelivery = async (memberCode: string) => {
     setShowMemberSearchModal(false);
+    const targetInvoice = selectedInvoiceNo;
     setDeliveryLoading(true);
     try {
       const res = await fetch(`${apiUrl}/api/bills/update-delivery-member`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          invoiceNo: selectedInvoiceNo,
+          invoiceNo: targetInvoice,
           memberCode,
         }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showNotice(`Member ${memberCode} assigned to Invoice #${selectedInvoiceNo}.`, "success");
-        // Refresh transaction list matching cmdFetch_Click in VB.NET
-        fetchTransactions();
+        showNotice(`Member ${memberCode} assigned to Invoice #${targetInvoice}.`, "success");
+        // Optimistically update the selected bill's member in current transactions state
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.invoiceNo === targetInvoice
+              ? {
+                  ...t,
+                  memberCode: memberCode,
+                  memberName: data.customerName || t.memberName,
+                }
+              : t
+          )
+        );
+        // Refresh transaction list & bill details while preserving selected invoice
+        await fetchTransactions(targetInvoice);
+        if (targetInvoice) {
+          fetchBillDetails(targetInvoice);
+        }
       } else {
         showNotice(data.message || "Failed to update member code", "error");
       }
@@ -499,6 +527,32 @@ export default function ViewBillModal({
     } finally {
       setDeliveryLoading(false);
     }
+  };
+
+  // ----------------------------------------------------------------------------
+  // BUTTON: Member Click Flow (Exact cmdMember_Click in frmLastTransaction.vb)
+  // ----------------------------------------------------------------------------
+  // VB.NET logic:
+  //   sMemberBarcode = fnGetText(dgvHeader, dgvHeader.CurrentRow.Index, cMember.Index).Trim
+  //   frmMember.prpMemberBarCode = sMemberBarcode
+  //   frmMember.ShowDialog()
+  // ----------------------------------------------------------------------------
+  const handleMemberButtonClick = (memberCodeToOpen?: string) => {
+    let targetMemberCode = (memberCodeToOpen || "").trim();
+
+    if (!targetMemberCode && selectedInvoiceNo) {
+      const selectedTx = transactions.find((t) => t.invoiceNo === selectedInvoiceNo);
+      if (selectedTx) {
+        targetMemberCode = (selectedTx.memberCode || "").trim();
+      }
+    }
+
+    if (!targetMemberCode && billHeader) {
+      targetMemberCode = (billHeader.customerCode || "").trim();
+    }
+
+    setSelectedMemberCodeForModal(targetMemberCode);
+    setShowMemberModal(true);
   };
 
   // ----------------------------------------------------------------------------
@@ -659,7 +713,7 @@ export default function ViewBillModal({
                 placeholder="Search Invoice #..."
                 value={invoiceFilter}
                 onChangeText={setInvoiceFilter}
-                onSubmitEditing={fetchTransactions}
+                onSubmitEditing={() => fetchTransactions()}
                 placeholderTextColor="#94a3b8"
               />
               {invoiceFilter ? (
@@ -677,7 +731,7 @@ export default function ViewBillModal({
                 placeholder="Member / Customer Code..."
                 value={memberFilter}
                 onChangeText={setMemberFilter}
-                onSubmitEditing={fetchTransactions}
+                onSubmitEditing={() => fetchTransactions()}
                 placeholderTextColor="#94a3b8"
               />
               {memberFilter ? (
@@ -716,7 +770,7 @@ export default function ViewBillModal({
             {/* Refresh Button (cmdFetch) */}
             <TouchableOpacity
               style={[styles.fetchBtn, { backgroundColor: primaryColor }]}
-              onPress={fetchTransactions}
+              onPress={() => fetchTransactions()}
             >
               <MaterialCommunityIcons name="refresh" size={16} color="#ffffff" />
               <Text style={styles.fetchBtnText}>Fetch</Text>
@@ -733,8 +787,9 @@ export default function ViewBillModal({
                   <Text style={[styles.thCell, { width: 110 }]}>Invoice #</Text>
                   <Text style={[styles.thCell, { width: 75 }]}>Time</Text>
                   <Text style={[styles.thCell, { width: 65 }]}>User</Text>
-                  <Text style={[styles.thCell, { flex: 1 }]}>Customer</Text>
-                  <Text style={[styles.thCell, { width: 95 }]}>Pay Mode</Text>
+                  <Text style={[styles.thCell, { width: 75 }]}>Member</Text>
+                  <Text style={[styles.thCell, { width: 110 }]}>Member Name</Text>
+                  <Text style={[styles.thCell, { width: 85 }]}>Pay Mode</Text>
                   <Text style={[styles.thCell, { width: 75, textAlign: "right" }]}>Paid</Text>
                 </View>
 
@@ -795,20 +850,42 @@ export default function ViewBillModal({
                           >
                             {item.cashierId}
                           </Text>
-                          <Text
-                            style={[
-                              styles.tdCell,
-                              { flex: 1 },
-                              isSelected && { color: "#ffffff" },
-                            ]}
-                            numberOfLines={1}
+                          <TouchableOpacity
+                            style={{ width: 75, justifyContent: "center" }}
+                            onPress={() => handleMemberButtonClick(item.memberCode)}
+                            activeOpacity={0.7}
                           >
-                            {item.memberName || item.memberCode || "CASH"}
-                          </Text>
+                            <Text
+                              style={[
+                                styles.tdCell,
+                                isSelected ? { color: "#ffffff" } : { color: "#0284c7" },
+                                { fontWeight: "700", textDecorationLine: "underline" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {item.memberCode || "CASH"}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={{ width: 110, justifyContent: "center" }}
+                            onPress={() => handleMemberButtonClick(item.memberCode)}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.tdCell,
+                                isSelected ? { color: "#ffffff" } : { color: "#334155" },
+                                { fontWeight: "600" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {item.memberName || "CASH"}
+                            </Text>
+                          </TouchableOpacity>
                           <Text
                             style={[
                               styles.tdCell,
-                              { width: 95, color: "#2563eb", fontWeight: "600" },
+                              { width: 85, color: "#2563eb", fontWeight: "600" },
                               isSelected && { color: "#bfdbfe" },
                             ]}
                             numberOfLines={1}
@@ -846,7 +923,7 @@ export default function ViewBillModal({
                 {billHeader ? (
                   <>
                     <View style={styles.detailHeaderBox}>
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text style={styles.detailTitle}>Invoice: #{billHeader.invoiceNo}</Text>
                         <Text style={styles.detailSubtitle}>
                           Customer: {billHeader.customerName || billHeader.customerCode} | Date:{" "}
@@ -857,6 +934,16 @@ export default function ViewBillModal({
                           })}
                         </Text>
                       </View>
+                      <TouchableOpacity
+                        style={[styles.memberBadgeBtn, { backgroundColor: primaryColor }]}
+                        onPress={() => handleMemberButtonClick(billHeader.customerCode)}
+                        activeOpacity={0.8}
+                      >
+                        <MaterialCommunityIcons name="card-account-details-outline" size={15} color="#ffffff" />
+                        <Text style={styles.memberBadgeBtnText}>
+                          Member: {billHeader.customerCode || "CASH"}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
 
                     {/* Detail Table Header */}
@@ -1127,8 +1214,22 @@ export default function ViewBillModal({
               ) : null}
             </View>
 
-            {/* Right Side: Print Receipt & Exit */}
+            {/* Right Side: Member, Print Receipt & Exit */}
             <View style={styles.vbBottomRightCol}>
+              <TouchableOpacity
+                style={[
+                  styles.vbActionBtn,
+                  styles.btnMemberAction,
+                  !selectedInvoiceNo && styles.btnDisabled,
+                ]}
+                onPress={() => handleMemberButtonClick()}
+                disabled={!selectedInvoiceNo}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons name="card-account-details-outline" size={18} color="#ffffff" />
+                <Text style={styles.vbActionBtnText}>Member</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={[
                   styles.vbActionBtn,
@@ -1297,6 +1398,20 @@ export default function ViewBillModal({
           </View>
         </View>
       </Modal>
+
+      {/* =========================================================================
+          SUB-MODAL: Member Master Modal (frmMember.vb cmdMember_Click)
+          Executes Sp_POS_GetMember, Sp_GetNextMemberCode, sp_Pos_MemberSave
+      ========================================================================= */}
+      <MemberModal
+        visible={showMemberModal}
+        onClose={() => setShowMemberModal(false)}
+        initialMemberCode={selectedMemberCodeForModal}
+        onMemberSaved={(savedCode, savedName) => {
+          showNotice(`Member ${savedName} (${savedCode}) updated successfully.`, "success");
+          fetchTransactions(selectedInvoiceNo);
+        }}
+      />
     </Modal>
   );
 }
@@ -1495,7 +1610,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
   },
   leftTableContainer: {
-    flex: 1.15,
+    flex: 1.3,
     borderRightWidth: 1,
     borderRightColor: "#e2e8f0",
     display: "flex",
@@ -1552,7 +1667,7 @@ const styles = StyleSheet.create({
     color: "#0f172a",
   },
   rightTableContainer: {
-    flex: 1.25,
+    flex: 1.0,
     display: "flex",
     flexDirection: "column",
     backgroundColor: "#ffffff",
@@ -1821,6 +1936,23 @@ const styles = StyleSheet.create({
   },
   btnExit: {
     backgroundColor: "#475569", // Dark slate gray for Exit
+  },
+  btnMemberAction: {
+    backgroundColor: "#7c3aed", // Rich purple for Member action
+  },
+  memberBadgeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  memberBadgeBtnText: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 12,
   },
   btnDisabled: {
     opacity: 0.45,

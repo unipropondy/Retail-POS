@@ -32,14 +32,23 @@ export function getBackendBaseUrl(): string {
     return process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, "");
   }
 
-  // 2. Web browser: if deployed on Railway, Vercel, Netlify, or any non-localhost domain, route to Railway
+  // 2. Web browser: if running on localhost or a local IP (192.168.x.x, 10.x.x.x, 127.0.0.1), connect locally
   if (Platform.OS === "web" && typeof window !== "undefined" && window.location) {
     const host = window.location.hostname || "localhost";
-    if (host.includes("railway.app") || host.includes("vercel.app") || host.includes("netlify.app")) {
-      return CLOUD_BACKEND_URL;
+    const isLocal =
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host.startsWith("192.168.") ||
+      host.startsWith("10.") ||
+      host.startsWith("172.16.") ||
+      host.endsWith(".local");
+
+    if (isLocal) {
+      return `http://${host}:5000`;
     }
-    // Local development or on-premise LAN server
-    return `http://${host}:5000`;
+
+    // Any remote hosted website (e.g. *.workers.dev, *.railway.app, *.pages.dev, *.vercel.app, custom domain)
+    return CLOUD_BACKEND_URL;
   }
 
   // 3. Mobile APK / Native Terminal default: configured cloud backend URL

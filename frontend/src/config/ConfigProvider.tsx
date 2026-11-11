@@ -102,6 +102,32 @@ export const ConfigProvider: React.FC<ConfigProviderProps> = ({ children }) => {
   }, [fetchConfig]);
 
   /**
+   * Directly sets/merges the live tblMaParamMaster loaded during login
+   */
+  const setParamMaster = useCallback(
+    async (paramMaster: any, cashCustomerCode?: string) => {
+      setConfig((prev) => {
+        const next = {
+          ...prev,
+          paramMaster,
+          cashCustomerCode: cashCustomerCode || prev.cashCustomerCode || "CASH",
+        };
+        // Also persist to AsyncStorage for seamless refreshes
+        AsyncStorage.setItem(
+          CONFIG_CACHE_KEY,
+          JSON.stringify({
+            config: next,
+            items,
+            savedAt: new Date().toISOString(),
+          }),
+        ).catch(() => {});
+        return next;
+      });
+    },
+    [items],
+  );
+
+  /**
    * Reset configuration back to original VB.NET App.config defaults
    */
   const resetToDefaults = useCallback(async (): Promise<boolean> => {
@@ -124,25 +150,73 @@ export const ConfigProvider: React.FC<ConfigProviderProps> = ({ children }) => {
     }
   }, [fetchConfig]);
 
-  const isEnabledHelper = useCallback((key: keyof AppConfig) => {
-    return checkIsEnabled(config, key);
-  }, [config]);
+  const isEnabledHelper = useCallback(
+    (key: keyof AppConfig) => {
+      return checkIsEnabled(config, key);
+    },
+    [config],
+  );
 
-  const getNumHelper = useCallback((key: keyof AppConfig, fallback: number = 0) => {
-    return checkGetNum(config, key, fallback);
-  }, [config]);
+  const getNumHelper = useCallback(
+    (key: keyof AppConfig, fallback: number = 0) => {
+      return checkGetNum(config, key, fallback);
+    },
+    [config],
+  );
 
-  const value: ConfigContextValue = useMemo(() => ({
-    config,
-    items,
-    isLoading,
-    error,
-    refreshConfig: fetchConfig,
-    updateConfig,
-    resetToDefaults,
-    isEnabled: isEnabledHelper,
-    getNum: getNumHelper,
-  }), [config, items, isLoading, error, fetchConfig, updateConfig, resetToDefaults, isEnabledHelper, getNumHelper]);
+  const getParamHelper = useCallback(
+    (key: string, fallback?: any) => {
+      if (!config.paramMaster?.params) return fallback;
+      const normalized = key.trim().toUpperCase();
+      // Search case-insensitively across params
+      for (const [k, v] of Object.entries(config.paramMaster.params)) {
+        if (k.trim().toUpperCase() === normalized) {
+          return v;
+        }
+      }
+      return fallback;
+    },
+    [config],
+  );
+
+  const isParamEnabledHelper = useCallback(
+    (key: string) => {
+      const val = getParamHelper(key, false);
+      return Boolean(val === true || val === 1 || String(val).toUpperCase() === "Y");
+    },
+    [getParamHelper],
+  );
+
+  const value: ConfigContextValue = useMemo(
+    () => ({
+      config,
+      items,
+      isLoading,
+      error,
+      refreshConfig: fetchConfig,
+      updateConfig,
+      setParamMaster,
+      resetToDefaults,
+      isEnabled: isEnabledHelper,
+      getNum: getNumHelper,
+      getParam: getParamHelper,
+      isParamEnabled: isParamEnabledHelper,
+    }),
+    [
+      config,
+      items,
+      isLoading,
+      error,
+      fetchConfig,
+      updateConfig,
+      setParamMaster,
+      resetToDefaults,
+      isEnabledHelper,
+      getNumHelper,
+      getParamHelper,
+      isParamEnabledHelper,
+    ],
+  );
 
   return <ConfigContext.Provider value={value}>{children}</ConfigContext.Provider>;
 };

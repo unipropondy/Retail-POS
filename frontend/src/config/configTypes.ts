@@ -114,6 +114,15 @@ export interface AppConfig {
 
   // 9. License Settings (1)
   KeySet: string;
+
+  // 10. NEW Database tblMaParamMaster Live Parameters & Member Cash Code
+  paramMaster?: {
+    raw?: Record<string, string>;
+    params?: Record<string, string | number | boolean>;
+    loaded?: boolean;
+    count?: number;
+  };
+  cashCustomerCode?: string;
 }
 
 export type ConfigCategory =

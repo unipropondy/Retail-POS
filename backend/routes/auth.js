@@ -20,6 +20,9 @@ const jwt = require("jsonwebtoken");
 // Database pool and connection helper functions
 const { sql, getPool } = require("../config/db");
 
+// ParamMaster & Cash Customer loading service (matching VB.NET frmSignOn / clsCompany flow)
+const { loadParamMaster, fncGetCashMemberCode } = require("../services/paramService");
+
 module.exports = function (jwtSecret) {
   // ----------------------------------------------------------------------------
   // Helper Function: Find and validate terminal in tblmaTerminal
@@ -477,12 +480,20 @@ module.exports = function (jwtSecret) {
         { expiresIn: "12h" }, // 12-hour session duration for cashier shift
       );
 
-      // 8. Log success
+      // 9. Legacy VB.NET Sign-On Sequence Integration:
+      // SubGetTerminal() -> already performed above (terminal validated)
+      // objComp.fncLoadParamMaster() -> load all parameters from NEW tblMaParamMaster
+      // gsCashCustomerCode = fncGetCashMemberCode() -> fetch CASH member code
+      console.log(`⚙️ [LOGIN] Executing objComp.fncLoadParamMaster() from tblMaParamMaster...`);
+      const paramMaster = await loadParamMaster(pool);
+      const cashCustomerCode = await fncGetCashMemberCode(pool);
+
+      // 10. Log success
       console.log(
-        `✅ [LOGIN SUCCESS] User: ${user.UserName} (${user.UserGroupCode}) on Terminal: ${terminal.TerminalCode}`,
+        `✅ [LOGIN SUCCESS] User: ${user.UserName} (${user.UserGroupCode}) on Terminal: ${terminal.TerminalCode} | Params loaded: ${paramMaster.count} | CashCustomer: ${cashCustomerCode}`,
       );
 
-      // Return user profile, terminal configuration, and session token
+      // Return user profile, terminal configuration, loaded paramMaster, and session token
       return res.status(200).json({
         success: true,
         message: "Login successful",
@@ -504,6 +515,8 @@ module.exports = function (jwtSecret) {
           isCashier: user.IsCashier === 1 || user.IsCashier === true,
           isSalesMan: user.IsSalesMan === 1 || user.IsSalesMan === true,
         },
+        cashCustomerCode,
+        paramMaster,
       });
     } catch (error) {
       console.error("❌ [AUTH ERROR] Database query exception:", error.message);

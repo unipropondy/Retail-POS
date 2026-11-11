@@ -92,11 +92,13 @@ export default function App() {
 
   // ---------------------------------------------------------------------------
   // Cashier Login Success Handler
-  // Author: JAVITH, BAVANI 28-10-2026: Saves authenticated user & terminal to AsyncStorage
+  // Author: JAVITH, BAVANI 28-10-2026: Saves authenticated user, terminal & paramMaster to AsyncStorage
   // ---------------------------------------------------------------------------
   const handleLoginSuccess = async (
     user: CashierProfile,
     terminal: TerminalProfile | null,
+    paramMaster?: any,
+    cashCustomerCode?: string,
   ) => {
     setCurrentUser(user);
     setCurrentTerminal(terminal);
@@ -107,6 +109,8 @@ export default function App() {
         JSON.stringify({
           user,
           terminal,
+          paramMaster,
+          cashCustomerCode,
           savedAt: new Date().toISOString(),
         }),
       );

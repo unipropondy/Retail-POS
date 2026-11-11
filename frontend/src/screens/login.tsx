@@ -75,6 +75,8 @@ interface LoginScreenProps {
   onLoginSuccess?: (
     user: CashierProfile,
     terminal: TerminalProfile | null,
+    paramMaster?: any,
+    cashCustomerCode?: string,
   ) => void;
 }
 
@@ -99,8 +101,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [licenseWarning, setLicenseWarning] = useState<string | null>(null);
 
-  // Centralized App.config Integration
-  const { config, isEnabled } = useAppConfig();
+  // Centralized App.config & ParamMaster Integration
+  const { config, isEnabled, setParamMaster } = useAppConfig();
   const [showConfigModal, setShowConfigModal] = useState(false);
 
   // Authenticated cashier profile (for welcome screen fallback)
@@ -300,8 +302,19 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         if (data.terminal) {
           setTerminal(data.terminal);
         }
+
+        // Seamlessly update global config state with loaded ParamMaster and Cash Member Code
+        if (data.paramMaster) {
+          await setParamMaster(data.paramMaster, data.cashCustomerCode);
+        }
+
         if (onLoginSuccess) {
-          onLoginSuccess(data.user, resolvedTerminal);
+          onLoginSuccess(
+            data.user,
+            resolvedTerminal,
+            data.paramMaster,
+            data.cashCustomerCode,
+          );
         }
       } else {
         if (

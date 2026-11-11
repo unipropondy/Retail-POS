@@ -587,7 +587,7 @@ router.post('/check-delivery', async (req, res) => {
       row = resultCur.recordset[0];
       isCur = true;
     } else {
-      // Check tblPOSSalesHeader (history bills)
+      // Check tblPOSSalesHeader (local history bills)
       const qHist = pool.request();
       qHist.input('inv', sql.VarChar(50), cleanInv);
       const resultHist = await qHist.query(`
@@ -605,6 +605,29 @@ router.post('/check-delivery', async (req, res) => {
       if (resultHist.recordset.length > 0) {
         row = resultHist.recordset[0];
         isCur = false;
+      } else {
+        // Fallback: Check unified view vw_POS_SalesHeader (which includes archived database RetailposHisERP)
+        const qView = pool.request();
+        qView.input('inv', sql.VarChar(50), cleanInv);
+        const resultView = await qView.query(`
+          SELECT TOP 1
+            RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
+            RTRIM(LTRIM(ISNULL(AccFlag, '0'))) AS AccFlag1,
+            RTRIM(LTRIM(ISNULL(CustomerCode, 'CASH'))) AS CustomerCode,
+            RTRIM(LTRIM(ISNULL(CustomerName, 'CASH'))) AS CustomerName,
+            RTRIM(LTRIM(ISNULL(Delivered, '0'))) AS Delivered,
+            0 AS IsCur
+          FROM vw_POS_SalesHeader
+          WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+        `);
+
+        if (resultView.recordset.length > 0) {
+          row = resultView.recordset[0];
+          isCur = false;
+        }
+      }
+
+      if (row) {
         // Check if already in tblPaidDeliveryOrder
         const qPaidDO = pool.request();
         qPaidDO.input('inv', sql.VarChar(50), cleanInv);
@@ -647,7 +670,7 @@ router.post('/check-delivery', async (req, res) => {
 // Exact equivalent of:
 // `Update tblPOSSalesHeaderCur Set CustomerCode = @memberCode Where InvoiceNo = @invoiceNo`
 // Triggered when CustomerCode is CASH in Butcondelivery_Click.
-// Updates tblPOSSalesHeaderCur (or tblPOSSalesHeader if history) with selected Member Code.
+// Updates tblPOSSalesHeaderCur (or tblPOSSalesHeader / RetailposHisERP) with selected Member Code.
 // ------------------------------------------------------------------------------
 router.post('/update-delivery-member', async (req, res) => {
   try {
@@ -664,17 +687,39 @@ router.post('/update-delivery-member', async (req, res) => {
       return res.status(400).json({ success: false, message: 'memberCode is required' });
     }
 
+    // Lookup Member Name from tblMember
+    let memberName = '';
+    try {
+      const qMem = pool.request();
+      qMem.input('mem', sql.VarChar(50), cleanMem);
+      const memRes = await qMem.query(`
+        SELECT TOP 1 RTRIM(LTRIM(MemberName)) AS MemberName
+        FROM tblMember
+        WHERE UPPER(RTRIM(LTRIM(MemberCode))) = UPPER(@mem)
+           OR UPPER(RTRIM(LTRIM(NRICNo))) = UPPER(@mem)
+      `);
+      if (memRes.recordset.length > 0) {
+        memberName = memRes.recordset[0].MemberName || '';
+      }
+    } catch (e) {
+      console.warn('Member name lookup warning:', e.message);
+    }
+
     const tx = new sql.Transaction(pool);
     await tx.begin();
 
     try {
+      // 1. Try updating tblPOSSalesHeaderCur first
       const updCur = new sql.Request(tx);
       updCur.input('inv', sql.VarChar(50), cleanInv);
       updCur.input('mem', sql.VarChar(50), cleanMem);
+      updCur.input('name', sql.VarChar(100), memberName);
 
       const resCur = await updCur.query(`
         UPDATE tblPOSSalesHeaderCur
-        SET CustomerCode = @mem
+        SET CustomerCode = @mem,
+            CustomerName = CASE WHEN @name <> '' THEN @name ELSE CustomerName END,
+            ModifyDate = GETDATE()
         WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
       `);
 
@@ -684,28 +729,68 @@ router.post('/update-delivery-member', async (req, res) => {
           success: true,
           invoiceNo: cleanInv,
           customerCode: cleanMem,
+          customerName: memberName,
+          targetTable: 'tblPOSSalesHeaderCur',
           message: `Member ${cleanMem} assigned to Invoice ${cleanInv} successfully.`,
         });
       }
 
-      // If not in Cur, update history table tblPOSSalesHeader
+      // 2. If not in Cur, try updating local history table tblPOSSalesHeader
       const updHist = new sql.Request(tx);
       updHist.input('inv', sql.VarChar(50), cleanInv);
       updHist.input('mem', sql.VarChar(50), cleanMem);
+      updHist.input('name', sql.VarChar(100), memberName);
 
-      await updHist.query(`
+      const resHist = await updHist.query(`
         UPDATE tblPOSSalesHeader
-        SET CustomerCode = @mem
+        SET CustomerCode = @mem,
+            CustomerName = CASE WHEN @name <> '' THEN @name ELSE CustomerName END,
+            ModifyDate = GETDATE()
         WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
       `);
 
-      await tx.commit();
+      if (resHist.rowsAffected && resHist.rowsAffected[0] > 0) {
+        await tx.commit();
+        return res.status(200).json({
+          success: true,
+          invoiceNo: cleanInv,
+          customerCode: cleanMem,
+          customerName: memberName,
+          targetTable: 'tblPOSSalesHeader',
+          message: `Member ${cleanMem} assigned to History Invoice ${cleanInv} successfully.`,
+        });
+      }
 
-      return res.status(200).json({
-        success: true,
-        invoiceNo: cleanInv,
-        customerCode: cleanMem,
-        message: `Member ${cleanMem} assigned to History Invoice ${cleanInv} successfully.`,
+      // 3. If not in local tables, update archived database RetailposHisERP.dbo.TBLPOSSALESHEADER
+      const updHisERP = new sql.Request(tx);
+      updHisERP.input('inv', sql.VarChar(50), cleanInv);
+      updHisERP.input('mem', sql.VarChar(50), cleanMem);
+      updHisERP.input('name', sql.VarChar(100), memberName);
+
+      const resHisERP = await updHisERP.query(`
+        UPDATE RetailposHisERP.dbo.TBLPOSSALESHEADER
+        SET CustomerCode = @mem,
+            CustomerName = CASE WHEN @name <> '' THEN @name ELSE CustomerName END,
+            ModifyDate = GETDATE()
+        WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+      `);
+
+      if (resHisERP.rowsAffected && resHisERP.rowsAffected[0] > 0) {
+        await tx.commit();
+        return res.status(200).json({
+          success: true,
+          invoiceNo: cleanInv,
+          customerCode: cleanMem,
+          customerName: memberName,
+          targetTable: 'RetailposHisERP.dbo.TBLPOSSALESHEADER',
+          message: `Member ${cleanMem} assigned to Archived Invoice ${cleanInv} successfully.`,
+        });
+      }
+
+      await tx.rollback();
+      return res.status(404).json({
+        success: false,
+        message: `Invoice #${cleanInv} was not found in active, history, or archived sales records.`,
       });
     } catch (txErr) {
       await tx.rollback();
@@ -791,6 +876,37 @@ router.post('/execute-delivery', async (req, res) => {
           if (paidCheck.recordset.length > 0) {
             invRow.AccFlag1 = '1';
           }
+        } else {
+          // Check in RetailposHisERP.dbo.TBLPOSSALESHEADER (archived table)
+          const chkHisERP = new sql.Request(tx);
+          chkHisERP.input('inv', sql.VarChar(50), cleanInv);
+          const chkResHisERP = await chkHisERP.query(`
+            SELECT TOP 1
+              RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
+              InvoiceDate,
+              '0' AS AccFlag1,
+              RTRIM(LTRIM(ISNULL(CustomerCode, ''))) AS CustomerCode,
+              RTRIM(LTRIM(ISNULL(CustomerName, ''))) AS CustomerName,
+              RTRIM(LTRIM(ISNULL(LocationCode, 'HQ'))) AS LocationCode,
+              RTRIM(LTRIM(ISNULL(CashierID, 'UPS'))) AS CashierID,
+              0 AS IsCur
+            FROM RetailposHisERP.dbo.TBLPOSSALESHEADER WITH (UPDLOCK)
+            WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+          `);
+
+          if (chkResHisERP.recordset.length > 0) {
+            invRow = chkResHisERP.recordset[0];
+            isCur = false;
+
+            const paidReq = new sql.Request(tx);
+            paidReq.input('inv', sql.VarChar(50), cleanInv);
+            const paidCheck = await paidReq.query(`
+              SELECT TOP 1 InvoiceNo FROM tblPaidDeliveryOrder WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+            `);
+            if (paidCheck.recordset.length > 0) {
+              invRow.AccFlag1 = '1';
+            }
+          }
         }
       }
 
@@ -856,8 +972,8 @@ router.post('/execute-delivery', async (req, res) => {
               HandPhone, Phone, Country, ZipCode, InvoiceNo, InvoiceDate, DeliveryDate,
               CreateUser, CreateDate, Modifyuser, ModifyDate
             )
-            SELECT 
-              @loc, CustomerCode, CustomerName, ISNULL(Address1, ''), ISNULL(Address2, ''), ISNULL(Address3, ''),
+            SELECT TOP 1
+              @loc, MemberCode, MemberName, ISNULL(Address1, ''), ISNULL(Address2, ''), ISNULL(Address3, ''),
               ISNULL(Mobile, ''), ISNULL(ResPhone, ''), ISNULL(Country, ''), ISNULL(ZipCode, ''),
               @inv, GETDATE(), GETDATE(), @user, GETDATE(), @user, GETDATE()
             FROM tblMember

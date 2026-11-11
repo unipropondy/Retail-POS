@@ -102,6 +102,10 @@ app.use("/api/price-change", priceChangeRoutes);
 const billRoutes = require("./routes/billRoutes");
 app.use("/api/bills", billRoutes);
 
+// Mount Member management routes (clsMember.vb & frmMember.vb)
+const memberRoutes = require("./routes/memberRoutes");
+app.use("/api/members", memberRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

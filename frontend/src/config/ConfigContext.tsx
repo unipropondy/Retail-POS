@@ -17,9 +17,12 @@ export interface ConfigContextValue {
   error: string | null;
   refreshConfig: () => Promise<void>;
   updateConfig: (updates: Partial<AppConfig>) => Promise<boolean>;
+  setParamMaster: (paramMaster: any, cashCustomerCode?: string) => Promise<void>;
   resetToDefaults: () => Promise<boolean>;
   isEnabled: (key: keyof AppConfig) => boolean;
   getNum: (key: keyof AppConfig, fallback?: number) => number;
+  getParam: (key: string, fallback?: any) => any;
+  isParamEnabled: (key: string) => boolean;
 }
 
 export const ConfigContext = createContext<ConfigContextValue>({
@@ -29,9 +32,12 @@ export const ConfigContext = createContext<ConfigContextValue>({
   error: null,
   refreshConfig: async () => {},
   updateConfig: async () => false,
+  setParamMaster: async () => {},
   resetToDefaults: async () => false,
   isEnabled: () => false,
   getNum: () => 0,
+  getParam: () => undefined,
+  isParamEnabled: () => false,
 });
 
 export function useAppConfig(): ConfigContextValue {
