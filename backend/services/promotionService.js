@@ -340,7 +340,9 @@ async function recalculateCartPromotions(pool, cartItems = [], locationCode = 'H
     const rawNormalPrice = it.normalPrice !== undefined ? it.normalPrice : (it.NormalPrice !== undefined ? it.NormalPrice : rawPrice);
     const normalPrice = Number(rawNormalPrice) || 0;
     const manualDiscount = Number(it.manualDisc !== undefined ? it.manualDisc : (it.ManualDisc || 0)); // Preserves user manual discount
-    const currentQty = Number(it.qty !== undefined ? it.qty : (it.Qty !== undefined ? it.Qty : 1)) || 1;
+    const rawQty = it.qty !== undefined ? it.qty : (it.Qty !== undefined ? it.Qty : 1);
+    const parsedQty = Number(rawQty);
+    const currentQty = !isNaN(parsedQty) && parsedQty !== 0 ? parsedQty : 1;
     const cleanCode = String(it.code || it.InventoryCode || it.inventoryCode || '').trim().toUpperCase();
 
     return {
@@ -537,11 +539,11 @@ async function recalculateCartPromotions(pool, cartItems = [], locationCode = 'H
   // STEP 6: Final Line Totals & Tax Calculation
   // ----------------------------------------------------------------------------
   const finalResult = calculatedItems.map((it) => {
-    const totalLineDiscount = parseFloat(
-      (it.manualDisc + it.promoDisc + it.pairDisc).toFixed(2)
-    );
+    const totalLineDiscount = it.qty < 0 
+      ? 0 
+      : parseFloat((it.manualDisc + it.promoDisc + it.pairDisc).toFixed(2));
     const lineTotal = parseFloat((it.qty * it.price - totalLineDiscount).toFixed(2));
-    const safeAmount = Math.max(0, lineTotal);
+    const safeAmount = it.qty < 0 ? lineTotal : Math.max(0, lineTotal);
 
     // GST calculation (Tax inclusive format matching frmPos1)
     const gstPerc = it.gstPrec || 0;

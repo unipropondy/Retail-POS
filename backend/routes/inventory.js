@@ -544,7 +544,8 @@ router.post('/direct-sku', async (req, res) => {
       return res.status(400).json({ success: false, message: 'TerminalCode is required.' });
     }
 
-    const qtyNum = Number(qty) > 0 ? Number(qty) : 1;
+    const parsedQty = Number(qty);
+    const qtyNum = !isNaN(parsedQty) && parsedQty !== 0 ? parsedQty : 1;
     const discNum = Number(disc) >= 0 ? Number(disc) : 0;
 
     // Step 2: Check tblInventory strictly matching InventoryCode
@@ -653,14 +654,18 @@ router.post('/direct-sku', async (req, res) => {
     const lineDesc = String(item.Description || '').trim();
     const effectivePromoName = invCode;
 
-    // Check if this exact item already exists in tblTempSales for this terminal
+    // Check if item with matching sign already exists in tblTempSales for this terminal
+    // (Positive purchases merge together; negative exchange items merge together or stay distinct)
     const checkReq = pool.request();
     checkReq.input('term', sql.VarChar(20), termCode);
     checkReq.input('code', sql.VarChar(50), invCode);
+    checkReq.input('isNegative', sql.Bit, qtyNum < 0 ? 1 : 0);
     const existing = await checkReq.query(`
       SELECT TOP 1 TempID, Qty, Discount, Price, NetDiscount
       FROM tblTempSales
-      WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
+      WHERE RTRIM(LTRIM(TerminalCode)) = @term 
+        AND RTRIM(LTRIM(InventoryCode)) = @code
+        AND ((@isNegative = 1 AND Qty < 0) OR (@isNegative = 0 AND Qty > 0))
       ORDER BY TempID DESC
     `);
 

@@ -43,6 +43,8 @@ import ClearAdminAuthModal from "../components/ClearAdminAuthModal";
 import SearchModal, { SearchResultItem } from "../components/SearchModal";
 import ViewBillModal from "../components/ViewBillModal";
 import VoidBillModal from "../components/VoidBillModal";
+import TotalSalesModal from "../components/TotalSalesModal";
+import MemberModal from "../components/MemberModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -501,6 +503,9 @@ export default function PosBillingScreen({
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
   const [showViewBillModal, setShowViewBillModal] = useState<boolean>(false);
   const [showVoidBillModal, setShowVoidBillModal] = useState<boolean>(false);
+  const [showTotalSalesModal, setShowTotalSalesModal] = useState<boolean>(false);
+  const [showMemberManagementModal, setShowMemberManagementModal] = useState<boolean>(false);
+  const [isExchangeMode, setIsExchangeMode] = useState<boolean>(false);
 
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
@@ -813,11 +818,12 @@ export default function PosBillingScreen({
       return;
     }
 
-    const qtyToAdd = explicitQty !== undefined 
+    const rawQtyToAdd = explicitQty !== undefined 
       ? explicitQty 
-      : (isManualFastQtyEnteredRef.current ? (parseFloat(fastQty) || 1) : 1);
+      : (isManualFastQtyEnteredRef.current ? (parseFloat(fastQty) || 1) : (isExchangeMode ? -1 : 1));
+    const qtyToAdd = isExchangeMode ? -Math.abs(rawQtyToAdd) : rawQtyToAdd;
     isManualFastQtyEnteredRef.current = false;
-    const discToAdd = parseFloat(fastDisc) || 0;
+    const discToAdd = isExchangeMode ? 0 : (parseFloat(fastDisc) || 0);
     const finalPrice = explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
     const finalDesc = explicitDesc || item.Description;
     const finalSalesman = explicitSalesman || salesMan || effectiveLocation;
@@ -917,10 +923,13 @@ export default function PosBillingScreen({
     });
 
     setCart((prev) => {
-      // Find existing item from the end (latest line)
+      // Find existing item from the end (latest line) with matching sign
       let existingIdx = -1;
       for (let i = prev.length - 1; i >= 0; i--) {
-        if (prev[i].code === item.InventoryCode) {
+        if (
+          prev[i].code === item.InventoryCode &&
+          ((qtyToAdd < 0 && prev[i].qty < 0) || (qtyToAdd > 0 && prev[i].qty > 0))
+        ) {
           existingIdx = i;
           break;
         }
@@ -992,10 +1001,11 @@ export default function PosBillingScreen({
         .catch(() => {});
     } catch {}
 
-    // Reset top item-entry fields back to default for the next item
+    // Reset top item-entry fields and clear exchange mode (VB.NET subClearDetail)
     setSkuCode("");
     setSkuDesc("");
     setShowDescDropdown(false);
+    setIsExchangeMode(false);
     setFastQty("1");
     setFastPrice("0.00");
     setFastDisc("0.00");
@@ -1003,7 +1013,20 @@ export default function PosBillingScreen({
   };
 
   
-  // Commits price for pending zero-price item and adds it to cart
+  // VB.NET subActivateExchange() - Initiates Exchange Mode (-1 qty)
+  const triggerExchangeMode = () => {
+    setShowMoreMenuModal(false);
+    showAlert(
+      "F9 Exchange",
+      "Exchange mode initiated. Scan or select the item to exchange.",
+      "info",
+      () => {
+        setIsExchangeMode(true);
+        setFastQty("-1");
+        skuInputRef.current?.focus();
+      }
+    );
+  };
   const handleFastPriceCommit = async (enteredPriceStr: string) => {
     if (isCommittingPriceRef.current) return;
     const enteredPrice = parseFloat(enteredPriceStr);
@@ -1512,6 +1535,7 @@ export default function PosBillingScreen({
     });
     setSkuCode("");
     setSkuDesc("");
+    setIsExchangeMode(false);
     setFastQty("1");
     setFastDisc("0.00");
     setSelectedPayMode("CASH");
@@ -2198,10 +2222,11 @@ export default function PosBillingScreen({
         setSalesMan(data.salesman);
       }
 
-      // Reset SKU input and reset fast inputs
+      // Reset SKU input and reset fast inputs (VB.NET subClearDetail)
       setSkuCode("");
       setSkuDesc("");
       setShowDescDropdown(false);
+      setIsExchangeMode(false);
       setFastQty("1");
       setFastPrice("0.00");
       setFastDisc("0.00");
@@ -2437,6 +2462,7 @@ export default function PosBillingScreen({
     handleHoldBill,
     handleReleaseBill,
     handlePriceChangeClick,
+    triggerExchangeMode,
     onLogout,
     handleDeleteItem,
     processDirectSkuCode,
@@ -2451,6 +2477,7 @@ export default function PosBillingScreen({
       handleHoldBill,
       handleReleaseBill,
       handlePriceChangeClick,
+      triggerExchangeMode,
       onLogout,
       handleDeleteItem,
       processDirectSkuCode,
@@ -2491,6 +2518,11 @@ export default function PosBillingScreen({
         e.preventDefault();
         e.stopPropagation();
         keyboardActionsRef.current.handleReleaseBill();
+      } else if (key === "F9" || code === "F9") {
+        // VB.NET F9: Activate Exchange Mode
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.triggerExchangeMode();
       } else if (key === "F10" || code === "F10") {
         e.preventDefault();
         e.stopPropagation();
@@ -2721,11 +2753,22 @@ export default function PosBillingScreen({
         <TouchableOpacity
           activeOpacity={1}
           onPress={() => fastQtyInputRef.current?.focus()}
-          style={[styles.pillInputBox, isScaleLockedQty && { backgroundColor: "#f1f5f9", opacity: 0.7 }]}
+          style={[
+            styles.pillInputBox,
+            isScaleLockedQty && { backgroundColor: "#f1f5f9", opacity: 0.7 },
+            isExchangeMode && {
+              backgroundColor: "#fee2e2",
+              borderColor: "#ef4444",
+              borderWidth: 2,
+            },
+          ]}
         >
           <TextInput
             ref={fastQtyInputRef}
-            style={styles.pillInput}
+            style={[
+              styles.pillInput,
+              isExchangeMode && { color: "#b91c1c", fontWeight: "900" },
+            ]}
             value={fastQty}
             editable={!isScaleLockedQty}
             onChangeText={(txt) => {
@@ -4567,6 +4610,26 @@ export default function PosBillingScreen({
         }}
       />
 
+      {/* Total Sales Modal (VB.NET frmTotalSales.vb) */}
+      <TotalSalesModal
+        visible={showTotalSalesModal}
+        onClose={() => setShowTotalSalesModal(false)}
+        apiUrl={API_URL}
+        terminalCode={(terminalCode || "").trim()}
+        theme={currentTheme}
+        primaryColor={currentTheme?.primary || "#7A1C30"}
+      />
+
+      {/* Member Management Modal (VB.NET frmMember.vb) */}
+      <MemberModal
+        visible={showMemberManagementModal}
+        onClose={() => setShowMemberManagementModal(false)}
+        initialMemberCode=""
+        onMemberSaved={(savedCode, savedName) => {
+          showAlert("Member Saved", `Member ${savedName} (${savedCode}) saved successfully.`, "success");
+        }}
+      />
+
       {/* Theme & Typography Customizer Modal */}
       <ThemeModal
         visible={showThemeModal}
@@ -4665,11 +4728,8 @@ export default function PosBillingScreen({
 
                 {/* F9 Exchange */}
                 <TouchableOpacity
-                  style={styles.menuGridTile}
-                  onPress={() => {
-                    setShowMoreMenuModal(false);
-                    showAlert("F9 Exchange", "Exchange mode initiated. Scan or select the item to exchange.", "info");
-                  }}
+                  style={[styles.menuGridTile, isExchangeMode && styles.menuGridTileActiveBorder]}
+                  onPress={triggerExchangeMode}
                   activeOpacity={0.8}
                 >
                   <Text style={styles.menuGridTileKey}>F9</Text>
@@ -4681,11 +4741,7 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    showAlert(
-                      "Total Sales Summary",
-                      `Terminal: ${terminalCode || "1"}\nTotal Active Bills: ${heldBills.length + (cart.length > 0 ? 1 : 0)}\nCurrent Cart Total: $${grandTotal.toFixed(2)}`,
-                      "info"
-                    );
+                    setShowTotalSalesModal(true);
                   }}
                   activeOpacity={0.8}
                 >
@@ -4945,7 +5001,7 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    showAlert("F8 Member", "Scan or enter customer membership card number / phone number.", "info");
+                    setShowMemberManagementModal(true);
                   }}
                   activeOpacity={0.8}
                 >

@@ -106,6 +106,10 @@ app.use("/api/bills", billRoutes);
 const memberRoutes = require("./routes/memberRoutes");
 app.use("/api/members", memberRoutes);
 
+// Mount Total Sales routes (frmTotalSales.vb & clsPaymode.vb GetTotalSales)
+const totalSalesRoutes = require("./routes/totalSalesRoutes");
+app.use("/api/total-sales", totalSalesRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

@@ -165,14 +165,17 @@ router.post('/temp-sales/add', async (req, res) => {
     const item = itemRes.recordset[0];
     const unitPrice = overridePrice !== undefined ? Number(overridePrice) : Number(item.SellingPrice);
 
-    // 2. Check if this exact item is already in tblTempSales for this terminal
+    // 2. Check if item with matching sign already exists in tblTempSales for this terminal
     const checkReq = pool.request();
     checkReq.input('term', sql.VarChar(20), termCode);
     checkReq.input('code', sql.VarChar(50), invCode);
+    checkReq.input('isNegative', sql.Bit, qtyNum < 0 ? 1 : 0);
     const existing = await checkReq.query(`
       SELECT TOP 1 TempID, Qty, Discount, Price, NetDiscount
       FROM tblTempSales
-      WHERE RTRIM(LTRIM(TerminalCode)) = @term AND RTRIM(LTRIM(InventoryCode)) = @code
+      WHERE RTRIM(LTRIM(TerminalCode)) = @term 
+        AND RTRIM(LTRIM(InventoryCode)) = @code
+        AND ((@isNegative = 1 AND Qty < 0) OR (@isNegative = 0 AND Qty > 0))
       ORDER BY TempID DESC
     `);
 
@@ -408,8 +411,8 @@ router.post('/temp-sales/update-qty', async (req, res) => {
       ? Number(exactQty)
       : Number(row.Qty) + Number(delta || 0);
 
-    if (nextQty <= 0) {
-      // Remove item if qty drops to 0 or less
+    if (nextQty === 0) {
+      // Remove item if qty drops to 0
       const delReq = pool.request();
       delReq.input('tempId', sql.Int, row.TempID);
       await delReq.query(`DELETE FROM tblTempSales WHERE TempID = @tempId`);
@@ -419,7 +422,9 @@ router.post('/temp-sales/update-qty', async (req, res) => {
     const itemPrice = Number(row.Price) || 0;
     const itemDisc = Number(row.Discount) || 0;
     const itemGstPrec = Number(row.GstPrec) || 0;
-    const baseAmount = Math.max(0, parseFloat((nextQty * itemPrice - itemDisc).toFixed(2)));
+    const baseAmount = nextQty < 0 
+      ? parseFloat((nextQty * itemPrice - itemDisc).toFixed(2))
+      : Math.max(0, parseFloat((nextQty * itemPrice - itemDisc).toFixed(2)));
     const baseGst = itemGstPrec > 0 ? parseFloat(((baseAmount * itemGstPrec) / (100 + itemGstPrec)).toFixed(2)) : 0;
 
     const upReq = pool.request();
@@ -1070,7 +1075,9 @@ router.post('/checkout', async (req, res) => {
         const priceNum = Number(it.price) || 0;
         const totalValue = parseFloat((qtyNum * priceNum).toFixed(2));
         const discNum = Number(it.disc) || 0;
-        const netAmount = Math.max(0, parseFloat((totalValue - discNum).toFixed(2)));
+        const netAmount = qtyNum < 0 
+          ? parseFloat((totalValue - discNum).toFixed(2))
+          : Math.max(0, parseFloat((totalValue - discNum).toFixed(2)));
         const gstPrec = Number(it.gstPrec) || 0;
         const gst = gstPrec > 0 ? parseFloat(((netAmount * gstPrec) / (100 + gstPrec)).toFixed(2)) : 0;
         const actualSales = parseFloat((netAmount - gst).toFixed(2));
