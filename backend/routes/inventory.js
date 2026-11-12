@@ -75,12 +75,20 @@ router.get('/touch-items', async (req, res) => {
       });
     }
 
-    const { groupCode, locationCode, terminalCode } = req.query;
+    const { groupCode, locationCode, terminalCode, maxData } = req.query;
     const loc = await getDbLocationCode(pool, terminalCode, locationCode);
-    const maxItems = configService.getNumber('itemListMaxData', 40);
+    const parsedMaxData = maxData ? parseInt(maxData, 10) : NaN;
+    // If maxData is explicitly passed as 0 or 'all', do not limit. Otherwise use parsed or App.config setting.
+    const maxItems = (!isNaN(parsedMaxData) && parsedMaxData > 0)
+      ? parsedMaxData
+      : (maxData === '0' || maxData === 'all')
+        ? null
+        : configService.getNumber('itemListMaxData', 0);
+
+    const topClause = (maxItems && maxItems > 0) ? `TOP (${maxItems})` : '';
 
     let query = `
-      SELECT TOP (${maxItems})
+      SELECT ${topClause}
         RTRIM(LTRIM(ts.GroupCode)) AS GroupCode,
         RTRIM(LTRIM(ts.InventoryCode)) AS InventoryCode,
         ts.SortOrder,

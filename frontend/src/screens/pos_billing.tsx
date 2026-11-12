@@ -656,6 +656,8 @@ export default function PosBillingScreen({
       if (activeTerm) queryParams.push(`terminalCode=${encodeURIComponent(activeTerm)}`);
       if (loc) queryParams.push(`locationCode=${encodeURIComponent(loc)}`);
       if (groupCode) queryParams.push(`groupCode=${encodeURIComponent(groupCode)}`);
+      // Fetch all available category items so multi-page pagination (Page 1, 2, ...) can display all items
+      queryParams.push(`maxData=0`);
 
       const url = `${API_URL}/api/inventory/touch-items${queryParams.length > 0 ? `?${queryParams.join("&")}` : ""}`;
       const res = await fetch(url);
@@ -671,6 +673,13 @@ export default function PosBillingScreen({
       setLoadingItems(false);
     }
   };
+
+  // Re-fetch touch items when the Item List Max Data configuration changes dynamically
+  useEffect(() => {
+    if (selectedGroup) {
+      fetchTouchItems(selectedGroup);
+    }
+  }, [config.itemListMaxData]);
 
   const handleSelectGroup = (groupCode: string) => {
     setSelectedGroup(groupCode);
@@ -727,19 +736,31 @@ export default function PosBillingScreen({
     }
   }, [groupPageIndex, totalGroupPages]);
 
-  // Item pagination (3x3 grid = exactly 9 items per page, zero scrolling)
+  // Item pagination controlled dynamically by General Settings (itemListMaxData)
+  // If itemListMaxData is configured to 20, 40, etc., itemsPerPage dynamically matches itemListMaxData.
   const [itemPageIndex, setItemPageIndex] = useState<number>(0);
-  const ITEMS_PER_PAGE = 9;
+  const itemsPerPage = useMemo(() => {
+    const configuredLimit = getNum("itemListMaxData", 20);
+    return configuredLimit > 0 ? configuredLimit : 20;
+  }, [config.itemListMaxData]);
+
   const totalItemPages = Math.max(
     1,
-    Math.ceil(filteredProducts.length / ITEMS_PER_PAGE),
+    Math.ceil(filteredProducts.length / itemsPerPage),
   );
   const visibleProducts = useMemo(() => {
     return filteredProducts.slice(
-      itemPageIndex * ITEMS_PER_PAGE,
-      (itemPageIndex + 1) * ITEMS_PER_PAGE,
+      itemPageIndex * itemsPerPage,
+      (itemPageIndex + 1) * itemsPerPage,
     );
-  }, [filteredProducts, itemPageIndex]);
+  }, [filteredProducts, itemPageIndex, itemsPerPage]);
+
+  // Keep itemPageIndex within valid range when itemsPerPage or filteredProducts change
+  useEffect(() => {
+    if (itemPageIndex >= totalItemPages) {
+      setItemPageIndex(Math.max(0, totalItemPages - 1));
+    }
+  }, [itemPageIndex, totalItemPages]);
 
   // Reset itemPageIndex to 0 whenever category changes
   useEffect(() => {
@@ -3929,7 +3950,7 @@ export default function PosBillingScreen({
                       PAGE {itemPageIndex + 1} / {totalItemPages}
                     </Text>
                     <Text style={styles.itemNavCountText}>
-                      ({filteredProducts.length} Items)
+                      ({visibleProducts.length} Items)
                     </Text>
                   </View>
 
