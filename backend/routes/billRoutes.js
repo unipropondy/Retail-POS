@@ -17,7 +17,11 @@
 
 const express = require('express');
 const router = express.Router();
+const dns = require('dns');
+const http = require('http');
+const https = require('https');
 const { getPool, sql } = require('../config/db');
+const configService = require('../config/configService');
 
 // Helper to format date as YYYY-MM-DD
 function formatDate(d) {
@@ -25,6 +29,241 @@ function formatDate(d) {
   const date = new Date(d);
   if (isNaN(date.getTime())) return '';
   return date.toISOString().split('T')[0];
+}
+
+// ------------------------------------------------------------------------------
+// Helper: Check Network Availability matching IsNetworkConnected() in VB.NET
+// ------------------------------------------------------------------------------
+async function checkNetworkAvailability() {
+  return new Promise((resolve) => {
+    dns.lookup('google.com', (err) => {
+      if (!err) return resolve(true);
+      // Fallback ping check to standard DNS
+      dns.lookup('8.8.8.8', (err2) => {
+        resolve(!err2);
+      });
+    });
+  });
+}
+
+// ------------------------------------------------------------------------------
+// Helper: Background API Data Sync matching SubBillCancelDataSyncPOSSales()
+// Runs strictly after transaction commit and checks APIEnable & network.
+// ------------------------------------------------------------------------------
+async function runBillCancelDataSync(pool) {
+  try {
+    const isApiEnabled = configService.getBoolean('APIEnable', false);
+    if (!isApiEnabled) {
+      console.log('ℹ️ [DATA SYNC] API DataSync disabled (APIEnable = 0/false).');
+      return;
+    }
+
+    const isConnected = await checkNetworkAvailability();
+    if (!isConnected) {
+      console.warn('⚠️ [DATA SYNC] Network unavailable. Skipping BillCancel sync.');
+      return;
+    }
+
+    const syncUrl = configService.getString('DataSyncURL', '') || configService.getString('WebURL', '');
+    if (!syncUrl) {
+      console.warn('⚠️ [DATA SYNC] DataSyncURL not configured.');
+      return;
+    }
+
+    // 1. Fetch pending BillCancel headers
+    const hdrRes = await pool.request().query(`
+      SELECT TOP 20
+        RTRIM(LTRIM(BillCancelNo)) AS BillCancelNo,
+        RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
+        InvoiceDate,
+        TotalValue,
+        Gst,
+        DetailDiscount,
+        NetDiscountAmount,
+        TotalDiscount,
+        RTRIM(LTRIM(ISNULL(DiscountType, ''))) AS DiscountType,
+        NetTotal,
+        RTRIM(LTRIM(ISNULL(CashierID, ''))) AS CashierID,
+        RTRIM(LTRIM(ISNULL(LocationCode, ''))) AS LocationCode,
+        RTRIM(LTRIM(ISNULL(TerminalCode, ''))) AS TerminalCode,
+        TotalLines,
+        TenderAmount,
+        Balance,
+        RTRIM(LTRIM(ISNULL(SalesType, ''))) AS SalesType,
+        RTRIM(LTRIM(ISNULL(CustomerCode, ''))) AS CustomerCode,
+        RTRIM(LTRIM(ISNULL(CustomerName, ''))) AS CustomerName,
+        RTRIM(LTRIM(ISNULL(Address1, ''))) AS Address1,
+        RTRIM(LTRIM(ISNULL(Address2, ''))) AS Address2,
+        RTRIM(LTRIM(ISNULL(Address3, ''))) AS Address3,
+        RTRIM(LTRIM(ISNULL(Phone, ''))) AS Phone,
+        RTRIM(LTRIM(ISNULL(Fax, ''))) AS Fax,
+        MemberDiscount,
+        RTRIM(LTRIM(ISNULL(GstType, ''))) AS GstType,
+        RTRIM(LTRIM(ISNULL(CreateUser, ''))) AS CreateUser,
+        CreateDate,
+        RTRIM(LTRIM(ISNULL(ModifyUser, ''))) AS ModifyUser,
+        ModifyDate
+      FROM tblPOSBillCancelSalesHeader
+      ORDER BY ModifyDate DESC
+    `);
+
+    if (hdrRes.recordset.length === 0) return;
+
+    const billCancelHeaders = [];
+    for (const h of hdrRes.recordset) {
+      const detRes = await pool.request()
+        .input('cNo', sql.VarChar(50), h.BillCancelNo)
+        .query(`
+          SELECT 
+            RTRIM(LTRIM(BillCancelNo)) AS ReturnNo,
+            RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
+            RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+            RTRIM(LTRIM(Description)) AS Description,
+            Qty,
+            Price,
+            TotalValue,
+            Discount,
+            NetDiscount,
+            NetAmount,
+            ActualSales,
+            Gst,
+            RTRIM(LTRIM(ISNULL(SalesManId, ''))) AS SalesManId,
+            RTRIM(LTRIM(ISNULL(DeptCode, ''))) AS DeptCode,
+            RTRIM(LTRIM(ISNULL(CategoryCode, ''))) AS CategoryCode,
+            RTRIM(LTRIM(ISNULL(BrandCode, ''))) AS BrandCode,
+            AverageCost,
+            MemberDiscount,
+            RTRIM(LTRIM(ISNULL(LocationCode, ''))) AS LocationCode,
+            UnitCost,
+            RetailPrice AS SellingPrice,
+            RTRIM(LTRIM(ISNULL(CreateUser, ''))) AS CreateUser,
+            CreateDate,
+            RTRIM(LTRIM(ISNULL(ModifyUser, ''))) AS ModifyUser,
+            ModifyDate,
+            RTRIM(LTRIM(ISNULL(TaxPerc, ''))) AS TaxPerc,
+            RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks,
+            RTRIM(LTRIM(ISNULL(unid, ''))) AS unid
+          FROM tblPOSBillCancelSalesDetail
+          WHERE RTRIM(LTRIM(BillCancelNo)) = @cNo
+        `);
+
+      billCancelHeaders.push({
+        ReturnNo: h.BillCancelNo,
+        InvoiceNo: h.InvoiceNo,
+        InvoiceDate: new Date(h.InvoiceDate).toISOString(),
+        TotalValue: h.TotalValue,
+        Gst: h.Gst,
+        DetailDiscount: h.DetailDiscount,
+        NetDiscount: h.NetDiscountAmount,
+        Discount: h.TotalDiscount,
+        DiscountType: h.DiscountType,
+        NetTotal: h.NetTotal,
+        CashierID: h.CashierID,
+        LocationCode: h.LocationCode,
+        TerminalCode: h.TerminalCode,
+        TotalLines: h.TotalLines,
+        TenderAmount: h.TenderAmount,
+        Balance: h.Balance,
+        SalesType: h.SalesType,
+        CustomerCode: h.CustomerCode,
+        CustomerName: h.CustomerName,
+        Address1: h.Address1,
+        Address2: h.Address2,
+        Address3: h.Address3,
+        Phone: h.Phone,
+        Fax: h.Fax,
+        MemberDiscount: h.MemberDiscount,
+        GstType: h.GstType,
+        PaidStatus: '',
+        ChequeNo: '',
+        CreateUser: h.CreateUser,
+        CreateDate: new Date(h.CreateDate).toISOString(),
+        ModifyUser: h.ModifyUser,
+        ModifyDate: new Date(h.ModifyDate).toISOString(),
+        billCancelDetails: detRes.recordset.map(d => ({
+          ...d,
+          CreateDate: d.CreateDate ? new Date(d.CreateDate).toISOString() : null,
+          ModifyDate: d.ModifyDate ? new Date(d.ModifyDate).toISOString() : null,
+        })),
+      });
+    }
+
+    // 2. Fetch Sales History for sync
+    const hisRes = await pool.request().query(`
+      SELECT TOP 50
+        RTRIM(LTRIM(LocationCode)) AS LocationCode,
+        RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+        SalesDate AS [Date],
+        QtySold,
+        SalesValue,
+        Discount,
+        Gst,
+        NetAmount,
+        RTRIM(LTRIM(Type)) AS Type,
+        Cost,
+        RTRIM(LTRIM(ISNULL(ModifyUser, ''))) AS ModifyUser,
+        ModifyDate
+      FROM tblPOSSalesHistoryCur
+      ORDER BY ModifyDate DESC
+    `);
+
+    const salesHistorys = hisRes.recordset.map(sh => ({
+      ...sh,
+      Date: sh.Date ? new Date(sh.Date).toISOString() : null,
+      ModifyDate: sh.ModifyDate ? new Date(sh.ModifyDate).toISOString() : null,
+    }));
+
+    const payload = {
+      billCancelHeaders,
+      salesHistorys,
+    };
+
+    const targetUrl = syncUrl.endsWith('/') ? `${syncUrl}BillCancel` : `${syncUrl}/BillCancel`;
+    const postData = JSON.stringify(payload);
+    const parsedUrl = new URL(targetUrl);
+    const client = parsedUrl.protocol === 'https:' ? https : http;
+
+    const syncReq = client.request(parsedUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+      timeout: 10000,
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', async () => {
+        try {
+          const jsonRes = JSON.parse(data);
+          const firstResult = jsonRes?.Table?.result?.[0] || jsonRes?.result?.[0];
+          if (firstResult && firstResult.status === 'Success') {
+            const lastDate = firstResult.lastUpdateDate || new Date();
+            await pool.request()
+              .input('lastDate', sql.DateTime, new Date(lastDate))
+              .query(`
+                IF EXISTS (SELECT 1 FROM tblLastSyncDateTime WHERE [Function] = 'BillCancel')
+                  UPDATE tblLastSyncDateTime SET LastRunDateTime = @lastDate, NextSyncDateTime = DATEADD(hour, 4, @lastDate) WHERE [Function] = 'BillCancel'
+                ELSE
+                  INSERT INTO tblLastSyncDateTime ([Function], LastRunDateTime, NextSyncDateTime) VALUES ('BillCancel', @lastDate, DATEADD(hour, 4, @lastDate))
+              `);
+            console.log('✅ [DATA SYNC] BillCancel sync completed successfully.');
+          }
+        } catch (e) {
+          console.warn('⚠️ [DATA SYNC - RESPONSE PARSE]:', e.message);
+        }
+      });
+    });
+
+    syncReq.on('error', (err) => {
+      console.warn('⚠️ [DATA SYNC - REQUEST ERROR]:', err.message);
+    });
+
+    syncReq.write(postData);
+    syncReq.end();
+  } catch (syncErr) {
+    console.warn('⚠️ [DATA SYNC - BILL CANCEL ERROR]:', syncErr.message);
+  }
 }
 
 // ------------------------------------------------------------------------------
@@ -261,11 +500,122 @@ router.get('/search-members', async (req, res) => {
 });
 
 // ------------------------------------------------------------------------------
+// 3.5. GET /api/bills/void-receipt/:invoiceNo
+// Retrieves voided/cancelled bill receipt data matching subPrintVoidBill &
+// rptPOSBillCancelReceipt_ERP from tblPOSBillCancelSalesHeader/Detail/PayMode
+// ------------------------------------------------------------------------------
+router.get('/void-receipt/:invoiceNo', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+
+    const rawInv = String(req.params.invoiceNo || '').trim();
+    if (!rawInv) {
+      return res.status(400).json({ success: false, message: 'Invoice number is required' });
+    }
+
+    const hdrReq = pool.request();
+    hdrReq.input('inv', sql.VarChar(50), rawInv);
+    const hdrRes = await hdrReq.query(`
+      SELECT TOP 1
+        RTRIM(LTRIM(BillCancelNo)) AS BillCancelNo,
+        RTRIM(LTRIM(ISNULL(BillCancelledBy, ''))) AS BillCancelledBy,
+        RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
+        InvoiceDate,
+        ISNULL(TotalValue, 0) AS TotalValue,
+        ISNULL(NetTotal, 0) AS NetTotal,
+        ISNULL(Gst, 0) AS Gst,
+        RTRIM(LTRIM(ISNULL(CashierID, ''))) AS CashierID,
+        RTRIM(LTRIM(ISNULL(LocationCode, ''))) AS LocationCode,
+        RTRIM(LTRIM(ISNULL(TerminalCode, ''))) AS TerminalCode,
+        ISNULL(TotalLines, 0) AS TotalLines,
+        ISNULL(TenderAmount, 0) AS TenderAmount,
+        ISNULL(Balance, 0) AS Balance,
+        RTRIM(LTRIM(ISNULL(SalesType, ''))) AS SalesType,
+        RTRIM(LTRIM(ISNULL(CustomerCode, 'CASH'))) AS CustomerCode,
+        RTRIM(LTRIM(ISNULL(CustomerName, 'CASH'))) AS CustomerName,
+        ISNULL(TotalDiscount, 0) AS TotalDiscount,
+        ISNULL(DetailDiscount, 0) AS DetailDiscount,
+        ISNULL(NetDiscountAmount, 0) AS NetDiscountAmount,
+        ISNULL(MemberDiscount, 0) AS MemberDiscount,
+        ISNULL(RoundOff, 0) AS RoundOff,
+        RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks,
+        CreateDate,
+        ModifyDate
+      FROM tblPOSBillCancelSalesHeader
+      WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+      ORDER BY ModifyDate DESC
+    `);
+
+    if (hdrRes.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Void bill receipt record for invoice ${rawInv} not found.`,
+      });
+    }
+
+    const header = hdrRes.recordset[0];
+    const cancelNo = header.BillCancelNo;
+
+    const detReq = pool.request();
+    detReq.input('inv', sql.VarChar(50), rawInv);
+    detReq.input('cNo', sql.VarChar(50), cancelNo);
+    const detRes = await detReq.query(`
+      SELECT 
+        RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+        RTRIM(LTRIM(Description)) AS Description,
+        ISNULL(Qty, 0) AS Qty,
+        ISNULL(Price, 0) AS Price,
+        ISNULL(TotalValue, 0) AS TotalValue,
+        ISNULL(SubTotal, 0) AS SubTotal,
+        ISNULL(Discount, 0) AS Discount,
+        ISNULL(NetDiscount, 0) AS NetDiscount,
+        ISNULL(NetAmount, 0) AS NetAmount,
+        ISNULL(ActualSales, 0) AS ActualSales,
+        ISNULL(Gst, 0) AS Gst,
+        RTRIM(LTRIM(ISNULL(SalesManId, ''))) AS SalesManId,
+        RTRIM(LTRIM(ISNULL(DeptCode, ''))) AS DeptCode,
+        RTRIM(LTRIM(ISNULL(CategoryCode, ''))) AS CategoryCode,
+        RTRIM(LTRIM(ISNULL(BrandCode, ''))) AS BrandCode,
+        ISNULL(RetailPrice, 0) AS RetailPrice,
+        ISNULL(TaxPerc, 0) AS TaxPerc
+      FROM tblPOSBillCancelSalesDetail
+      WHERE RTRIM(LTRIM(InvoiceNo)) = @inv AND (RTRIM(LTRIM(BillCancelNo)) = @cNo OR @cNo = '')
+      ORDER BY InventoryCode ASC
+    `);
+
+    const payReq = pool.request();
+    payReq.input('inv', sql.VarChar(50), rawInv);
+    payReq.input('cNo', sql.VarChar(50), cancelNo);
+    const payRes = await payReq.query(`
+      SELECT 
+        RTRIM(LTRIM(PayMode)) AS PayMode,
+        ISNULL(Amount, 0) AS Amount,
+        ISNULL(Commision, 0) AS Commision,
+        RTRIM(LTRIM(ISNULL(SlipNo, ''))) AS SlipNo
+      FROM tblPOSBillCancelPayModeDetail
+      WHERE RTRIM(LTRIM(InvoiceNo)) = @inv AND (RTRIM(LTRIM(BillCancelNo)) = @cNo OR @cNo = '')
+    `);
+
+    return res.status(200).json({
+      success: true,
+      header,
+      items: detRes.recordset,
+      payments: payRes.recordset,
+    });
+  } catch (err) {
+    console.error('❌ [BILL ERROR - VOID RECEIPT]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ------------------------------------------------------------------------------
 // 4. GET /api/bills/:invoiceNo
 // Retrieves complete Bill details:
-//   - Header from vw_POS_SalesHeader
-//   - Items from vwSalesDetail
-//   - Payments from vw_POS_PayModeDetail
+//   - Checks tblPOSSalesHeaderCur first (today's active session for void/return)
+//   - Falls back to vw_POS_SalesHeader for historical view
+//   - Line items from tblPOSSalesDetailCur or vwSalesDetail
+//   - Payments from tblPOSPayModeDetailCur or vw_POS_PayModeDetail
 // ------------------------------------------------------------------------------
 router.get('/:invoiceNo', async (req, res) => {
   try {
@@ -277,10 +627,10 @@ router.get('/:invoiceNo', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invoice number is required' });
     }
 
-    // 1. Fetch Header from vw_POS_SalesHeader
-    const hdrReq = pool.request();
-    hdrReq.input('inv', sql.VarChar(50), rawInv);
-    const hdrRes = await hdrReq.query(`
+    // 1. Fetch Header - First check current ERP active table tblPOSSalesHeaderCur
+    const curHdrReq = pool.request();
+    curHdrReq.input('inv', sql.VarChar(50), rawInv);
+    const curHdrRes = await curHdrReq.query(`
       SELECT TOP 1
         RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
         InvoiceDate,
@@ -305,107 +655,230 @@ router.get('/:invoiceNo', async (req, res) => {
         RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks,
         RTRIM(LTRIM(ISNULL(Delivered, ''))) AS Delivered,
         RTRIM(LTRIM(ISNULL(AccFlag, ''))) AS AccFlag,
+        ShiftNo,
+        1 AS IsCur,
         CreateDate,
         ModifyDate
-      FROM vw_POS_SalesHeader
+      FROM tblPOSSalesHeaderCur
       WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
     `);
 
-    // 2. Fetch Line Items from vwSalesDetail
-    const detReq = pool.request();
-    detReq.input('inv', sql.VarChar(50), rawInv);
-    const detRes = await detReq.query(`
-      SELECT 
-        RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
-        RTRIM(LTRIM(Description)) AS Description,
-        ISNULL(Qty, 0) AS Qty,
-        ISNULL(Price, 0) AS Price,
-        ISNULL(TotalValue, 0) AS TotalValue,
-        ISNULL(SUBTOTAL, 0) AS SubTotal,
-        ISNULL(Discount, 0) AS Discount,
-        ISNULL(NetDiscount, 0) AS NetDiscount,
-        ISNULL(NetAmount, 0) AS NetAmount,
-        ISNULL(ActualSales, 0) AS ActualSales,
-        ISNULL(Gst, 0) AS Gst,
-        RTRIM(LTRIM(ISNULL(SalesManId, ''))) AS SalesManId,
-        RTRIM(LTRIM(ISNULL(DeptCode, ''))) AS DeptCode,
-        RTRIM(LTRIM(ISNULL(CategoryCode, ''))) AS CategoryCode,
-        RTRIM(LTRIM(ISNULL(BrandCode, ''))) AS BrandCode,
-        ISNULL(AVERAGECOST, 0) AS AverageCost,
-        ISNULL(MEMBERDISCOUNT, 0) AS MemberDiscount,
-        RTRIM(LTRIM(ISNULL(PRMFlag, 'N'))) AS PRMFlag,
-        ISNULL(Sellingprice, 0) AS SellingPrice
-      FROM vwSalesDetail
-      WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
-      ORDER BY InventoryCode ASC
-    `);
+    let header = null;
+    let isCur = false;
+
+    if (curHdrRes.recordset.length > 0) {
+      header = curHdrRes.recordset[0];
+      isCur = true;
+    } else {
+      // Fallback: check vw_POS_SalesHeader for completed/history sales
+      const hdrReq = pool.request();
+      hdrReq.input('inv', sql.VarChar(50), rawInv);
+      const hdrRes = await hdrReq.query(`
+        SELECT TOP 1
+          RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
+          InvoiceDate,
+          ISNULL(TotalValue, 0) AS TotalValue,
+          ISNULL(NetTotal, 0) AS NetTotal,
+          ISNULL(Gst, 0) AS Gst,
+          RTRIM(LTRIM(ISNULL(CashierID, ''))) AS CashierID,
+          RTRIM(LTRIM(ISNULL(LocationCode, ''))) AS LocationCode,
+          RTRIM(LTRIM(ISNULL(TerminalCode, ''))) AS TerminalCode,
+          ISNULL(TotalLines, 0) AS TotalLines,
+          ISNULL(TenderAmount, 0) AS TenderAmount,
+          ISNULL(Balance, 0) AS Balance,
+          RTRIM(LTRIM(ISNULL(SalesType, ''))) AS SalesType,
+          RTRIM(LTRIM(ISNULL(CustomerCode, 'CASH'))) AS CustomerCode,
+          RTRIM(LTRIM(ISNULL(CustomerName, 'CASH'))) AS CustomerName,
+          ISNULL(TotalDiscount, 0) AS TotalDiscount,
+          RTRIM(LTRIM(ISNULL(Address1, ''))) AS Address1,
+          RTRIM(LTRIM(ISNULL(Phone, ''))) AS Phone,
+          ISNULL(MemberDiscount, 0) AS MemberDiscount,
+          RTRIM(LTRIM(ISNULL(GstType, 'I'))) AS GstType,
+          ISNULL(RoundOff, 0) AS RoundOff,
+          RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks,
+          RTRIM(LTRIM(ISNULL(Delivered, ''))) AS Delivered,
+          RTRIM(LTRIM(ISNULL(AccFlag, ''))) AS AccFlag,
+          ShiftNo,
+          0 AS IsCur,
+          CreateDate,
+          ModifyDate
+        FROM vw_POS_SalesHeader
+        WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+      `);
+
+      if (hdrRes.recordset.length > 0) {
+        header = hdrRes.recordset[0];
+        isCur = false;
+      }
+    }
+
+    // 2. Fetch Line Items
+    let items = [];
+    if (isCur) {
+      const curDetReq = pool.request();
+      curDetReq.input('inv', sql.VarChar(50), rawInv);
+      const curDetRes = await curDetReq.query(`
+        SELECT 
+          RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+          RTRIM(LTRIM(Description)) AS Description,
+          ISNULL(Qty, 0) AS Qty,
+          ISNULL(Price, 0) AS Price,
+          ISNULL(TotalValue, 0) AS TotalValue,
+          ISNULL(SubTotal, 0) AS SubTotal,
+          ISNULL(Discount, 0) AS Discount,
+          ISNULL(NetDiscount, 0) AS NetDiscount,
+          ISNULL(NetAmount, 0) AS NetAmount,
+          ISNULL(ActualSales, 0) AS ActualSales,
+          ISNULL(Gst, 0) AS Gst,
+          RTRIM(LTRIM(ISNULL(SalesManId, ''))) AS SalesManId,
+          RTRIM(LTRIM(ISNULL(DeptCode, ''))) AS DeptCode,
+          RTRIM(LTRIM(ISNULL(CategoryCode, ''))) AS CategoryCode,
+          RTRIM(LTRIM(ISNULL(BrandCode, ''))) AS BrandCode,
+          ISNULL(AverageCost, 0) AS AverageCost,
+          ISNULL(MemberDiscount, 0) AS MemberDiscount,
+          RTRIM(LTRIM(ISNULL(PRMFlag, 'N'))) AS PRMFlag,
+          ISNULL(RetailPrice, 0) AS SellingPrice
+        FROM tblPOSSalesDetailCur
+        WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+        ORDER BY InventoryCode ASC
+      `);
+      items = curDetRes.recordset.map((r) => ({
+        inventoryCode: r.InventoryCode,
+        barcode: r.InventoryCode,
+        description: r.Description,
+        qty: Number(r.Qty),
+        price: Number(r.Price),
+        totalValue: Number(r.TotalValue),
+        subTotal: Number(r.SubTotal),
+        discount: Number(r.Discount),
+        netDiscount: Number(r.NetDiscount),
+        netAmount: Number(r.NetAmount),
+        gst: Number(r.Gst),
+        salesmanId: r.SalesManId,
+        deptCode: r.DeptCode,
+        categoryCode: r.CategoryCode,
+        brandCode: r.BrandCode,
+        prmFlag: r.PRMFlag,
+      }));
+    } else {
+      const detReq = pool.request();
+      detReq.input('inv', sql.VarChar(50), rawInv);
+      const detRes = await detReq.query(`
+        SELECT 
+          RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+          RTRIM(LTRIM(Description)) AS Description,
+          ISNULL(Qty, 0) AS Qty,
+          ISNULL(Price, 0) AS Price,
+          ISNULL(TotalValue, 0) AS TotalValue,
+          ISNULL(SUBTOTAL, 0) AS SubTotal,
+          ISNULL(Discount, 0) AS Discount,
+          ISNULL(NetDiscount, 0) AS NetDiscount,
+          ISNULL(NetAmount, 0) AS NetAmount,
+          ISNULL(ActualSales, 0) AS ActualSales,
+          ISNULL(Gst, 0) AS Gst,
+          RTRIM(LTRIM(ISNULL(SalesManId, ''))) AS SalesManId,
+          RTRIM(LTRIM(ISNULL(DeptCode, ''))) AS DeptCode,
+          RTRIM(LTRIM(ISNULL(CategoryCode, ''))) AS CategoryCode,
+          RTRIM(LTRIM(ISNULL(BrandCode, ''))) AS BrandCode,
+          ISNULL(AVERAGECOST, 0) AS AverageCost,
+          ISNULL(MEMBERDISCOUNT, 0) AS MemberDiscount,
+          RTRIM(LTRIM(ISNULL(PRMFlag, 'N'))) AS PRMFlag,
+          ISNULL(Sellingprice, 0) AS SellingPrice
+        FROM vwSalesDetail
+        WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+        ORDER BY InventoryCode ASC
+      `);
+      items = detRes.recordset.map((r) => ({
+        inventoryCode: r.InventoryCode,
+        barcode: r.InventoryCode,
+        description: r.Description,
+        qty: Number(r.Qty),
+        price: Number(r.Price),
+        totalValue: Number(r.TotalValue),
+        subTotal: Number(r.SubTotal),
+        discount: Number(r.Discount),
+        netDiscount: Number(r.NetDiscount),
+        netAmount: Number(r.NetAmount),
+        gst: Number(r.Gst),
+        salesmanId: r.SalesManId,
+        deptCode: r.DeptCode,
+        categoryCode: r.CategoryCode,
+        brandCode: r.BrandCode,
+        prmFlag: r.PRMFlag,
+      }));
+    }
 
     // 3. Fetch Payment Mode details
-    const payReq = pool.request();
-    payReq.input('inv', sql.VarChar(50), rawInv);
-    const payRes = await payReq.query(`
-      SELECT 
-        RTRIM(LTRIM(PayMode)) AS PayMode,
-        ISNULL(Amount, 0) AS Amount,
-        ISNULL(Commision, 0) AS Commision,
-        RTRIM(LTRIM(ISNULL(SlipNo, ''))) AS SlipNo
-      FROM vw_POS_PayModeDetail
-      WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
-    `);
+    let payModesList = [];
+    if (isCur) {
+      const curPayReq = pool.request();
+      curPayReq.input('inv', sql.VarChar(50), rawInv);
+      const curPayRes = await curPayReq.query(`
+        SELECT 
+          RTRIM(LTRIM(PayMode)) AS PayMode,
+          ISNULL(Amount, 0) AS Amount,
+          ISNULL(Commision, 0) AS Commision,
+          RTRIM(LTRIM(ISNULL(SlipNo, ''))) AS SlipNo
+        FROM tblPOSPayModeDetailCur
+        WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+      `);
+      payModesList = curPayRes.recordset.map((p) => ({
+        payMode: p.PayMode,
+        amount: Number(p.Amount),
+        commission: Number(p.Commision),
+        slipNo: p.SlipNo,
+      }));
+    } else {
+      const payReq = pool.request();
+      payReq.input('inv', sql.VarChar(50), rawInv);
+      const payRes = await payReq.query(`
+        SELECT 
+          RTRIM(LTRIM(PayMode)) AS PayMode,
+          ISNULL(Amount, 0) AS Amount,
+          ISNULL(Commision, 0) AS Commision,
+          RTRIM(LTRIM(ISNULL(SlipNo, ''))) AS SlipNo
+        FROM vw_POS_PayModeDetail
+        WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
+      `);
+      payModesList = payRes.recordset.map((p) => ({
+        payMode: p.PayMode,
+        amount: Number(p.Amount),
+        commission: Number(p.Commision),
+        slipNo: p.SlipNo,
+      }));
+    }
 
-    if (hdrRes.recordset.length === 0 && detRes.recordset.length === 0) {
+    if (!header && items.length === 0) {
       return res.status(404).json({
         success: false,
-        message: `Bill ${rawInv} not found in transaction history.`,
+        message: 'Bill not found in transaction history.',
       });
     }
 
-    const header = hdrRes.recordset[0] || {
-      InvoiceNo: rawInv,
-      InvoiceDate: new Date(),
-      TotalValue: detRes.recordset.reduce((s, r) => s + Number(r.TotalValue || 0), 0),
-      NetTotal: detRes.recordset.reduce((s, r) => s + Number(r.NetAmount || 0), 0),
-      TenderAmount: payRes.recordset.reduce((s, r) => s + Number(r.Amount || 0), 0),
-      Balance: 0,
-      Gst: detRes.recordset.reduce((s, r) => s + Number(r.Gst || 0), 0),
-      TotalDiscount: detRes.recordset.reduce((s, r) => s + Number(r.Discount || 0), 0),
-      CashierID: 'UPS',
-      CustomerCode: 'CASH',
-      CustomerName: 'CASH',
-      TerminalCode: '',
-      LocationCode: '',
-      TotalLines: detRes.recordset.length,
-      Delivered: '',
-      AccFlag: '',
-    };
-
-    const payModesList = payRes.recordset.map((p) => ({
-      payMode: p.PayMode,
-      amount: Number(p.Amount),
-      commission: Number(p.Commision),
-      slipNo: p.SlipNo,
-    }));
+    if (!header) {
+      header = {
+        InvoiceNo: rawInv,
+        InvoiceDate: new Date(),
+        TotalValue: items.reduce((s, r) => s + Number(r.totalValue || 0), 0),
+        NetTotal: items.reduce((s, r) => s + Number(r.netAmount || 0), 0),
+        TenderAmount: payModesList.reduce((s, r) => s + Number(r.amount || 0), 0),
+        Balance: 0,
+        Gst: items.reduce((s, r) => s + Number(r.gst || 0), 0),
+        TotalDiscount: items.reduce((s, r) => s + Number(r.discount || 0), 0),
+        CashierID: 'UPS',
+        CustomerCode: 'CASH',
+        CustomerName: 'CASH',
+        TerminalCode: '',
+        LocationCode: '',
+        TotalLines: items.length,
+        Delivered: '',
+        AccFlag: '',
+        ShiftNo: null,
+        IsCur: false,
+      };
+    }
 
     const payModeSummaryText = payModesList.map((p) => p.payMode).join(' , ') || 'CASH';
-
-    const items = detRes.recordset.map((r) => ({
-      inventoryCode: r.InventoryCode,
-      barcode: r.InventoryCode,
-      description: r.Description,
-      qty: Number(r.Qty),
-      price: Number(r.Price),
-      totalValue: Number(r.TotalValue),
-      subTotal: Number(r.SubTotal),
-      discount: Number(r.Discount),
-      netDiscount: Number(r.NetDiscount),
-      netAmount: Number(r.NetAmount),
-      gst: Number(r.Gst),
-      salesmanId: r.SalesManId,
-      deptCode: r.DeptCode,
-      categoryCode: r.CategoryCode,
-      brandCode: r.BrandCode,
-      prmFlag: r.PRMFlag,
-    }));
 
     return res.status(200).json({
       success: true,
@@ -428,7 +901,27 @@ router.get('/:invoiceNo', async (req, res) => {
         remarks: header.Remarks || '',
         delivered: header.Delivered || '',
         accFlag: header.AccFlag || '',
+        shiftNo: header.ShiftNo,
+        isCur: Boolean(header.IsCur),
         payModeSummary: payModeSummaryText,
+      },
+      bill: {
+        InvoiceNo: header.InvoiceNo,
+        InvoiceDate: header.InvoiceDate,
+        TotalValue: Number(header.TotalValue),
+        NetTotal: Number(header.NetTotal),
+        TenderAmount: Number(header.TenderAmount),
+        Balance: Number(header.Balance),
+        Gst: Number(header.Gst),
+        TotalDiscount: Number(header.TotalDiscount),
+        CashierID: header.CashierID,
+        CustomerCode: header.CustomerCode,
+        CustomerName: header.CustomerName,
+        TerminalCode: header.TerminalCode,
+        LocationCode: header.LocationCode,
+        TotalLines: Number(header.TotalLines || items.length),
+        ShiftNo: header.ShiftNo,
+        IsCur: Boolean(header.IsCur),
       },
       items,
       payments: payModesList,
@@ -441,28 +934,37 @@ router.get('/:invoiceNo', async (req, res) => {
 
 // ------------------------------------------------------------------------------
 // 5. POST /api/bills/cancel
-// Implements cmdBillCancel_Click from frmLastTransaction.vb:
-//   - Date validation against server date (Current vs History bill check)
-//   - sp_SalesBillCancel stored procedure execution
-//   - Transaction commit/rollback
-//   - NextBillCancelNo increment
-//   - Member points log update via sp_SaveMemberPointsByInvoice
+// Implements cmdSave_Click from frmBillCancel.vb:
+//   - Shifts & Historical bill validation (ShiftNo check matching VB.NET)
+//   - NextBillCancelNo retrieval from tblmaCompany
+//   - Safe database transaction management (BEGIN, COMMIT, ROLLBACK)
+//   - sp_SalesBillCancel (ERP mode) or legacy ERP cancellation
+//   - Member points synchronization (fncUpdateMemberPointsToHQ)
+//   - Background DataSync API trigger (SubBillCancelDataSyncPOSSales) strictly post-commit
 // ------------------------------------------------------------------------------
 router.post('/cancel', async (req, res) => {
+  let pool = null;
+  let tx = null;
   try {
-    const pool = await getPool();
+    pool = await getPool();
     if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
 
     const { invoiceNo, cashierId, locationCode, printVoidBill } = req.body;
     const cleanInv = String(invoiceNo || '').trim();
     if (!cleanInv) {
-      return res.status(400).json({ success: false, message: 'invoiceNo is required for bill cancel' });
+      return res.status(400).json({ success: false, message: 'Invoice number is required for bill cancellation' });
     }
 
     const loc = String(locationCode || 'HQ').trim();
     const user = String(cashierId || 'UPS').trim();
 
-    // 1. Retrieve the sales header using fncGetSalesHeaderByInvoiceNoTemp logic
+    // 1. Fetch sales header using entered Invoice Number from tblPOSSalesHeaderCur ONLY
+    // Requirement:
+    // - Use only tblPOSSalesHeaderCur for Void Bill invoice lookup
+    // - Completely remove ERP_tblPOSSalesHeaderCur dependency
+    // - Do not implement OLD database conditional logic
+    // - Search using the entered Invoice Number
+    // - Do not apply ShiftNo filter directly in the initial lookup query
     const chkReq = pool.request();
     chkReq.input('inv', sql.VarChar(50), cleanInv);
     const chkRes = await chkReq.query(`
@@ -471,67 +973,163 @@ router.post('/cancel', async (req, res) => {
         InvoiceDate, 
         NetTotal, 
         RTRIM(LTRIM(CustomerCode)) AS CustomerCode,
-        RTRIM(LTRIM(LocationCode)) AS LocationCode
+        RTRIM(LTRIM(LocationCode)) AS LocationCode,
+        ShiftNo
       FROM tblPOSSalesHeaderCur
       WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
     `);
 
+    // 8. If the invoice does not exist in tblPOSSalesHeaderCur, display "Bill not found in transaction history."
     if (chkRes.recordset.length === 0) {
-      // Check if it's already in history table
-      const histReq = pool.request();
-      histReq.input('inv', sql.VarChar(50), cleanInv);
-      const histRes = await histReq.query(`
-        SELECT TOP 1 InvoiceNo FROM tblPOSSalesHeader WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
-      `);
-
-      if (histRes.recordset.length > 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'You cannot cancel History Bills. Only today\'s current bills can be cancelled.',
-        });
-      }
-
       return res.status(404).json({
         success: false,
-        message: 'This Bill Not Found... Please Give Correct Bill No',
+        message: 'Bill not found in transaction history.',
       });
     }
 
     const header = chkRes.recordset[0];
 
-    // 2. Date validation against server date
-    const serverDateReq = pool.request();
-    const serverDateRes = await serverDateReq.query('SELECT CONVERT(varchar(10), GETDATE(), 120) AS ServerDate');
-    const serverDateStr = serverDateRes.recordset[0]?.ServerDate;
-    const invDateStr = formatDate(header.InvoiceDate);
+    // 2. Validate its ShiftNo separately:
+    // - If the invoice exists and ShiftNo is NULL or 0, allow bill cancellation.
+    // - If the invoice exists but ShiftNo is not 0, display the historical bill restriction message.
+    const rawShiftNo = header.ShiftNo;
+    const shiftVal = rawShiftNo !== null && rawShiftNo !== undefined && rawShiftNo !== '' ? Number(rawShiftNo) : 0;
 
-    // 3. Get NextBillCancelNo from tblmaCompany
+    if (shiftVal !== 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot cancel History Bills ....Please Give Correct Bill No',
+      });
+    }
+
+    // 3. Retrieve NextBillCancelNo from tblmaCompany
     const cancelNoReq = pool.request();
     const cancelNoRes = await cancelNoReq.query('SELECT ISNULL(NextBillCancelNo, 1) AS NextBillCancelNo FROM tblmaCompany');
     const billCancelNo = String(cancelNoRes.recordset[0]?.NextBillCancelNo || 1);
 
-    // 4. Execute sp_SalesBillCancel
-    const execReq = pool.request();
-    execReq.input('InvoiceNo', sql.Char(15), cleanInv);
-    execReq.input('LocationCode', sql.Char(10), loc);
-    execReq.input('UserID', sql.Char(10), user);
+    // 4. Start Database Transaction
+    tx = new sql.Transaction(pool);
+    await tx.begin();
 
-    await execReq.execute('sp_SalesBillCancel');
+    try {
+      // Execute cancellation process (fncBillCancelSave / sp_SalesBillCancel)
+      const execReq = new sql.Request(tx);
+      execReq.input('InvoiceNo', sql.Char(15), cleanInv);
+      execReq.input('LocationCode', sql.Char(10), loc);
+      execReq.input('UserID', sql.Char(10), user);
+      await execReq.execute('sp_SalesBillCancel');
 
-    // 5. Update Member Points to HQ if applicable:
+      // Commit the database transaction
+      await tx.commit();
+      tx = null; // Mark committed
+    } catch (saveErr) {
+      if (tx) {
+        await tx.rollback();
+        tx = null;
+      }
+      throw saveErr;
+    }
+
+    // 5. Member Points Synchronization (ERP database fncUpdateMemberPointsToHQ)
+    // Executed after local transaction commit
     try {
       const memCode = (header.CustomerCode || '').trim();
       if (memCode && memCode.toUpperCase() !== 'CASH') {
-        const hqReq = pool.request();
-        hqReq.input('InvoiceNo', sql.VarChar(30), cleanInv);
-        hqReq.input('BillCancelNo', sql.VarChar(10), billCancelNo);
-        hqReq.input('MemberCode', sql.VarChar(30), memCode);
-        hqReq.input('UserID', sql.VarChar(20), user);
-        await hqReq.execute('sp_SaveMemberPointsByInvoice');
+        // Step A: Update local log_MemberPointsByInvoice via sp_SaveMemberPointsByInvoice
+        const logReq = pool.request();
+        logReq.input('InvoiceNo', sql.VarChar(30), cleanInv);
+        logReq.input('BillCancelNo', sql.VarChar(10), billCancelNo);
+        logReq.input('MemberCode', sql.VarChar(30), memCode);
+        logReq.input('UserID', sql.VarChar(20), user);
+        await logReq.execute('sp_SaveMemberPointsByInvoice');
+
+        // Step B: If HQ connection is available, synchronize member points and transactions to HQ
+        const hqConnStr = configService.getString('DBHQConn', '');
+        if (hqConnStr && !hqConnStr.includes('SCK-TG')) {
+          try {
+            const hqPool = await new sql.ConnectionPool(hqConnStr).connect();
+            try {
+              // 0. Update member points at HQ
+              const memPointsRes = await pool.request()
+                .input('inv', sql.VarChar(50), cleanInv)
+                .query(`
+                  SELECT TOP 1 A.TotalSales, A.TotalSavings, A.TotalRewardPoint, A.TotalUsagePoint, A.MemberCode
+                  FROM tblMember A 
+                  INNER JOIN log_MemberPointsByInvoice B ON A.MemberCode = B.MemberCode
+                  WHERE B.InvoiceNo = @inv
+                `);
+
+              if (memPointsRes.recordset.length > 0) {
+                const mp = memPointsRes.recordset[0];
+                await hqPool.request()
+                  .input('mCode', sql.VarChar(50), mp.MemberCode)
+                  .input('sales', sql.Decimal(18, 2), mp.TotalSales || 0)
+                  .input('savings', sql.Decimal(18, 2), mp.TotalSavings || 0)
+                  .input('reward', sql.Decimal(18, 2), mp.TotalRewardPoint || 0)
+                  .input('usage', sql.Decimal(18, 2), mp.TotalUsagePoint || 0)
+                  .query(`
+                    UPDATE tblMember 
+                    SET TotalSales = @sales, TotalSavings = @savings, TotalRewardPoint = @reward, TotalUsagePoint = @usage
+                    WHERE MemberCode = @mCode
+                  `);
+
+                // 1. Upload Log Details to HQ
+                await hqPool.request()
+                  .input('InvoiceNo', sql.VarChar(30), cleanInv)
+                  .input('BillCancelNo', sql.VarChar(10), billCancelNo)
+                  .input('MemberCode', sql.VarChar(30), mp.MemberCode)
+                  .input('UserID', sql.VarChar(20), user)
+                  .execute('sp_SaveMemberPointsByInvoice');
+
+                // 2. Upload Member Transaction to HQ if SP exists
+                const transRes = await pool.request()
+                  .input('cNo', sql.VarChar(50), billCancelNo)
+                  .query(`SELECT TOP 1 * FROM tblMemberTransaction WHERE InvoiceNo = @cNo`);
+                if (transRes.recordset.length > 0) {
+                  const tr = transRes.recordset[0];
+                  try {
+                    await hqPool.request()
+                      .input('LocationCode', sql.VarChar(50), tr.LocationCode)
+                      .input('MemberCode', sql.VarChar(50), tr.MemberCode)
+                      .input('InvoiceNo', sql.VarChar(50), tr.InvoiceNo)
+                      .input('InvoiceDate', sql.DateTime, tr.InvoiceDate)
+                      .input('InvoiceAmount', sql.Decimal(18, 2), tr.InvoiceAmount)
+                      .input('MemberDiscount', sql.Decimal(18, 2), tr.MemberDiscount)
+                      .input('RewardPoint', sql.Decimal(18, 2), tr.RewardPoint)
+                      .input('CreateUser', sql.VarChar(50), tr.CreateUser)
+                      .input('CreateDate', sql.DateTime, tr.CreateDate)
+                      .input('ModifyUser', sql.VarChar(50), tr.ModifyUser)
+                      .input('ModifyDate', sql.DateTime, tr.ModifyDate)
+                      .execute('sp_UploadMemberTransactionToHQ');
+                  } catch (spErr) {
+                    console.warn('ℹ️ [HQ - sp_UploadMemberTransactionToHQ skipped/not found]:', spErr.message);
+                  }
+                }
+
+                // 3. Delete Member savings detail at HQ
+                await hqPool.request()
+                  .input('inv', sql.VarChar(50), cleanInv)
+                  .query(`DELETE FROM tblMemberSavingsDetails WHERE InvoiceNo = @inv`);
+              }
+            } finally {
+              await hqPool.close();
+            }
+          } catch (hqErr) {
+            console.warn('ℹ️ [HQ CONNECTION SKIPPED]:', hqErr.message);
+          }
+        }
       }
-    } catch (memErr) {
-      console.warn('⚠️ [BILL CANCEL - MEMBER POINTS UPDATE]:', memErr.message);
+    } catch (memSyncErr) {
+      console.warn('⚠️ [BILL CANCEL - MEMBER POINTS SYNC]:', memSyncErr.message);
     }
+
+    // 6. Background API Data Synchronization (SubBillCancelDataSyncPOSSales in VB.NET)
+    // Non-blocking asynchronous task executed after transaction commit
+    setImmediate(() => {
+      runBillCancelDataSync(pool).catch((err) => {
+        console.warn('⚠️ [BACKGROUND DATA SYNC ERROR]:', err.message);
+      });
+    });
 
     return res.status(200).json({
       success: true,
@@ -541,6 +1139,9 @@ router.post('/cancel', async (req, res) => {
       message: 'Bill Cancelled Successfully.',
     });
   } catch (err) {
+    if (tx) {
+      try { await tx.rollback(); } catch {}
+    }
     console.error('❌ [BILL ERROR - CANCEL]:', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }

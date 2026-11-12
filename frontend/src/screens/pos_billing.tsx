@@ -42,6 +42,7 @@ import CustomAlertModal, { CustomAlertState } from "../components/CustomAlertMod
 import ClearAdminAuthModal from "../components/ClearAdminAuthModal";
 import SearchModal, { SearchResultItem } from "../components/SearchModal";
 import ViewBillModal from "../components/ViewBillModal";
+import VoidBillModal from "../components/VoidBillModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -499,6 +500,7 @@ export default function PosBillingScreen({
   const [currentFont, setCurrentFont] = useState<FontOption>(FONTS[0]);
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
   const [showViewBillModal, setShowViewBillModal] = useState<boolean>(false);
+  const [showVoidBillModal, setShowVoidBillModal] = useState<boolean>(false);
 
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
@@ -740,8 +742,8 @@ export default function PosBillingScreen({
   // If itemListMaxData is configured to 20, 40, etc., itemsPerPage dynamically matches itemListMaxData.
   const [itemPageIndex, setItemPageIndex] = useState<number>(0);
   const itemsPerPage = useMemo(() => {
-    const configuredLimit = getNum("itemListMaxData", 20);
-    return configuredLimit > 0 ? configuredLimit : 20;
+    const configuredLimit = getNum("itemListMaxData", 10);
+    return configuredLimit > 0 ? configuredLimit : 10;
   }, [config.itemListMaxData]);
 
   const totalItemPages = Math.max(
@@ -2439,6 +2441,7 @@ export default function PosBillingScreen({
     handleDeleteItem,
     processDirectSkuCode,
     handleFastPriceCommit,
+    openVoidBillModal: () => setShowVoidBillModal(true),
   });
 
   useEffect(() => {
@@ -2452,6 +2455,7 @@ export default function PosBillingScreen({
       handleDeleteItem,
       processDirectSkuCode,
       handleFastPriceCommit,
+      openVoidBillModal: () => setShowVoidBillModal(true),
     };
   });
 
@@ -2470,6 +2474,11 @@ export default function PosBillingScreen({
         e.preventDefault();
         e.stopPropagation();
         keyboardActionsRef.current.handleClearCart();
+      } else if (key === "F3" || code === "F3") {
+        // Exact VB.NET F3: Void Bill (frmBillCancel.vb)
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.openVoidBillModal();
       } else if (key === "F4" || code === "F4") {
         e.preventDefault();
         e.stopPropagation();
@@ -3859,8 +3868,12 @@ export default function PosBillingScreen({
               </View>
             ) : (
               <View style={styles.catalogItemsWrapper}>
-                {/* 3x3 Grid (Exactly 9 tiles, no scrolling) */}
-                <View style={styles.touchTilesContainer}>
+                {/* Items Grid Container (Scrolls vertically if items exceed viewable height, while keeping itemNavDock permanently pinned) */}
+                <ScrollView
+                  style={styles.touchTilesScroll}
+                  contentContainerStyle={styles.touchTilesContainer}
+                  showsVerticalScrollIndicator={false}
+                >
                   {visibleProducts.map((prod) => {
                     const iconName = getCategoryIcon(prod.GroupCode);
 
@@ -3913,7 +3926,7 @@ export default function PosBillingScreen({
                       </TouchableOpacity>
                     );
                   })}
-                </View>
+                </ScrollView>
 
                 {/* Bottom Pagination Bar: Up Arrow & Down Arrow buttons */}
                 <View style={styles.itemNavDock}>
@@ -4538,6 +4551,22 @@ export default function PosBillingScreen({
         onAdminAuthRequest={handleAdminAuthSubmit}
       />
 
+      {/* Void Bill Dialog (VB.NET frmBillCancel.vb) */}
+      <VoidBillModal
+        visible={showVoidBillModal}
+        onClose={() => setShowVoidBillModal(false)}
+        apiUrl={API_URL}
+        activeTerminal={(terminalCode || "").trim()}
+        activeCashier={(cashierName || "UPS").trim()}
+        activeLocation={(effectiveLocation || "HQ").trim()}
+        primaryColor={currentTheme?.primary || "#7A1C30"}
+        theme={currentTheme}
+        onAdminAuthRequest={handleAdminAuthSubmit}
+        onSuccess={(cancelledInvoiceNo) => {
+          showAlert("Void Bill", `Bill ${cancelledInvoiceNo} cancelled successfully.`, "success");
+        }}
+      />
+
       {/* Theme & Typography Customizer Modal */}
       <ThemeModal
         visible={showThemeModal}
@@ -4614,7 +4643,7 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    handleClearCart();
+                    setShowVoidBillModal(true);
                   }}
                   activeOpacity={0.8}
                 >
@@ -6062,11 +6091,17 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "space-between",
     padding: 6,
+    overflow: "hidden",
+  },
+  touchTilesScroll: {
+    flex: 1,
+    width: "100%",
   },
   touchTilesContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
+    paddingBottom: 4,
   },
   touchTile: {
     width: "31.4%", // Exactly 3 columns (3x3 layout)

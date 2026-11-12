@@ -150,9 +150,10 @@ export default function ViewBillModal({
   const [showMemberModal, setShowMemberModal] = useState<boolean>(false);
   const [selectedMemberCodeForModal, setSelectedMemberCodeForModal] = useState<string>("");
 
-  // Bill Cancel Confirmation & Void Print Dialog State
+  // Bill Cancel Confirmation (2-step prompt matching frmBillCancel.vb)
   const [cancelLoading, setCancelLoading] = useState<boolean>(false);
-  const [showVoidConfirmModal, setShowVoidConfirmModal] = useState<boolean>(false);
+  const [showVoidStep1Modal, setShowVoidStep1Modal] = useState<boolean>(false);
+  const [showVoidStep2Modal, setShowVoidStep2Modal] = useState<boolean>(false);
 
   // Convert Delivery Loading State
   const [deliveryLoading, setDeliveryLoading] = useState<boolean>(false);
@@ -337,14 +338,20 @@ export default function ViewBillModal({
     }
   };
 
-  // Prompt confirmation: "Do you want to cancel the bill {InvoiceNo}?"
+  // Prompt confirmation Step 1: "Do you want to cancel the bill {InvoiceNo}?"
   const promptCancelConfirmation = () => {
-    setShowVoidConfirmModal(true);
+    setShowVoidStep1Modal(true);
+  };
+
+  // Step 1: User says Yes to cancel -> Ask Step 2: "Do you want to print the void bill?"
+  const handleStep1Yes = () => {
+    setShowVoidStep1Modal(false);
+    setShowVoidStep2Modal(true);
   };
 
   // Execute Bill Cancellation via backend API
   const executeBillCancel = async (printVoidBill: boolean) => {
-    setShowVoidConfirmModal(false);
+    setShowVoidStep2Modal(false);
     setCancelLoading(true);
     try {
       const res = await fetch(`${apiUrl}/api/bills/cancel`, {
@@ -361,13 +368,17 @@ export default function ViewBillModal({
       const data = await res.json();
       if (res.ok && data.success) {
         showNotice(
-          `Bill ${selectedInvoiceNo} Cancelled Successfully (Void Ref #${data.billCancelNo}).`,
+          `Bill Cancelled Successfully. (Void Ref #${data.billCancelNo})`,
           "success"
         );
+        // If user asked to print the void bill, trigger receipt print
+        if (printVoidBill && onReprintBill) {
+          onReprintBill(selectedInvoiceNo);
+        }
         // Refresh list
         fetchTransactions();
       } else {
-        showNotice(data.message || "Failed to cancel bill", "error");
+        showNotice(data.message || "You cannot cancel History Bills ....Please Give Correct Bill No", "error");
       }
     } catch (err: any) {
       showNotice(err.message || "Network error while cancelling bill", "error");
@@ -1272,49 +1283,75 @@ export default function ViewBillModal({
       />
 
       {/* =========================================================================
-          SUB-MODAL: Void Bill Printing Confirmation Prompt (VB.NET Question)
+          SUB-MODAL 1: Step 1 Confirmation ("Do you want to cancel the bill {InvoiceNo}?")
       ========================================================================= */}
       <Modal
-        visible={showVoidConfirmModal}
+        visible={showVoidStep1Modal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowVoidConfirmModal(false)}
+        onRequestClose={() => setShowVoidStep1Modal(false)}
       >
         <View style={styles.confirmModalBackdrop}>
           <View style={styles.confirmModalCard}>
             <View style={styles.confirmModalHeader}>
               <MaterialCommunityIcons name="alert-octagon" size={32} color="#dc2626" />
-              <Text style={styles.confirmModalTitle}>Cancel Bill #{selectedInvoiceNo}</Text>
+              <Text style={styles.confirmModalTitle}>Cancel Bill</Text>
             </View>
             <Text style={styles.confirmModalBody}>
-              Are you sure you want to cancel the bill {selectedInvoiceNo}? This will revert
-              inventory stock, reverse payments, and record an audit void entry.
-            </Text>
-
-            <Text style={[styles.confirmModalBody, { fontWeight: "700", marginTop: 8 }]}>
-              Do you want to print the void bill receipt?
+              Do you want to cancel the bill <Text style={{ fontWeight: "800" }}>{selectedInvoiceNo}</Text> ?
             </Text>
 
             <View style={styles.confirmModalBtnRow}>
               <TouchableOpacity
                 style={[styles.confirmBtn, { backgroundColor: "#f1f5f9" }]}
-                onPress={() => setShowVoidConfirmModal(false)}
+                onPress={() => setShowVoidStep1Modal(false)}
               >
-                <Text style={[styles.confirmBtnText, { color: "#475569" }]}>Abort</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.confirmBtn, { backgroundColor: "#64748b" }]}
-                onPress={() => executeBillCancel(false)}
-              >
-                <Text style={styles.confirmBtnText}>Cancel Without Print</Text>
+                <Text style={[styles.confirmBtnText, { color: "#475569" }]}>No</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.confirmBtn, { backgroundColor: "#dc2626" }]}
+                onPress={handleStep1Yes}
+              >
+                <Text style={styles.confirmBtnText}>Yes</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* =========================================================================
+          SUB-MODAL 2: Step 2 Question ("Do you want to print the void bill?")
+      ========================================================================= */}
+      <Modal
+        visible={showVoidStep2Modal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowVoidStep2Modal(false)}
+      >
+        <View style={styles.confirmModalBackdrop}>
+          <View style={styles.confirmModalCard}>
+            <View style={styles.confirmModalHeader}>
+              <MaterialCommunityIcons name="printer-outline" size={32} color="#0284c7" />
+              <Text style={styles.confirmModalTitle}>Print Void Bill?</Text>
+            </View>
+            <Text style={styles.confirmModalBody}>
+              Do you want to print the void bill?
+            </Text>
+
+            <View style={styles.confirmModalBtnRow}>
+              <TouchableOpacity
+                style={[styles.confirmBtn, { backgroundColor: "#f1f5f9" }]}
+                onPress={() => executeBillCancel(false)}
+              >
+                <Text style={[styles.confirmBtnText, { color: "#475569" }]}>No</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.confirmBtn, { backgroundColor: "#0284c7" }]}
                 onPress={() => executeBillCancel(true)}
               >
-                <Text style={styles.confirmBtnText}>Print & Cancel</Text>
+                <Text style={styles.confirmBtnText}>Yes (Print)</Text>
               </TouchableOpacity>
             </View>
           </View>
