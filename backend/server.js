@@ -118,6 +118,14 @@ app.use("/api/settlement", settlementRoutes);
 const paymodeChangeRoutes = require("./routes/paymodeChangeRoutes");
 app.use("/api/paymode-change", paymodeChangeRoutes);
 
+// Mount Expense / Petty Cash routes (frmExpense.vb & btn_Expenses_Click)
+const expenseRoutes = require("./routes/expenseRoutes");
+app.use("/api/expenses", expenseRoutes);
+
+// Mount Bill-Level Discount routes (frmDiscount.vb & subDiscount)
+const discountRoutes = require("./routes/discountRoutes");
+app.use("/api/discounts", discountRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

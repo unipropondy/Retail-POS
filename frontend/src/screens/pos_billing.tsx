@@ -49,6 +49,8 @@ import TotalSalesModal from "../components/TotalSalesModal";
 import MemberModal from "../components/MemberModal";
 import { SettlementModal } from "../components/SettlementModal";
 import { PaymodeModificationModal } from "../components/PaymodeModificationModal";
+import { ExpenseModal } from "../components/ExpenseModal";
+import { DiscountModal } from "../components/DiscountModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -557,6 +559,12 @@ export default function PosBillingScreen({
     useState<boolean>(false);
   const [showPaymodeModificationModal, setShowPaymodeModificationModal] =
     useState<boolean>(false);
+  const [showExpenseModal, setShowExpenseModal] = useState<boolean>(false);
+  const [showDiscountModal, setShowDiscountModal] = useState<boolean>(false);
+  const [billDiscountAmount, setBillDiscountAmount] = useState<number>(0);
+  const [billDiscountPerc, setBillDiscountPerc] = useState<number>(0);
+  const [billDiscountRemarks, setBillDiscountRemarks] = useState<string>("");
+  const [billDiscountReasonCode, setBillDiscountReasonCode] = useState<string>("");
   const [showMemberManagementModal, setShowMemberManagementModal] =
     useState<boolean>(false);
   const [isExchangeMode, setIsExchangeMode] = useState<boolean>(false);
@@ -831,9 +839,11 @@ export default function PosBillingScreen({
 
   // ---------------------------------------------------------------------------
   // FINANCIAL CALCULATIONS (Total, Tot Qty, Disc, SubTotal, Tax, RoundOff)
+  // Exact VB.NET Parity: Combines item detail discounts + bill-level discount (F5)
   // ---------------------------------------------------------------------------
   const totalQty = cart.reduce((acc, curr) => acc + curr.qty, 0);
-  const totalDiscount = cart.reduce((acc, curr) => acc + curr.disc, 0);
+  const detailDiscount = cart.reduce((acc, curr) => acc + curr.disc, 0);
+  const totalDiscount = parseFloat((detailDiscount + (billDiscountAmount || 0)).toFixed(2));
   const subTotal = cart.reduce((acc, curr) => acc + curr.qty * curr.price, 0);
   const netBeforeTax = Math.max(0, subTotal - totalDiscount);
   const taxRate = 0.0; // matching image (Tax 0.0000)
@@ -1668,6 +1678,10 @@ export default function PosBillingScreen({
     setIsExchangeMode(false);
     setFastQty("1");
     setFastDisc("0.00");
+    setBillDiscountAmount(0);
+    setBillDiscountPerc(0);
+    setBillDiscountRemarks("");
+    setBillDiscountReasonCode("");
     setSelectedPayMode("CASH");
     skuInputRef.current?.focus();
   };
@@ -2669,6 +2683,8 @@ export default function PosBillingScreen({
     openVoidBillModal: () => setShowVoidBillModal(true),
     openSettlementModal: () => setShowSettlementModal(true),
     openPaymodeModificationModal: () => setShowPaymodeModificationModal(true),
+    openExpenseModal: () => setShowExpenseModal(true),
+    openDiscountModal: () => setShowDiscountModal(true),
   });
 
   useEffect(() => {
@@ -2686,6 +2702,8 @@ export default function PosBillingScreen({
       openVoidBillModal: () => setShowVoidBillModal(true),
       openSettlementModal: () => setShowSettlementModal(true),
       openPaymodeModificationModal: () => setShowPaymodeModificationModal(true),
+      openExpenseModal: () => setShowExpenseModal(true),
+      openDiscountModal: () => setShowDiscountModal(true),
     };
   });
 
@@ -2713,6 +2731,11 @@ export default function PosBillingScreen({
         e.preventDefault();
         e.stopPropagation();
         keyboardActionsRef.current.handleCheckout();
+      } else if (key === "F5" || code === "F5") {
+        // VB.NET F5: Bill-Level Discount (frmDiscount.vb)
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.openDiscountModal();
       } else if (key === "F6" || code === "F6") {
         e.preventDefault();
         e.stopPropagation();
@@ -2731,6 +2754,11 @@ export default function PosBillingScreen({
         e.stopPropagation();
         if (keyboardActionsRef.current.onLogout)
           keyboardActionsRef.current.onLogout();
+      } else if (e.ctrlKey && (key === "E" || code === "KEYE")) {
+        // VB.NET Ctrl + E: Open Expenses / Petty Cash
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.openExpenseModal();
       } else if (key === "F11" || code === "F11") {
         e.preventDefault();
         e.stopPropagation();
@@ -4991,6 +5019,60 @@ export default function PosBillingScreen({
         showAlert={showAlert}
       />
 
+      {/* POS Expense / Petty Cash Modal (frmExpense.vb & btn_Expenses_Click) */}
+      <ExpenseModal
+        visible={showExpenseModal}
+        onClose={() => setShowExpenseModal(false)}
+        terminalCode={(terminalCode || "1").trim()}
+        locationCode={locationCode || "HQ"}
+        cashierGroupCode="CASHIER"
+        loggedInUserId={cashierName || "ADMIN"}
+        backendUrl={API_URL}
+        isStandalone={false}
+        showAlert={showAlert}
+      />
+
+      {/* POS Bill-Level Discount Modal (frmDiscount.vb & subDiscount) */}
+      <DiscountModal
+        visible={showDiscountModal}
+        onClose={() => setShowDiscountModal(false)}
+        subTotal={subTotal}
+        initialDiscountAmount={billDiscountAmount}
+        cashierGroupCode="CASHIER"
+        backendUrl={API_URL}
+        onSaveDiscount={(discAmt, discPerc, reasonDesc, reasonCode) => {
+          setBillDiscountAmount(discAmt);
+          setBillDiscountPerc(discPerc);
+          setBillDiscountRemarks(reasonDesc);
+          if (reasonCode) setBillDiscountReasonCode(reasonCode);
+
+          // Synchronize summary into tblTempSalesSummary (Savesummarytemp)
+          fetch(`${API_URL}/api/discounts/sync-temp-summary`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              terminalCode: (terminalCode || "1").trim(),
+              totalItems: cart.length,
+              totalQty,
+              subTotal,
+              discount: parseFloat((detailDiscount + discAmt).toFixed(2)),
+              tax: taxAmount,
+              roundOff,
+              netTotal: Math.max(0, subTotal - (detailDiscount + discAmt) + taxAmount),
+            }),
+          }).catch(() => {});
+
+          showAlert("Discount Applied", `Applied $${discAmt.toFixed(2)} (${discPerc.toFixed(1)}%) discount.`, "success");
+        }}
+        onCancelDiscount={() => {
+          setBillDiscountAmount(0);
+          setBillDiscountPerc(0);
+          setBillDiscountRemarks("");
+          setBillDiscountReasonCode("");
+        }}
+        showAlert={showAlert}
+      />
+
       {/* Member Management Modal (VB.NET frmMember.vb) */}
       <MemberModal
         visible={showMemberManagementModal}
@@ -5272,14 +5354,11 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    showAlert(
-                      "Petty Cash / Expenses",
-                      "Opening Petty Cash / Expense Entry module...",
-                      "info",
-                    );
+                    setShowExpenseModal(true);
                   }}
                   activeOpacity={0.8}
                 >
+                  <Text style={styles.menuGridTileKey}>Ctrl+E</Text>
                   <Text style={styles.menuGridTileLabelSingle}>Expenses</Text>
                 </TouchableOpacity>
 
@@ -5288,7 +5367,11 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    fastDiscInputRef.current?.focus();
+                    if (cart.length === 0) {
+                      showAlert("Notice", "Cannot apply discount on empty cart.", "warning");
+                      return;
+                    }
+                    setShowDiscountModal(true);
                   }}
                   activeOpacity={0.8}
                 >
