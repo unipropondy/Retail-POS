@@ -1226,22 +1226,8 @@ export default function ViewBillModal({
               ) : null}
             </View>
 
-            {/* Right Side: Member, Print Receipt & Exit */}
+            {/* Right Side: Print Receipt & Exit */}
             <View style={styles.vbBottomRightCol}>
-              <TouchableOpacity
-                style={[
-                  styles.vbActionBtn,
-                  styles.btnMemberAction,
-                  !selectedInvoiceNo && styles.btnDisabled,
-                ]}
-                onPress={() => handleMemberButtonClick()}
-                disabled={!selectedInvoiceNo}
-                activeOpacity={0.8}
-              >
-                <MaterialCommunityIcons name="card-account-details-outline" size={18} color="#ffffff" />
-                <Text style={styles.vbActionBtnText}>Member</Text>
-              </TouchableOpacity>
-
               <TouchableOpacity
                 style={[
                   styles.vbActionBtn,

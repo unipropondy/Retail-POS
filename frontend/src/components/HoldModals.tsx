@@ -450,15 +450,7 @@ export default function HoldModals({
 
             {/* Bottom Enterprise Control Strip */}
             <View style={styles.modernFooter}>
-              {/* Left Summary Box */}
-              <View style={styles.footerSummary}>
-                <Text style={styles.footerSummaryLabel}>SELECTED BILL TOTAL</Text>
-                <Text style={[styles.footerSummaryVal, { color: themePrimary }]}>
-                  ${selectedHold ? Number(selectedHold.NetTotal).toFixed(2) : "0.00"}
-                </Text>
-              </View>
-
-              {/* Action Buttons Row */}
+              {/* Left Action Buttons (Discard & Close) */}
               <View style={styles.footerActions}>
                 {/* Discard / Delete Button */}
                 {selectedHold && (
@@ -476,7 +468,19 @@ export default function HoldModals({
                   </TouchableOpacity>
                 )}
 
-                {/* Release to Cart Hero Button */}
+                {/* Close Button */}
+                <TouchableOpacity
+                  style={styles.modernCloseBtn}
+                  onPress={onCloseHoldListModal}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.modernCloseBtnText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Right Side: Release Button + Total */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
+                {/* Release to Cart Hero Button (Next to total on its left) */}
                 <TouchableOpacity
                   style={[
                     styles.modernReleaseHeroBtn,
@@ -506,14 +510,13 @@ export default function HoldModals({
                   )}
                 </TouchableOpacity>
 
-                {/* Close Button */}
-                <TouchableOpacity
-                  style={styles.modernCloseBtn}
-                  onPress={onCloseHoldListModal}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.modernCloseBtnText}>Close</Text>
-                </TouchableOpacity>
+                {/* Selected Bill Total Summary Box (Right, directly under Amount column) */}
+                <View style={[styles.footerSummary, { alignItems: "flex-end", width: 140 }]}>
+                  <Text style={styles.footerSummaryLabel}>SELECTED BILL TOTAL</Text>
+                  <Text style={[styles.footerSummaryVal, { color: themePrimary, fontSize: 16 }]}>
+                    ${selectedHold ? Number(selectedHold.NetTotal).toFixed(2) : "0.00"}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>

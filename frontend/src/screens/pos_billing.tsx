@@ -38,7 +38,9 @@ import {
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import ThemeModal from "../components/ThemeModal";
 import HoldModals, { HoldHeaderItem } from "../components/HoldModals";
-import CustomAlertModal, { CustomAlertState } from "../components/CustomAlertModal";
+import CustomAlertModal, {
+  CustomAlertState,
+} from "../components/CustomAlertModal";
 import ClearAdminAuthModal from "../components/ClearAdminAuthModal";
 import SearchModal, { SearchResultItem } from "../components/SearchModal";
 import ViewBillModal from "../components/ViewBillModal";
@@ -180,8 +182,6 @@ function getCategoryIcon(
   return "tag-outline";
 }
 
-
-
 export default function PosBillingScreen({
   onLogout,
   cashierName,
@@ -212,45 +212,51 @@ export default function PosBillingScreen({
   // ==============================================================================
   const isRecalculatingRef = React.useRef(false);
 
-  const applyPromotionsToCart = React.useCallback(async (itemsToCalc: CartItem[]) => {
-    if (!itemsToCalc || itemsToCalc.length === 0) return itemsToCalc;
-    try {
-      const activeLoc = (locationCode || "HQ").trim();
-      const res = await fetch(`${API_URL}/api/promotions/recalculate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: itemsToCalc,
-          locationCode: activeLoc,
-        }),
-      });
+  const applyPromotionsToCart = React.useCallback(
+    async (itemsToCalc: CartItem[]) => {
+      if (!itemsToCalc || itemsToCalc.length === 0) return itemsToCalc;
+      try {
+        const activeLoc = (locationCode || "HQ").trim();
+        const res = await fetch(`${API_URL}/api/promotions/recalculate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: itemsToCalc,
+            locationCode: activeLoc,
+          }),
+        });
 
-      if (!res.ok) return itemsToCalc;
-      const data = await res.json();
-      if (data && data.success && Array.isArray(data.items)) {
-        return data.items as CartItem[];
+        if (!res.ok) return itemsToCalc;
+        const data = await res.json();
+        if (data && data.success && Array.isArray(data.items)) {
+          return data.items as CartItem[];
+        }
+      } catch (err) {
+        console.warn("Promotion calculation fallback:", err);
       }
-    } catch (err) {
-      console.warn("Promotion calculation fallback:", err);
-    }
-    return itemsToCalc;
-  }, [locationCode]);
+      return itemsToCalc;
+    },
+    [locationCode],
+  );
 
   // Sync entire cart with promotions to tblTempSales (Exact SaveTempBill L5732)
-  const syncTempSalesFull = React.useCallback((itemsToSync: CartItem[]) => {
-    try {
-      const activeTerm = (terminalCode || "").trim();
-      if (!activeTerm) return;
-      fetch(`${API_URL}/api/cart/temp-sales/sync-full`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          terminalCode: activeTerm,
-          items: itemsToSync,
-        }),
-      }).catch(() => {});
-    } catch {}
-  }, [terminalCode]);
+  const syncTempSalesFull = React.useCallback(
+    (itemsToSync: CartItem[]) => {
+      try {
+        const activeTerm = (terminalCode || "").trim();
+        if (!activeTerm) return;
+        fetch(`${API_URL}/api/cart/temp-sales/sync-full`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            terminalCode: activeTerm,
+            items: itemsToSync,
+          }),
+        }).catch(() => {});
+      } catch {}
+    },
+    [terminalCode],
+  );
 
   const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1);
   const cartScrollRef = useRef<any>(null);
@@ -276,12 +282,20 @@ export default function PosBillingScreen({
         if (isLatest) {
           // Exact match with latest mutation: server is source of truth
           const serverCodes = new Set(serverItems.map((c: CartItem) => c.code));
-          const missingOptimistic = prev.filter((p) => !serverCodes.has(p.code));
+          const missingOptimistic = prev.filter(
+            (p) => !serverCodes.has(p.code),
+          );
           const merged = serverItems.map((c: CartItem) => {
-            const existing = prev.find((p) => p.code === c.code || (c.id && p.id === c.id));
+            const existing = prev.find(
+              (p) => p.code === c.code || (c.id && p.id === c.id),
+            );
             return {
               ...c,
-              id: String(c.id || existing?.id || Date.now().toString() + Math.random().toString()),
+              id: String(
+                c.id ||
+                  existing?.id ||
+                  Date.now().toString() + Math.random().toString(),
+              ),
               stock: c.stock !== undefined ? c.stock : existing?.stock,
             };
           });
@@ -291,23 +305,46 @@ export default function PosBillingScreen({
           // so multi-buy discounts (e.g. 5th Kingfisher) are NOT discarded!
           return prev.map((localItem) => {
             const matchingServerItem = serverItems.find(
-              (si) => (si.id && si.id === localItem.id) || si.code === localItem.code
+              (si) =>
+                (si.id && si.id === localItem.id) || si.code === localItem.code,
             );
             if (!matchingServerItem) return localItem;
 
             // Merge server-calculated promotion fields while keeping current local qty if local is newer
-            const hasPromo = Boolean(matchingServerItem.promoName || matchingServerItem.disc > 0 || matchingServerItem.discountPriceCode);
+            const hasPromo = Boolean(
+              matchingServerItem.promoName ||
+              matchingServerItem.disc > 0 ||
+              matchingServerItem.discountPriceCode,
+            );
             if (!hasPromo && localItem.disc === 0) return localItem;
 
             return {
               ...localItem,
-              disc: matchingServerItem.disc !== undefined ? matchingServerItem.disc : localItem.disc,
-              promoDisc: matchingServerItem.promoDisc !== undefined ? matchingServerItem.promoDisc : localItem.promoDisc,
-              pairDisc: matchingServerItem.pairDisc !== undefined ? matchingServerItem.pairDisc : localItem.pairDisc,
+              disc:
+                matchingServerItem.disc !== undefined
+                  ? matchingServerItem.disc
+                  : localItem.disc,
+              promoDisc:
+                matchingServerItem.promoDisc !== undefined
+                  ? matchingServerItem.promoDisc
+                  : localItem.promoDisc,
+              pairDisc:
+                matchingServerItem.pairDisc !== undefined
+                  ? matchingServerItem.pairDisc
+                  : localItem.pairDisc,
               promoName: matchingServerItem.promoName || localItem.promoName,
               promoCode: matchingServerItem.promoCode || localItem.promoCode,
-              discountPriceCode: matchingServerItem.discountPriceCode || localItem.discountPriceCode,
-              amount: parseFloat(Math.max(0, localItem.qty * (matchingServerItem.price || localItem.price) - (matchingServerItem.disc || 0)).toFixed(2)),
+              discountPriceCode:
+                matchingServerItem.discountPriceCode ||
+                localItem.discountPriceCode,
+              amount: parseFloat(
+                Math.max(
+                  0,
+                  localItem.qty *
+                    (matchingServerItem.price || localItem.price) -
+                    (matchingServerItem.disc || 0),
+                ).toFixed(2),
+              ),
             };
           });
         }
@@ -316,7 +353,9 @@ export default function PosBillingScreen({
       if (isLatest && targetItemCode) {
         let matchedIdx = -1;
         for (let i = serverItems.length - 1; i >= 0; i--) {
-          if (serverItems[i].code.toUpperCase() === targetItemCode.toUpperCase()) {
+          if (
+            serverItems[i].code.toUpperCase() === targetItemCode.toUpperCase()
+          ) {
             matchedIdx = i;
             break;
           }
@@ -329,7 +368,7 @@ export default function PosBillingScreen({
         scrollToCartBottom(true);
       }
     },
-    []
+    [],
   );
 
   // Helper to scroll cart view to the bottom cleanly across native and web
@@ -415,7 +454,8 @@ export default function PosBillingScreen({
   const [showPriceChangeModal, setShowPriceChangeModal] = useState(false);
   const [overridePrice, setOverridePrice] = useState("");
   const [bPriceChange, setBPriceChange] = useState<boolean>(false); // Exact VB.NET bPriceChange toggle
-  const [maxPriceChangeAllowed, setMaxPriceChangeAllowed] = useState<number>(100);
+  const [maxPriceChangeAllowed, setMaxPriceChangeAllowed] =
+    useState<number>(100);
 
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [receiptSummary, setReceiptSummary] = useState<{
@@ -429,12 +469,18 @@ export default function PosBillingScreen({
   const [showHoldListModal, setShowHoldListModal] = useState<boolean>(false);
   const [holdList, setHoldList] = useState<HoldHeaderItem[]>([]);
   const [loadingHoldList, setLoadingHoldList] = useState<boolean>(false);
-  const [showManualHoldModal, setShowManualHoldModal] = useState<boolean>(false);
+  const [showManualHoldModal, setShowManualHoldModal] =
+    useState<boolean>(false);
   const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
-  const [adminAuthContext, setAdminAuthContext] = useState<"HOLD" | "PRICE_CHANGE">("HOLD");
-  const [showClearAdminModal, setShowClearAdminModal] = useState<boolean>(false);
-  const [pendingReleaseHoldNo, setPendingReleaseHoldNo] = useState<number | null>(null);
+  const [adminAuthContext, setAdminAuthContext] = useState<
+    "HOLD" | "PRICE_CHANGE"
+  >("HOLD");
+  const [showClearAdminModal, setShowClearAdminModal] =
+    useState<boolean>(false);
+  const [pendingReleaseHoldNo, setPendingReleaseHoldNo] = useState<
+    number | null
+  >(null);
   const [isClearing, setIsClearing] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [showAllCounters, setShowAllCounters] = useState<boolean>(false);
@@ -451,7 +497,7 @@ export default function PosBillingScreen({
     title: string,
     message: string,
     type: "success" | "warning" | "error" | "info" = "info",
-    onConfirm?: () => void
+    onConfirm?: () => void,
   ) => {
     setCustomAlert({
       visible: true,
@@ -469,7 +515,7 @@ export default function PosBillingScreen({
     onConfirm: () => void,
     onCancel?: () => void,
     confirmText = "Yes, Proceed",
-    cancelText = "Cancel"
+    cancelText = "Cancel",
   ) => {
     setCustomAlert({
       visible: true,
@@ -503,8 +549,10 @@ export default function PosBillingScreen({
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
   const [showViewBillModal, setShowViewBillModal] = useState<boolean>(false);
   const [showVoidBillModal, setShowVoidBillModal] = useState<boolean>(false);
-  const [showTotalSalesModal, setShowTotalSalesModal] = useState<boolean>(false);
-  const [showMemberManagementModal, setShowMemberManagementModal] = useState<boolean>(false);
+  const [showTotalSalesModal, setShowTotalSalesModal] =
+    useState<boolean>(false);
+  const [showMemberManagementModal, setShowMemberManagementModal] =
+    useState<boolean>(false);
   const [isExchangeMode, setIsExchangeMode] = useState<boolean>(false);
 
   // Refs for auto-focusing inputs
@@ -586,7 +634,9 @@ export default function PosBillingScreen({
   const fetchSavedCart = async () => {
     try {
       const activeTerm = (terminalCode || "").trim();
-      const res = await fetch(`${API_URL}/api/cart/temp-sales?terminalCode=${encodeURIComponent(activeTerm)}`);
+      const res = await fetch(
+        `${API_URL}/api/cart/temp-sales?terminalCode=${encodeURIComponent(activeTerm)}`,
+      );
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.items)) {
         if (data.items.length > 0) {
@@ -660,9 +710,11 @@ export default function PosBillingScreen({
       const activeTerm = (terminalCode || "").trim();
       const loc = (effectiveLocation || locationCode || "").trim();
       let queryParams = [];
-      if (activeTerm) queryParams.push(`terminalCode=${encodeURIComponent(activeTerm)}`);
+      if (activeTerm)
+        queryParams.push(`terminalCode=${encodeURIComponent(activeTerm)}`);
       if (loc) queryParams.push(`locationCode=${encodeURIComponent(loc)}`);
-      if (groupCode) queryParams.push(`groupCode=${encodeURIComponent(groupCode)}`);
+      if (groupCode)
+        queryParams.push(`groupCode=${encodeURIComponent(groupCode)}`);
       // Fetch all available category items so multi-page pagination (Page 1, 2, ...) can display all items
       queryParams.push(`maxData=0`);
 
@@ -724,10 +776,7 @@ export default function PosBillingScreen({
     return Math.max(1, count);
   }, [railHeight]);
 
-  const totalGroupPages = Math.max(
-    1,
-    Math.ceil(groups.length / groupsPerPage),
-  );
+  const totalGroupPages = Math.max(1, Math.ceil(groups.length / groupsPerPage));
 
   const visibleGroups = useMemo(() => {
     return groups.slice(
@@ -811,26 +860,35 @@ export default function PosBillingScreen({
   // ---------------------------------------------------------------------------
   // CART OPERATIONS
   // ---------------------------------------------------------------------------
-  const handleAddItem = async (item: TouchItem, explicitQty?: number, explicitPrice?: number, explicitDesc?: string, explicitSalesman?: string) => {
+  const handleAddItem = async (
+    item: TouchItem,
+    explicitQty?: number,
+    explicitPrice?: number,
+    explicitDesc?: string,
+    explicitSalesman?: string,
+  ) => {
     // Check if license is flagged as expired locally (fast non-blocking check)
     if (licenseExpired) {
       setShowLicenseModal(true);
       return;
     }
 
-    const rawQtyToAdd = explicitQty !== undefined 
-      ? explicitQty 
-      : (isManualFastQtyEnteredRef.current ? (parseFloat(fastQty) || 1) : (isExchangeMode ? -1 : 1));
+    const rawQtyToAdd =
+      explicitQty !== undefined
+        ? explicitQty
+        : isManualFastQtyEnteredRef.current
+          ? parseFloat(fastQty) || 1
+          : isExchangeMode
+            ? -1
+            : 1;
     const qtyToAdd = isExchangeMode ? -Math.abs(rawQtyToAdd) : rawQtyToAdd;
     isManualFastQtyEnteredRef.current = false;
-    const discToAdd = isExchangeMode ? 0 : (parseFloat(fastDisc) || 0);
-    const finalPrice = explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
+    const discToAdd = isExchangeMode ? 0 : parseFloat(fastDisc) || 0;
+    const finalPrice =
+      explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
     const finalDesc = explicitDesc || item.Description;
     const finalSalesman = explicitSalesman || salesMan || effectiveLocation;
     const initialStock = item.Stock !== undefined ? Number(item.Stock) : 0;
-
-
-
 
     // Check if item has $0.00 price (Zero-Price Item workflow) OR if Price Change mode is ON:
     // If bPriceChange is active, prompt manual price entry with the existing item price pre-filled
@@ -838,11 +896,18 @@ export default function PosBillingScreen({
       setSkuCode(item.InventoryCode);
       setSkuDesc(finalDesc);
       if (item.IsFixedPrice) {
-        showAlert("Fixed Price Item", "This item is marked as Fixed Price. Price Change is not allowed.", "warning");
+        showAlert(
+          "Fixed Price Item",
+          "This item is marked as Fixed Price. Price Change is not allowed.",
+          "warning",
+        );
         return;
       }
 
-      const existingPrice = Number(finalPrice) > 0 ? Number(finalPrice) : Number(item.SellingPrice || 0);
+      const existingPrice =
+        Number(finalPrice) > 0
+          ? Number(finalPrice)
+          : Number(item.SellingPrice || 0);
 
       setPendingZeroPriceItem({
         InventoryCode: item.InventoryCode,
@@ -928,7 +993,8 @@ export default function PosBillingScreen({
       for (let i = prev.length - 1; i >= 0; i--) {
         if (
           prev[i].code === item.InventoryCode &&
-          ((qtyToAdd < 0 && prev[i].qty < 0) || (qtyToAdd > 0 && prev[i].qty > 0))
+          ((qtyToAdd < 0 && prev[i].qty < 0) ||
+            (qtyToAdd > 0 && prev[i].qty > 0))
         ) {
           existingIdx = i;
           break;
@@ -943,9 +1009,10 @@ export default function PosBillingScreen({
                 qty: c.qty + qtyToAdd,
                 disc: c.disc + discToAdd,
                 amount: parseFloat(
-                  ((c.qty + qtyToAdd) * (c.normalPrice || c.price) - (c.disc + discToAdd)).toFixed(
-                    2,
-                  ),
+                  (
+                    (c.qty + qtyToAdd) * (c.normalPrice || c.price) -
+                    (c.disc + discToAdd)
+                  ).toFixed(2),
                 ),
               }
             : c,
@@ -960,9 +1027,7 @@ export default function PosBillingScreen({
           qty: qtyToAdd,
           price: finalPrice,
           disc: discToAdd,
-          amount: parseFloat(
-            (qtyToAdd * finalPrice - discToAdd).toFixed(2),
-          ),
+          amount: parseFloat((qtyToAdd * finalPrice - discToAdd).toFixed(2)),
           gst: 0.0,
           salesman: finalSalesman,
           uom: item.UOM || "PCS",
@@ -995,7 +1060,11 @@ export default function PosBillingScreen({
         .then((res) => res.json())
         .then((data) => {
           if (data && data.success && Array.isArray(data.cartItems)) {
-            reconcileCartWithServer(data.cartItems, currentSeq, item.InventoryCode);
+            reconcileCartWithServer(
+              data.cartItems,
+              currentSeq,
+              item.InventoryCode,
+            );
           }
         })
         .catch(() => {});
@@ -1012,7 +1081,6 @@ export default function PosBillingScreen({
     setFastDiscPerc("0");
   };
 
-  
   // VB.NET subActivateExchange() - Initiates Exchange Mode (-1 qty)
   const triggerExchangeMode = () => {
     setShowMoreMenuModal(false);
@@ -1024,7 +1092,7 @@ export default function PosBillingScreen({
         setIsExchangeMode(true);
         setFastQty("-1");
         skuInputRef.current?.focus();
-      }
+      },
     );
   };
   const handleFastPriceCommit = async (enteredPriceStr: string) => {
@@ -1032,7 +1100,11 @@ export default function PosBillingScreen({
     const enteredPrice = parseFloat(enteredPriceStr);
     if (isNaN(enteredPrice) || enteredPrice <= 0) {
       if (pendingZeroPriceItem) {
-        showAlert("Price Required", "Please enter a valid price greater than $0.00 for this item.", "warning");
+        showAlert(
+          "Price Required",
+          "Please enter a valid price greater than $0.00 for this item.",
+          "warning",
+        );
         fastPriceInputRef.current?.focus();
       }
       return;
@@ -1047,14 +1119,21 @@ export default function PosBillingScreen({
 
       // VB.NET txtPrice_Leave Price Change Validation
       if (targetItem.isPriceChangeMode) {
-        const originalPrice = Number(targetItem.SellingPrice || targetItem.Price || 0);
-        if (originalPrice > 0 && maxPriceChangeAllowed > 0 && maxPriceChangeAllowed < 100) {
-          const minAllowedPrice = originalPrice * (1 - maxPriceChangeAllowed / 100);
+        const originalPrice = Number(
+          targetItem.SellingPrice || targetItem.Price || 0,
+        );
+        if (
+          originalPrice > 0 &&
+          maxPriceChangeAllowed > 0 &&
+          maxPriceChangeAllowed < 100
+        ) {
+          const minAllowedPrice =
+            originalPrice * (1 - maxPriceChangeAllowed / 100);
           if (enteredPrice < minAllowedPrice) {
             showAlert(
               "Price Change Limit Exceeded",
               `More Price Change cannot be allowed !!! ... Max Discount : ${maxPriceChangeAllowed.toFixed(2)}% (Min Price: ${minAllowedPrice.toFixed(2)})`,
-              "warning"
+              "warning",
             );
             isCommittingPriceRef.current = false;
             fastPriceInputRef.current?.focus();
@@ -1082,7 +1161,11 @@ export default function PosBillingScreen({
 
         const data = await res.json();
         if (data && data.success && Array.isArray(data.cartItems)) {
-          reconcileCartWithServer(data.cartItems, currentSeq, targetItem.InventoryCode);
+          reconcileCartWithServer(
+            data.cartItems,
+            currentSeq,
+            targetItem.InventoryCode,
+          );
         }
 
         // Clear pending item and reset input bar
@@ -1094,13 +1177,18 @@ export default function PosBillingScreen({
         setFastDisc("0.00");
         skuInputRef.current?.focus();
       } catch (err: any) {
-        showAlert("Error", "Failed to add item with price: " + err.message, "error");
+        showAlert(
+          "Error",
+          "Failed to add item with price: " + err.message,
+          "error",
+        );
       } finally {
         isCommittingPriceRef.current = false;
       }
     } else if (cart.length > 0) {
       // If an existing cart item is selected, update its price (Price Change)
-      const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      const targetIdx =
+        selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
       const targetItem = cart[targetIdx];
       if (targetItem) {
         const activeTerm = (terminalCode || "").trim();
@@ -1112,10 +1200,12 @@ export default function PosBillingScreen({
               ? {
                   ...c,
                   price: enteredPrice,
-                  amount: parseFloat((c.qty * enteredPrice - c.disc).toFixed(2)),
+                  amount: parseFloat(
+                    (c.qty * enteredPrice - c.disc).toFixed(2),
+                  ),
                 }
-              : c
-          )
+              : c,
+          ),
         );
         setActiveItem({
           name: targetItem.description,
@@ -1138,7 +1228,12 @@ export default function PosBillingScreen({
           })
             .then((res) => res.json())
             .then((data) => {
-              if (currentSeq === cartMutationSeqRef.current && data && data.success && Array.isArray(data.cartItems)) {
+              if (
+                currentSeq === cartMutationSeqRef.current &&
+                data &&
+                data.success &&
+                Array.isArray(data.cartItems)
+              ) {
                 setCart(data.cartItems);
               }
             })
@@ -1163,7 +1258,8 @@ export default function PosBillingScreen({
 
     // If an item is currently selected in the cart, update its quantity immediately
     if (cart.length > 0) {
-      const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      const targetIdx =
+        selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
       const targetItem = cart[targetIdx];
       if (targetItem) {
         setCart((prev) =>
@@ -1176,7 +1272,7 @@ export default function PosBillingScreen({
               };
             }
             return c;
-          })
+          }),
         );
 
         setActiveItem((prev) => ({
@@ -1201,7 +1297,9 @@ export default function PosBillingScreen({
               if (data && data.success && Array.isArray(data.cartItems)) {
                 setCart(data.cartItems);
                 const reMatched = data.cartItems.find(
-                  (ci: any) => (ci.id && ci.id === targetItem.id) || ci.code === targetItem.code
+                  (ci: any) =>
+                    (ci.id && ci.id === targetItem.id) ||
+                    ci.code === targetItem.code,
                 );
                 if (reMatched) {
                   setActiveItem((prevActive) => ({
@@ -1230,7 +1328,8 @@ export default function PosBillingScreen({
     setFastDiscPerc(String(parsed));
 
     if (cart.length > 0) {
-      const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      const targetIdx =
+        selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
       const targetItem = cart[targetIdx];
       if (targetItem) {
         const gross = targetItem.qty * targetItem.price;
@@ -1247,7 +1346,7 @@ export default function PosBillingScreen({
               };
             }
             return c;
-          })
+          }),
         );
 
         try {
@@ -1277,12 +1376,14 @@ export default function PosBillingScreen({
     setFastDisc(parsed.toFixed(2));
 
     if (cart.length > 0) {
-      const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+      const targetIdx =
+        selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
       const targetItem = cart[targetIdx];
       if (targetItem) {
         const gross = targetItem.qty * targetItem.price;
         const discAmt = Math.min(parsed, gross);
-        const calculatedPerc = gross > 0 ? parseFloat(((discAmt / gross) * 100).toFixed(1)) : 0;
+        const calculatedPerc =
+          gross > 0 ? parseFloat(((discAmt / gross) * 100).toFixed(1)) : 0;
         setFastDiscPerc(String(calculatedPerc));
 
         setCart((prev) =>
@@ -1295,7 +1396,7 @@ export default function PosBillingScreen({
               };
             }
             return c;
-          })
+          }),
         );
 
         try {
@@ -1391,7 +1492,8 @@ export default function PosBillingScreen({
     });
 
     // 2. Accumulate delta for rapid-click batching
-    pendingQtyDeltaMapRef.current[itemKey] = (pendingQtyDeltaMapRef.current[itemKey] || 0) + delta;
+    pendingQtyDeltaMapRef.current[itemKey] =
+      (pendingQtyDeltaMapRef.current[itemKey] || 0) + delta;
 
     // 3. Send exact target quantity to MSSQL to guarantee 100% precision
     if (qtySyncDebounceTimerRef.current) {
@@ -1420,7 +1522,8 @@ export default function PosBillingScreen({
         if (res.ok && data && data.success && Array.isArray(data.cartItems)) {
           reconcileCartWithServer(data.cartItems, currentSeq, targetItem.code);
           const reMatched = data.cartItems.find(
-            (ci: any) => (ci.id && ci.id === targetItem.id) || ci.code === targetItem.code
+            (ci: any) =>
+              (ci.id && ci.id === targetItem.id) || ci.code === targetItem.code,
           );
           if (reMatched && currentSeq === cartMutationSeqRef.current) {
             setActiveItem((prevActive) => ({
@@ -1441,19 +1544,28 @@ export default function PosBillingScreen({
   // Delete selected item from cart - Exact VB.NET subVoidItem() workflow
   const handleDeleteItem = () => {
     if (cart.length === 0) {
-      showAlert("Cart Empty", "No item available to delete in the cart.", "info");
+      showAlert(
+        "Cart Empty",
+        "No item available to delete in the cart.",
+        "info",
+      );
       return;
     }
     if (isDeleting) return;
 
-    const targetIdx = selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
+    const targetIdx =
+      selectedCartIndex >= 0 ? selectedCartIndex : cart.length - 1;
     const targetItem = cart[targetIdx];
     if (!targetItem) return;
 
     // Rule 1: Do not allow deletion of BCRS DEPOSIT
     const codeUpper = (targetItem.code || "").toUpperCase();
     if (codeUpper === "BCRS DEPOSIT" || codeUpper.includes("BCRS")) {
-      showAlert("Action Not Allowed", "Deletion of BCRS DEPOSIT is not permitted.", "warning");
+      showAlert(
+        "Action Not Allowed",
+        "Deletion of BCRS DEPOSIT is not permitted.",
+        "warning",
+      );
       return;
     }
 
@@ -1482,7 +1594,11 @@ export default function PosBillingScreen({
             // Remove item from frontend state
             const remainingCart = cart.filter((_, i) => i !== targetIdx);
             setCart(remainingCart);
-            setSelectedCartIndex(remainingCart.length > 0 ? Math.min(targetIdx, remainingCart.length - 1) : -1);
+            setSelectedCartIndex(
+              remainingCart.length > 0
+                ? Math.min(targetIdx, remainingCart.length - 1)
+                : -1,
+            );
 
             // If no items remain, reset active item display
             if (remainingCart.length === 0) {
@@ -1503,17 +1619,25 @@ export default function PosBillingScreen({
               });
             }
           } else {
-            showAlert("Delete Failed", data.message || "Failed to delete item", "error");
+            showAlert(
+              "Delete Failed",
+              data.message || "Failed to delete item",
+              "error",
+            );
           }
         } catch (err: any) {
-          showAlert("Delete Error", err.message || "Network error while deleting item", "error");
+          showAlert(
+            "Delete Error",
+            err.message || "Network error while deleting item",
+            "error",
+          );
         } finally {
           setIsDeleting(false);
         }
       },
       undefined,
       "Yes, Delete",
-      "Cancel"
+      "Cancel",
     );
   };
 
@@ -1543,7 +1667,10 @@ export default function PosBillingScreen({
   };
 
   // Backend Clear Execution with SQL Transaction & sp_SalesHeaderClear
-  const executeClearBackend = async (adminId?: string, onCleared?: () => Promise<void> | void) => {
+  const executeClearBackend = async (
+    adminId?: string,
+    onCleared?: () => Promise<void> | void,
+  ) => {
     if (isClearing) return;
     setIsClearing(true);
 
@@ -1580,19 +1707,28 @@ export default function PosBillingScreen({
       } else {
         const detailedMessage =
           data?.message ||
-          (textResp && textResp.length > 0 && textResp.length < 500 ? textResp : null) ||
+          (textResp && textResp.length > 0 && textResp.length < 500
+            ? textResp
+            : null) ||
           `HTTP ${response.status}: Failed to execute clear transaction`;
         showAlert("Clear Failed", detailedMessage, "error");
       }
     } catch (err: any) {
-      showAlert("Clear Error", err.message || "Network error during Clear process", "error");
+      showAlert(
+        "Clear Error",
+        err.message || "Network error during Clear process",
+        "error",
+      );
     } finally {
       setIsClearing(false);
     }
   };
 
   // Submit handler for Clear Admin Authorization Modal
-  const handleClearAdminAuthSubmit = async (adminUser: string, adminPass: string): Promise<boolean> => {
+  const handleClearAdminAuthSubmit = async (
+    adminUser: string,
+    adminPass: string,
+  ): Promise<boolean> => {
     try {
       const res = await fetch(`${API_URL}/api/pos/clear/verify-admin`, {
         method: "POST",
@@ -1616,7 +1752,7 @@ export default function PosBillingScreen({
             },
             undefined,
             "Clear and Release",
-            "Keep Current Cart"
+            "Keep Current Cart",
           );
         } else {
           showConfirm(
@@ -1625,7 +1761,7 @@ export default function PosBillingScreen({
             () => executeClearBackend(data.adminUser),
             undefined,
             "Yes, Clear",
-            "No"
+            "No",
           );
         }
         return true;
@@ -1649,7 +1785,7 @@ export default function PosBillingScreen({
     try {
       const activeCashier = (cashierName || "UPS").trim();
       const permRes = await fetch(
-        `${API_URL}/api/pos/clear/check-permission?cashierId=${encodeURIComponent(activeCashier)}`
+        `${API_URL}/api/pos/clear/check-permission?cashierId=${encodeURIComponent(activeCashier)}`,
       );
       const permData = await permRes.json();
 
@@ -1666,7 +1802,7 @@ export default function PosBillingScreen({
         () => executeClearBackend(),
         undefined,
         "Yes, Clear",
-        "No"
+        "No",
       );
     } catch (err) {
       // If permission check fails, show fallback confirmation dialog
@@ -1676,7 +1812,7 @@ export default function PosBillingScreen({
         () => executeClearBackend(),
         undefined,
         "Yes, Clear",
-        "No"
+        "No",
       );
     }
   };
@@ -1692,9 +1828,10 @@ export default function PosBillingScreen({
     setLoadingHoldList(true);
     try {
       const activeTerm = (terminalCode || "").trim();
-      const url = isAll || !activeTerm
-        ? `${API_URL}/api/hold/list`
-        : `${API_URL}/api/hold/list?terminalCode=${encodeURIComponent(activeTerm)}`;
+      const url =
+        isAll || !activeTerm
+          ? `${API_URL}/api/hold/list`
+          : `${API_URL}/api/hold/list?terminalCode=${encodeURIComponent(activeTerm)}`;
       const res = await fetch(url);
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.holds)) {
@@ -1751,7 +1888,7 @@ export default function PosBillingScreen({
       showAlert(
         "Feature Disabled",
         "Hold Bill functionality is disabled in System Configuration (HOLDBILL = 0).",
-        "warning"
+        "warning",
       );
       return;
     }
@@ -1760,7 +1897,7 @@ export default function PosBillingScreen({
       showAlert(
         "Cart is Empty",
         "No item in cart. Please scan or add items before holding a bill.",
-        "warning"
+        "warning",
       );
       return;
     }
@@ -1768,7 +1905,9 @@ export default function PosBillingScreen({
     // Condition 2: Check Cashier Permission for F6
     try {
       const activeUser = (cashierName || "UPS").trim();
-      const permRes = await fetch(`${API_URL}/api/hold/check-permission?cashierId=${encodeURIComponent(activeUser)}`);
+      const permRes = await fetch(
+        `${API_URL}/api/hold/check-permission?cashierId=${encodeURIComponent(activeUser)}`,
+      );
       const permData = await permRes.json();
 
       if (permRes.ok && permData.requiresAdminAuth) {
@@ -1799,7 +1938,10 @@ export default function PosBillingScreen({
   };
 
   // Admin authorization submission
-  const handleAdminAuthSubmit = async (user: string, pass: string): Promise<boolean> => {
+  const handleAdminAuthSubmit = async (
+    user: string,
+    pass: string,
+  ): Promise<boolean> => {
     try {
       if (adminAuthContext === "PRICE_CHANGE") {
         const res = await fetch(`${API_URL}/api/price-change/verify-admin`, {
@@ -1850,7 +1992,7 @@ export default function PosBillingScreen({
     try {
       const activeCashier = (cashierName || "UPS").trim();
       const permRes = await fetch(
-        `${API_URL}/api/pos/clear/check-permission?cashierId=${encodeURIComponent(activeCashier)}`
+        `${API_URL}/api/pos/clear/check-permission?cashierId=${encodeURIComponent(activeCashier)}`,
       );
       const permData = await permRes.json();
 
@@ -1861,7 +2003,10 @@ export default function PosBillingScreen({
         return;
       }
     } catch (e) {
-      console.warn("Could not check clear permission, proceeding to confirmation:", e);
+      console.warn(
+        "Could not check clear permission, proceeding to confirmation:",
+        e,
+      );
     }
 
     // Step 2: Show confirmation dialog
@@ -1876,7 +2021,7 @@ export default function PosBillingScreen({
       },
       undefined,
       "Clear and Release",
-      "Keep Current Cart"
+      "Keep Current Cart",
     );
   };
 
@@ -1912,7 +2057,7 @@ export default function PosBillingScreen({
         showAlert(
           "Hold Released",
           `Hold #${holdNo} has been restored into the active cart.`,
-          "success"
+          "success",
         );
       } else {
         const errMsg = data.message || "Failed to release hold bill";
@@ -1931,13 +2076,19 @@ export default function PosBillingScreen({
       `Are you sure you want to delete and permanently discard Hold #${holdNo}?`,
       async () => {
         try {
-          const res = await fetch(`${API_URL}/api/hold/${holdNo}`, { method: "DELETE" });
+          const res = await fetch(`${API_URL}/api/hold/${holdNo}`, {
+            method: "DELETE",
+          });
           const data = await res.json();
           if (res.ok && data.success) {
             fetchHoldList();
             showAlert("Deleted", `Hold #${holdNo} has been removed.`, "info");
           } else {
-            showAlert("Delete Failed", data.message || "Could not delete hold bill", "error");
+            showAlert(
+              "Delete Failed",
+              data.message || "Could not delete hold bill",
+              "error",
+            );
           }
         } catch (e: any) {
           showAlert("Error", e.message || "Network error", "error");
@@ -1945,7 +2096,7 @@ export default function PosBillingScreen({
       },
       undefined,
       "Delete Bill",
-      "Keep Bill"
+      "Keep Bill",
     );
   };
 
@@ -1963,7 +2114,9 @@ export default function PosBillingScreen({
     const timer = setTimeout(async () => {
       try {
         setIsSearchingDesc(true);
-        const res = await fetch(`${API_URL}/api/inventory/search-desc?q=${encodeURIComponent(skuDesc.trim())}&limit=12`);
+        const res = await fetch(
+          `${API_URL}/api/inventory/search-desc?q=${encodeURIComponent(skuDesc.trim())}&limit=12`,
+        );
         const data = await res.json();
         if (data.success && Array.isArray(data.items)) {
           setDescSearchResults(data.items);
@@ -1986,7 +2139,10 @@ export default function PosBillingScreen({
   // ---------------------------------------------------------------------------
   // COMPLETE VB.NET POS ITEM LOOKUP & PROCESSING PIPELINE (txtInventoryCode_Leave)
   // ---------------------------------------------------------------------------
-  const processItemLookup = async (codeToLookup: string, forcedSalesman?: string) => {
+  const processItemLookup = async (
+    codeToLookup: string,
+    forcedSalesman?: string,
+  ) => {
     if (licenseExpired) {
       setShowLicenseModal(true);
       return;
@@ -2022,7 +2178,11 @@ export default function PosBillingScreen({
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        showAlert("Invalid Item", data.message || "Item not found in inventory.", "error");
+        showAlert(
+          "Invalid Item",
+          data.message || "Item not found in inventory.",
+          "error",
+        );
         setSkuCode("");
         return;
       }
@@ -2053,20 +2213,25 @@ export default function PosBillingScreen({
       // Complete cart insertion
       finalizeValidatedItemAdd(data, data.salesman || forcedSalesman);
     } catch (err: any) {
-      showAlert("Lookup Error", err.message || "Failed to process item code.", "error");
+      showAlert(
+        "Lookup Error",
+        err.message || "Failed to process item code.",
+        "error",
+      );
     }
   };
 
   const finalizeValidatedItemAdd = (data: any, chosenSalesman?: string) => {
-    const finalSalesman = chosenSalesman || data.salesmanCode || salesMan || effectiveLocation;
+    const finalSalesman =
+      chosenSalesman || data.salesmanCode || salesMan || effectiveLocation;
     const itemData = data.item || {};
     const finalQty = Number(data.quantity || itemData.Qty || fastQty) || 1;
     const finalPrice =
       data.price !== undefined && !isNaN(Number(data.price))
         ? Number(data.price)
         : itemData.Price !== undefined && !isNaN(Number(itemData.Price))
-        ? Number(itemData.Price)
-        : Number(itemData.SellingPrice || itemData.RetailPrice || 0);
+          ? Number(itemData.Price)
+          : Number(itemData.SellingPrice || itemData.RetailPrice || 0);
 
     // Update active item HUD
     setActiveItem({
@@ -2094,7 +2259,13 @@ export default function PosBillingScreen({
       UOM: itemData.UOM || "PCS",
     };
 
-    handleAddItem(touchItem, finalQty, finalPrice, itemData.Description, finalSalesman);
+    handleAddItem(
+      touchItem,
+      finalQty,
+      finalPrice,
+      itemData.Description,
+      finalSalesman,
+    );
 
     // Reset inputs
     setSkuCode("");
@@ -2106,7 +2277,6 @@ export default function PosBillingScreen({
     setFastDiscPerc("0");
     skuInputRef.current?.focus();
   };
-
 
   // ---------------------------------------------------------------------------
   // DIRECT SKU VALIDATION & TBLTEMPSALES INSERTION (txtInventoryCode_Leave / Enter)
@@ -2146,7 +2316,7 @@ export default function PosBillingScreen({
         showAlert(
           "Invalid SKU Code",
           data.message || "Invalid SKU Code. Item not found in Inventory.",
-          "error"
+          "error",
         );
         setSkuCode("");
         skuInputRef.current?.focus();
@@ -2156,12 +2326,18 @@ export default function PosBillingScreen({
       // Check if item has 0 price (requires price prompt) or Price Change Mode is active
       if (bPriceChange) {
         if (data.item?.IsFixedPrice) {
-          showAlert("Fixed Price Item", "This item is marked as Fixed Price. Price Change is not allowed.", "warning");
+          showAlert(
+            "Fixed Price Item",
+            "This item is marked as Fixed Price. Price Change is not allowed.",
+            "warning",
+          );
           setSkuCode("");
           return;
         }
 
-        const existingPrice = Number(data.item.Price || data.item.SellingPrice || 0);
+        const existingPrice = Number(
+          data.item.Price || data.item.SellingPrice || 0,
+        );
 
         setSkuCode(data.item.InventoryCode);
         setSkuDesc(data.item.Description);
@@ -2194,8 +2370,9 @@ export default function PosBillingScreen({
         setFastPrice("");
         showAlert(
           "Amount Required",
-          data.message || "Please enter a valid Amount for this item. Amount cannot be 0.",
-          "warning"
+          data.message ||
+            "Please enter a valid Amount for this item. Amount cannot be 0.",
+          "warning",
         );
         setTimeout(() => {
           fastPriceInputRef.current?.focus();
@@ -2233,7 +2410,11 @@ export default function PosBillingScreen({
       setFastDiscPerc("0");
       skuInputRef.current?.focus();
     } catch (err: any) {
-      showAlert("SKU Error", err.message || "Network error while validating SKU code.", "error");
+      showAlert(
+        "SKU Error",
+        err.message || "Network error while validating SKU code.",
+        "error",
+      );
       setSkuCode("");
       skuInputRef.current?.focus();
     } finally {
@@ -2299,7 +2480,7 @@ export default function PosBillingScreen({
       const activeTerm = (terminalCode || "").trim();
       const activeUser = (cashierName || "ADMIN").trim();
       const activeLoc = (locationCode || "HQ").trim();
-      const invNo = ("INV" + Date.now().toString().slice(-10));
+      const invNo = "INV" + Date.now().toString().slice(-10);
 
       await fetch(`${API_URL}/api/cart/checkout`, {
         method: "POST",
@@ -2327,14 +2508,19 @@ export default function PosBillingScreen({
   const subPriceChange = () => {
     // If cart has items, open the Price Change Modal for selected or last item
     if (cart.length > 0) {
-      const targetIdx = selectedCartIndex >= 0 && selectedCartIndex < cart.length
-        ? selectedCartIndex
-        : cart.length - 1;
+      const targetIdx =
+        selectedCartIndex >= 0 && selectedCartIndex < cart.length
+          ? selectedCartIndex
+          : cart.length - 1;
       const targetItem = cart[targetIdx];
 
       if (targetItem) {
         if ((targetItem as any).isFixedPrice) {
-          showAlert("Price Change Not Allowed", "This item has a fixed price and cannot be changed.", "warning");
+          showAlert(
+            "Price Change Not Allowed",
+            "This item has a fixed price and cannot be changed.",
+            "warning",
+          );
           return;
         }
         setOverridePrice(targetItem.price ? targetItem.price.toFixed(2) : "");
@@ -2359,7 +2545,9 @@ export default function PosBillingScreen({
   const handlePriceChangeClick = async () => {
     try {
       const activeUser = (cashierName || "UPS").trim();
-      const res = await fetch(`${API_URL}/api/price-change/check-permission?cashierId=${encodeURIComponent(activeUser)}`);
+      const res = await fetch(
+        `${API_URL}/api/price-change/check-permission?cashierId=${encodeURIComponent(activeUser)}`,
+      );
       const data = await res.json();
 
       if (res.ok && data.success && data.allowed) {
@@ -2382,9 +2570,10 @@ export default function PosBillingScreen({
       return;
     }
 
-    const targetIdx = selectedCartIndex >= 0 && selectedCartIndex < cart.length
-      ? selectedCartIndex
-      : cart.length - 1;
+    const targetIdx =
+      selectedCartIndex >= 0 && selectedCartIndex < cart.length
+        ? selectedCartIndex
+        : cart.length - 1;
 
     if (targetIdx < 0 || targetIdx >= cart.length) {
       setShowPriceChangeModal(false);
@@ -2395,13 +2584,17 @@ export default function PosBillingScreen({
 
     // Validate maxPriceChangeAllowed percentage
     const originalPrice = targetItem.normalPrice || targetItem.price;
-    if (originalPrice > 0 && maxPriceChangeAllowed > 0 && maxPriceChangeAllowed < 100) {
+    if (
+      originalPrice > 0 &&
+      maxPriceChangeAllowed > 0 &&
+      maxPriceChangeAllowed < 100
+    ) {
       const minAllowedPrice = originalPrice * (1 - maxPriceChangeAllowed / 100);
       if (newPrice < minAllowedPrice) {
         showAlert(
           "Price Change Limit Exceeded",
           `More Price Change cannot be allowed !!! ... Max Discount : ${maxPriceChangeAllowed.toFixed(2)}% (Min Price: $${minAllowedPrice.toFixed(2)})`,
-          "warning"
+          "warning",
         );
         return;
       }
@@ -2417,8 +2610,8 @@ export default function PosBillingScreen({
               price: newPrice,
               amount: parseFloat((c.qty * newPrice - c.disc).toFixed(2)),
             }
-          : c
-      )
+          : c,
+      ),
     );
     setActiveItem({
       name: targetItem.description,
@@ -2526,7 +2719,8 @@ export default function PosBillingScreen({
       } else if (key === "F10" || code === "F10") {
         e.preventDefault();
         e.stopPropagation();
-        if (keyboardActionsRef.current.onLogout) keyboardActionsRef.current.onLogout();
+        if (keyboardActionsRef.current.onLogout)
+          keyboardActionsRef.current.onLogout();
       } else if (key === "F11" || code === "F11") {
         e.preventDefault();
         e.stopPropagation();
@@ -2539,14 +2733,18 @@ export default function PosBillingScreen({
           keyboardActionsRef.current.handleDeleteItem();
         }
       } else if (key === "TAB" || code === "TAB") {
-        const isSkuFocused = typeof document !== "undefined" && document.activeElement && (
-          document.activeElement.getAttribute("data-test-id") === "sku-code-input" ||
-          document.activeElement === (skuInputRef.current as any)
-        );
-        const isFastPriceFocused = typeof document !== "undefined" && document.activeElement && (
-          document.activeElement.getAttribute("data-test-id") === "fast-price-input" ||
-          document.activeElement === (fastPriceInputRef.current as any)
-        );
+        const isSkuFocused =
+          typeof document !== "undefined" &&
+          document.activeElement &&
+          (document.activeElement.getAttribute("data-test-id") ===
+            "sku-code-input" ||
+            document.activeElement === (skuInputRef.current as any));
+        const isFastPriceFocused =
+          typeof document !== "undefined" &&
+          document.activeElement &&
+          (document.activeElement.getAttribute("data-test-id") ===
+            "fast-price-input" ||
+            document.activeElement === (fastPriceInputRef.current as any));
 
         if (isSkuFocused) {
           e.preventDefault();
@@ -2559,7 +2757,11 @@ export default function PosBillingScreen({
           if (priceVal && parseFloat(priceVal) > 0) {
             keyboardActionsRef.current.handleFastPriceCommit(priceVal);
           } else {
-            showAlert("Amount Required", "Please enter a valid Amount greater than $0.00.", "warning");
+            showAlert(
+              "Amount Required",
+              "Please enter a valid Amount greater than $0.00.",
+              "warning",
+            );
             fastPriceInputRef.current?.focus();
           }
         }
@@ -2581,7 +2783,9 @@ export default function PosBillingScreen({
         {...props}
         style={[
           style,
-          { fontFamily: isMono ? currentFont.monoFontFamily : activeFontFamily },
+          {
+            fontFamily: isMono ? currentFont.monoFontFamily : activeFontFamily,
+          },
         ]}
       />
     );
@@ -2662,7 +2866,10 @@ export default function PosBillingScreen({
             value={skuCode}
             onChangeText={setSkuCode}
             onKeyPress={(e: any) => {
-              if (e.nativeEvent && (e.nativeEvent.key === "Tab" || e.key === "Tab")) {
+              if (
+                e.nativeEvent &&
+                (e.nativeEvent.key === "Tab" || e.key === "Tab")
+              ) {
                 if (typeof e.preventDefault === "function") e.preventDefault();
                 processDirectSkuCode();
               }
@@ -2687,7 +2894,11 @@ export default function PosBillingScreen({
             onSubmitEditing={handleSkuSubmit}
           />
           {isSearchingDesc && (
-            <ActivityIndicator size="small" color="#64748b" style={{ position: "absolute", right: 8 }} />
+            <ActivityIndicator
+              size="small"
+              color="#64748b"
+              style={{ position: "absolute", right: 8 }}
+            />
           )}
 
           {/* Description Live Search Autocomplete Dropdown */}
@@ -2732,14 +2943,27 @@ export default function PosBillingScreen({
                     }}
                   >
                     <View style={{ flex: 1, marginRight: 8 }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#1e293b" }} numberOfLines={1}>
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: "#1e293b",
+                        }}
+                        numberOfLines={1}
+                      >
                         {prod.Description}
                       </Text>
                       <Text style={{ fontSize: 10, color: "#64748b" }}>
                         SKU: {prod.InventoryCode} | UOM: {prod.UOM || "PCS"}
                       </Text>
                     </View>
-                    <Text style={{ fontSize: 12, fontWeight: "800", color: "#15803d" }}>
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: "800",
+                        color: "#15803d",
+                      }}
+                    >
                       ${Number(prod.SellingPrice).toFixed(2)}
                     </Text>
                   </TouchableOpacity>
@@ -2803,14 +3027,20 @@ export default function PosBillingScreen({
             ref={fastPriceInputRef}
             style={[
               styles.pillInput,
-              Boolean(pendingZeroPriceItem) && { color: "#b45309", fontWeight: "800" },
+              Boolean(pendingZeroPriceItem) && {
+                color: "#b45309",
+                fontWeight: "800",
+              },
             ]}
             placeholder="0.00"
             placeholderTextColor="#94a3b8"
             value={fastPrice}
             onChangeText={setFastPrice}
             onKeyPress={(e: any) => {
-              if (e.nativeEvent && (e.nativeEvent.key === "Tab" || e.key === "Tab")) {
+              if (
+                e.nativeEvent &&
+                (e.nativeEvent.key === "Tab" || e.key === "Tab")
+              ) {
                 if (typeof e.preventDefault === "function") e.preventDefault();
                 handleFastPriceCommit(fastPriceRef.current);
               }
@@ -2851,22 +3081,41 @@ export default function PosBillingScreen({
         {/* If isSalesMan === false (e.g. AMITH): static non-clickable pill with default location code. */}
         {isSalesMan === true ? (
           <TouchableOpacity
-            style={[styles.salesManBtn, { borderColor: currentTheme.primary, backgroundColor: "#f8fafc" }]}
+            style={[
+              styles.salesManBtn,
+              { borderColor: currentTheme.primary, backgroundColor: "#f8fafc" },
+            ]}
             onPress={() => {
               setTempSalesmanCode(salesMan || effectiveLocation);
               setShowSalesmanModal(true);
             }}
             activeOpacity={0.7}
           >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-              <MaterialCommunityIcons name="account-edit-outline" size={14} color={currentTheme.primary} />
-              <Text style={[styles.salesManBtnText, { color: currentTheme.primary }]}>
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 3 }}
+            >
+              <MaterialCommunityIcons
+                name="account-edit-outline"
+                size={14}
+                color={currentTheme.primary}
+              />
+              <Text
+                style={[
+                  styles.salesManBtnText,
+                  { color: currentTheme.primary },
+                ]}
+              >
                 {salesMan ? `SM: ${salesMan}` : `SM: ${effectiveLocation}`}
               </Text>
             </View>
           </TouchableOpacity>
         ) : (
-          <View style={[styles.salesManBtn, { backgroundColor: "#f1f5f9", borderColor: "#e2e8f0" }]}>
+          <View
+            style={[
+              styles.salesManBtn,
+              { backgroundColor: "#f1f5f9", borderColor: "#e2e8f0" },
+            ]}
+          >
             <Text style={[styles.salesManBtnText, { color: "#64748b" }]}>
               {salesMan ? `SM: ${salesMan}` : `SM: ${effectiveLocation}`}
             </Text>
@@ -2908,19 +3157,6 @@ export default function PosBillingScreen({
           />
         </TouchableOpacity>
 
-        {/* Theme & Typography Customizer Button (Loads Theme Color Selector Modal) */}
-        <TouchableOpacity
-          style={styles.moreMenuBtn}
-          onPress={() => setShowThemeModal(true)}
-          activeOpacity={0.8}
-        >
-          <MaterialCommunityIcons
-            name="palette-outline"
-            size={22}
-            color={currentTheme.primary}
-          />
-        </TouchableOpacity>
-
         {/* Three-Dot / More Options Menu (Opens Desktop POS Quick Functions Grid) */}
         <TouchableOpacity
           style={styles.moreMenuBtn}
@@ -2943,7 +3179,7 @@ export default function PosBillingScreen({
                 "Confirm Exit",
                 "Are you sure you want to log out and switch cashier?",
                 "warning",
-                () => onLogout()
+                () => onLogout(),
               );
             }
           }}
@@ -2955,8 +3191,6 @@ export default function PosBillingScreen({
             color="#dc2626"
           />
         </TouchableOpacity>
-
-
 
         {/* Trailing space */}
         <View style={{ flex: 1 }} />
@@ -3146,7 +3380,11 @@ export default function PosBillingScreen({
 
                   return (
                     <TouchableOpacity
-                      key={item.id ? `cart_item_${item.id}` : `cart_item_${item.code}_${idx}`}
+                      key={
+                        item.id
+                          ? `cart_item_${item.id}`
+                          : `cart_item_${item.code}_${idx}`
+                      }
                       style={[styles.tableRow, rowCustomStyle]}
                       onPress={() => setSelectedCartIndex(idx)}
                       activeOpacity={0.85}
@@ -3182,7 +3420,7 @@ export default function PosBillingScreen({
                         {item.code}
                       </Text>
 
-                      <View style={{ flex: 1, justifyContent: 'center' }}>
+                      <View style={{ flex: 1, justifyContent: "center" }}>
                         <Text
                           style={[
                             styles.tdCell,
@@ -3194,11 +3432,39 @@ export default function PosBillingScreen({
                         >
                           {item.description}
                         </Text>
-                        {Boolean((item.promoName && item.promoName !== item.code) || item.promoDisc || item.pairDisc) && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                            <View style={{ backgroundColor: '#ffedd5', borderColor: '#ea580c', borderWidth: 1, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 }}>
-                              <Text style={{ color: '#c2410c', fontSize: 10, fontWeight: '700' }}>
-                                🏷️ {item.promoName || 'PROMOTION'} {item.disc > 0 ? `(-${item.disc.toFixed(2)})` : ''}
+                        {Boolean(
+                          (item.promoName && item.promoName !== item.code) ||
+                          item.promoDisc ||
+                          item.pairDisc,
+                        ) && (
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              marginTop: 2,
+                            }}
+                          >
+                            <View
+                              style={{
+                                backgroundColor: "#ffedd5",
+                                borderColor: "#ea580c",
+                                borderWidth: 1,
+                                borderRadius: 4,
+                                paddingHorizontal: 6,
+                                paddingVertical: 1,
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: "#c2410c",
+                                  fontSize: 10,
+                                  fontWeight: "700",
+                                }}
+                              >
+                                🏷️ {item.promoName || "PROMOTION"}{" "}
+                                {item.disc > 0
+                                  ? `(-${item.disc.toFixed(2)})`
+                                  : ""}
                               </Text>
                             </View>
                           </View>
@@ -3275,7 +3541,9 @@ export default function PosBillingScreen({
             <View style={styles.footerSummaryStrip}>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>Total: </Text>
-                <Text style={styles.summaryChipVal}>${subTotal.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${subTotal.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>Items: </Text>
@@ -3283,19 +3551,27 @@ export default function PosBillingScreen({
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>Disc: </Text>
-                <Text style={styles.summaryChipVal}>${totalDiscount.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${totalDiscount.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>SubTotal: </Text>
-                <Text style={styles.summaryChipVal}>${netBeforeTax.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${netBeforeTax.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>Tax: </Text>
-                <Text style={styles.summaryChipVal}>${taxAmount.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${taxAmount.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.summaryChip}>
                 <Text style={styles.summaryChipLabel}>RoundOff: </Text>
-                <Text style={styles.summaryChipVal}>${roundOff.toFixed(2)}</Text>
+                <Text style={styles.summaryChipVal}>
+                  ${roundOff.toFixed(2)}
+                </Text>
               </View>
             </View>
           </View>
@@ -3752,7 +4028,10 @@ export default function PosBillingScreen({
                 styles.railArrowBtn,
                 groupPageIndex === 0
                   ? styles.railArrowBtnDisabled
-                  : { backgroundColor: currentTheme.primary, borderColor: currentTheme.primary },
+                  : {
+                      backgroundColor: currentTheme.primary,
+                      borderColor: currentTheme.primary,
+                    },
               ]}
               disabled={groupPageIndex === 0}
               onPress={() => setGroupPageIndex((prev) => Math.max(0, prev - 1))}
@@ -3847,7 +4126,10 @@ export default function PosBillingScreen({
                 styles.railArrowBtn,
                 groupPageIndex >= totalGroupPages - 1
                   ? styles.railArrowBtnDisabled
-                  : { backgroundColor: currentTheme.primary, borderColor: currentTheme.primary },
+                  : {
+                      backgroundColor: currentTheme.primary,
+                      borderColor: currentTheme.primary,
+                    },
               ]}
               disabled={groupPageIndex >= totalGroupPages - 1}
               onPress={() =>
@@ -3930,13 +4212,23 @@ export default function PosBillingScreen({
                         {/* Image Box - Controlled by EnableImageforTouchPad setting */}
                         {isEnabled("EnableImageforTouchPad") && (
                           <View style={styles.touchTilePlaceholder}>
-                            {!imageErrorCodes.current.has(prod.InventoryCode) ? (
+                            {!imageErrorCodes.current.has(
+                              prod.InventoryCode,
+                            ) ? (
                               <Image
-                                source={{ uri: `${API_URL}/api/inventory/image/${encodeURIComponent(prod.InventoryCode.trim())}` }}
-                                style={{ width: "100%", height: "100%", borderRadius: 6 }}
+                                source={{
+                                  uri: `${API_URL}/api/inventory/image/${encodeURIComponent(prod.InventoryCode.trim())}`,
+                                }}
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  borderRadius: 6,
+                                }}
                                 resizeMode="contain"
                                 onError={() => {
-                                  imageErrorCodes.current.add(prod.InventoryCode);
+                                  imageErrorCodes.current.add(
+                                    prod.InventoryCode,
+                                  );
                                   setImageErrorTick((t) => t + 1); // trigger re-render to show icon
                                 }}
                               />
@@ -4243,7 +4535,7 @@ export default function PosBillingScreen({
                       "Printing Receipt",
                       `Spooling receipt to thermal printer [${printer}] using template [${tpl}] for ${store}...`,
                       "info",
-                      () => handleFinishSale()
+                      () => handleFinishSale(),
                     );
                   }}
                 >
@@ -4463,11 +4755,17 @@ export default function PosBillingScreen({
                   setPendingItemAdd(null);
                 }}
               >
-                <MaterialCommunityIcons name="close" size={20} color="#475569" />
+                <MaterialCommunityIcons
+                  name="close"
+                  size={20}
+                  color="#475569"
+                />
               </TouchableOpacity>
             </View>
 
-            <Text style={{ fontSize: 13, color: "#475569", marginVertical: 12 }}>
+            <Text
+              style={{ fontSize: 13, color: "#475569", marginVertical: 12 }}
+            >
               {pendingItemAdd
                 ? `Item [ ${pendingItemAdd.item.Description} ] requires a valid Salesman code:`
                 : "Enter Salesman Code to assign for sales transactions:"}
@@ -4494,23 +4792,37 @@ export default function PosBillingScreen({
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.modalPrimaryBtn, { backgroundColor: currentTheme.primary }]}
+                style={[
+                  styles.modalPrimaryBtn,
+                  { backgroundColor: currentTheme.primary },
+                ]}
                 onPress={async () => {
                   const sm = tempSalesmanCode.trim();
                   if (!sm) {
-                    showAlert("Required", "Please enter a Salesman code.", "warning");
+                    showAlert(
+                      "Required",
+                      "Please enter a Salesman code.",
+                      "warning",
+                    );
                     return;
                   }
 
                   try {
-                    const res = await fetch(`${API_URL}/api/inventory/validate-salesman`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ salesmanCode: sm }),
-                    });
+                    const res = await fetch(
+                      `${API_URL}/api/inventory/validate-salesman`,
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ salesmanCode: sm }),
+                      },
+                    );
                     const data = await res.json();
                     if (!res.ok || !data.success || !data.isValid) {
-                      showAlert("Invalid Salesman", "Salesman not found in system.", "error");
+                      showAlert(
+                        "Invalid Salesman",
+                        "Salesman not found in system.",
+                        "error",
+                      );
                       return;
                     }
 
@@ -4519,11 +4831,18 @@ export default function PosBillingScreen({
                     setShowSalesmanModal(false);
 
                     if (pendingItemAdd) {
-                      finalizeValidatedItemAdd(pendingItemAdd, assignedSalesman);
+                      finalizeValidatedItemAdd(
+                        pendingItemAdd,
+                        assignedSalesman,
+                      );
                       setPendingItemAdd(null);
                     }
                   } catch (err: any) {
-                    showAlert("Validation Error", err.message || "Failed to validate salesman.", "error");
+                    showAlert(
+                      "Validation Error",
+                      err.message || "Failed to validate salesman.",
+                      "error",
+                    );
                   }
                 }}
               >
@@ -4589,7 +4908,11 @@ export default function PosBillingScreen({
         activeLocation={(effectiveLocation || "HQ").trim()}
         primaryColor={currentTheme?.primary || "#7A1C30"}
         onReprintBill={(invoiceNo) => {
-          showAlert("Print Receipt", `Printing receipt for invoice #${invoiceNo}...`, "info");
+          showAlert(
+            "Print Receipt",
+            `Printing receipt for invoice #${invoiceNo}...`,
+            "info",
+          );
         }}
         onAdminAuthRequest={handleAdminAuthSubmit}
       />
@@ -4606,7 +4929,11 @@ export default function PosBillingScreen({
         theme={currentTheme}
         onAdminAuthRequest={handleAdminAuthSubmit}
         onSuccess={(cancelledInvoiceNo) => {
-          showAlert("Void Bill", `Bill ${cancelledInvoiceNo} cancelled successfully.`, "success");
+          showAlert(
+            "Void Bill",
+            `Bill ${cancelledInvoiceNo} cancelled successfully.`,
+            "success",
+          );
         }}
       />
 
@@ -4626,7 +4953,11 @@ export default function PosBillingScreen({
         onClose={() => setShowMemberManagementModal(false)}
         initialMemberCode=""
         onMemberSaved={(savedCode, savedName) => {
-          showAlert("Member Saved", `Member ${savedName} (${savedCode}) saved successfully.`, "success");
+          showAlert(
+            "Member Saved",
+            `Member ${savedName} (${savedCode}) saved successfully.`,
+            "success",
+          );
         }}
       />
 
@@ -4653,12 +4984,26 @@ export default function PosBillingScreen({
           onPress={() => setShowMoreMenuModal(false)}
         >
           <View
-            style={[styles.menuModalCard, { backgroundColor: currentTheme.surface, borderColor: currentTheme.borderColor }]}
+            style={[
+              styles.menuModalCard,
+              {
+                backgroundColor: currentTheme.surface,
+                borderColor: currentTheme.borderColor,
+              },
+            ]}
             onStartShouldSetResponder={() => true}
             onTouchEnd={(e) => e.stopPropagation()}
           >
             {/* Top Bar inside Menu Header */}
-            <View style={[styles.menuModalHeader, { backgroundColor: currentTheme.primary, borderColor: currentTheme.primaryHover }]}>
+            <View
+              style={[
+                styles.menuModalHeader,
+                {
+                  backgroundColor: currentTheme.primary,
+                  borderColor: currentTheme.primaryHover,
+                },
+              ]}
+            >
               <View style={styles.menuStationBadge}>
                 <MaterialCommunityIcons
                   name="view-grid-outline"
@@ -4666,10 +5011,13 @@ export default function PosBillingScreen({
                   color="#ffffff"
                 />
                 <Text style={styles.menuStationText}>
-                  POS Functions • Station [{terminalCode || "1"}] ({cashierName || "CASHIER"})
+                  POS Functions • Station [{terminalCode || "1"}] (
+                  {cashierName || "CASHIER"})
                 </Text>
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+              >
                 <TouchableOpacity
                   onPress={() => {
                     setShowMoreMenuModal(false);
@@ -4677,7 +5025,11 @@ export default function PosBillingScreen({
                   }}
                   style={styles.menuIconHeaderBtn}
                 >
-                  <MaterialCommunityIcons name="cog-outline" size={17} color="#334155" />
+                  <MaterialCommunityIcons
+                    name="cog-outline"
+                    size={17}
+                    color="#334155"
+                  />
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => {
@@ -4686,13 +5038,21 @@ export default function PosBillingScreen({
                   }}
                   style={styles.menuIconHeaderBtn}
                 >
-                  <MaterialCommunityIcons name="palette-outline" size={17} color="#334155" />
+                  <MaterialCommunityIcons
+                    name="palette-outline"
+                    size={17}
+                    color="#334155"
+                  />
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => setShowMoreMenuModal(false)}
                   style={styles.menuIconHeaderBtn}
                 >
-                  <MaterialCommunityIcons name="close" size={18} color="#64748b" />
+                  <MaterialCommunityIcons
+                    name="close"
+                    size={18}
+                    color="#64748b"
+                  />
                 </TouchableOpacity>
               </View>
             </View>
@@ -4728,7 +5088,10 @@ export default function PosBillingScreen({
 
                 {/* F9 Exchange */}
                 <TouchableOpacity
-                  style={[styles.menuGridTile, isExchangeMode && styles.menuGridTileActiveBorder]}
+                  style={[
+                    styles.menuGridTile,
+                    isExchangeMode && styles.menuGridTileActiveBorder,
+                  ]}
                   onPress={triggerExchangeMode}
                   activeOpacity={0.8}
                 >
@@ -4745,7 +5108,9 @@ export default function PosBillingScreen({
                   }}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.menuGridTileLabelSingle}>Total Sales</Text>
+                  <Text style={styles.menuGridTileLabelSingle}>
+                    Total Sales
+                  </Text>
                 </TouchableOpacity>
 
                 {/* F1 RePrint */}
@@ -4762,7 +5127,11 @@ export default function PosBillingScreen({
                       });
                       setShowReceiptModal(true);
                     } else {
-                      showAlert("RePrint", "No previous receipt found to re-print.", "warning");
+                      showAlert(
+                        "RePrint",
+                        "No previous receipt found to re-print.",
+                        "warning",
+                      );
                     }
                   }}
                   activeOpacity={0.8}
@@ -4782,7 +5151,11 @@ export default function PosBillingScreen({
                   ]}
                   onPress={() => {
                     setIsPrintOn(true);
-                    showAlert("Print Status", "Receipt Printing has been turned ON.", "success");
+                    showAlert(
+                      "Print Status",
+                      "Receipt Printing has been turned ON.",
+                      "success",
+                    );
                   }}
                   activeOpacity={0.8}
                 >
@@ -4797,7 +5170,11 @@ export default function PosBillingScreen({
                   ]}
                   onPress={() => {
                     setIsPrintOn(false);
-                    showAlert("Print Status", "Receipt Printing has been turned OFF.", "info");
+                    showAlert(
+                      "Print Status",
+                      "Receipt Printing has been turned OFF.",
+                      "info",
+                    );
                   }}
                   activeOpacity={0.8}
                 >
@@ -4812,7 +5189,7 @@ export default function PosBillingScreen({
                     showAlert(
                       "Daily Settlement",
                       `Station [${terminalCode || "1"}] Settlement is ready. Total Sales for session: $${grandTotal.toFixed(2)}`,
-                      "info"
+                      "info",
                     );
                   }}
                   activeOpacity={0.8}
@@ -4839,9 +5216,18 @@ export default function PosBillingScreen({
                   onPress={() => {
                     setShowMoreMenuModal(false);
                     // Cycle paymode or show selector
-                    const nextMode = selectedPayMode === "CASH" ? "NETS" : selectedPayMode === "NETS" ? "PAYNOW" : "CASH";
+                    const nextMode =
+                      selectedPayMode === "CASH"
+                        ? "NETS"
+                        : selectedPayMode === "NETS"
+                          ? "PAYNOW"
+                          : "CASH";
                     setSelectedPayMode(nextMode);
-                    showAlert("Paymode Changed", `Payment mode switched to [${nextMode}].`, "info");
+                    showAlert(
+                      "Paymode Changed",
+                      `Payment mode switched to [${nextMode}].`,
+                      "info",
+                    );
                   }}
                   activeOpacity={0.8}
                 >
@@ -4857,7 +5243,11 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    showAlert("Petty Cash / Expenses", "Opening Petty Cash / Expense Entry module...", "info");
+                    showAlert(
+                      "Petty Cash / Expenses",
+                      "Opening Petty Cash / Expense Entry module...",
+                      "info",
+                    );
                   }}
                   activeOpacity={0.8}
                 >
@@ -4885,7 +5275,7 @@ export default function PosBillingScreen({
                     showAlert(
                       "Dinamination Check",
                       `Terminal Cash Denomination Check:\nCash Tendered: $${currentTender.toFixed(2)}\nBalance: $${balance.toFixed(2)}`,
-                      "info"
+                      "info",
                     );
                   }}
                   activeOpacity={0.8}
@@ -4902,7 +5292,11 @@ export default function PosBillingScreen({
                   ]}
                   onPress={() => {
                     setIsAutoMode((prev) => !prev);
-                    showAlert("F12 Auto Mode", `Auto checkout mode is now ${!isAutoMode ? "ENABLED" : "DISABLED"}.`, "info");
+                    showAlert(
+                      "F12 Auto Mode",
+                      `Auto checkout mode is now ${!isAutoMode ? "ENABLED" : "DISABLED"}.`,
+                      "info",
+                    );
                   }}
                   activeOpacity={0.8}
                 >
@@ -4914,7 +5308,11 @@ export default function PosBillingScreen({
                 <TouchableOpacity
                   style={styles.menuGridTile}
                   onPress={() => {
-                    showAlert("Cash Drawer", "Triggering cash drawer kick pulse [ESC p 0 25 250]...", "info");
+                    showAlert(
+                      "Cash Drawer",
+                      "Triggering cash drawer kick pulse [ESC p 0 25 250]...",
+                      "info",
+                    );
                   }}
                   activeOpacity={0.8}
                 >
@@ -4933,7 +5331,7 @@ export default function PosBillingScreen({
                     showAlert(
                       "Day End Process",
                       "Are you sure you want to run Day End closing for today?",
-                      "warning"
+                      "warning",
                     );
                   }}
                   activeOpacity={0.8}
@@ -4966,7 +5364,11 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    showAlert("Refund", "Refund mode initiated. Enter original receipt / bill number.", "info");
+                    showAlert(
+                      "Refund",
+                      "Refund mode initiated. Enter original receipt / bill number.",
+                      "info",
+                    );
                   }}
                   activeOpacity={0.8}
                 >
@@ -4987,7 +5389,11 @@ export default function PosBillingScreen({
                       });
                       setShowReceiptModal(true);
                     } else {
-                      showAlert("Customer Receipts", "Showing Customer Receipts history...", "info");
+                      showAlert(
+                        "Customer Receipts",
+                        "Showing Customer Receipts history...",
+                        "info",
+                      );
                     }
                   }}
                   activeOpacity={0.8}
@@ -5019,7 +5425,7 @@ export default function PosBillingScreen({
                     showAlert(
                       "Upload Offline Transaction",
                       "Checking for unsynced offline transactions...\nAll transactions are currently synchronized with the server.",
-                      "success"
+                      "success",
                     );
                   }}
                   activeOpacity={0.8}
@@ -5048,7 +5454,7 @@ export default function PosBillingScreen({
         </TouchableOpacity>
       </Modal>
 
-            {/* App Configuration Management Modal */}
+      {/* App Configuration Management Modal */}
       <Modal
         visible={showConfigModal}
         transparent={false}
@@ -5068,7 +5474,11 @@ export default function PosBillingScreen({
         onSubmit={handleClearAdminAuthSubmit}
         theme={currentTheme}
         primaryColor={currentTheme.primary}
-        actionTitle={pendingReleaseHoldNo !== null ? "Admin Authorization to Clear & Release" : "Admin Authorization Required"}
+        actionTitle={
+          pendingReleaseHoldNo !== null
+            ? "Admin Authorization to Clear & Release"
+            : "Admin Authorization Required"
+        }
         promptMessage={
           pendingReleaseHoldNo !== null
             ? `Cashier does not have permission to clear active items to release Hold #${pendingReleaseHoldNo}. Enter Admin or Supervisor credentials:`
@@ -5497,7 +5907,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   skuCodeBox: {
-    width: 130,
+    width: 85,
     height: 34,
     backgroundColor: "#f8fafc",
     borderRadius: 6,
@@ -5507,7 +5917,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   skuDescBox: {
-    width: 260,
+    width: 350,
     height: 34,
     backgroundColor: "#f8fafc",
     borderRadius: 6,
@@ -5518,6 +5928,7 @@ const styles = StyleSheet.create({
   },
   skuInput: {
     fontSize: 12,
+    fontWeight: "700",
     color: "#0f172a",
     fontFamily: FONT_FAMILY,
     outlineStyle: "none" as any,
