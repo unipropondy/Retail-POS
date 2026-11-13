@@ -47,6 +47,7 @@ import ViewBillModal from "../components/ViewBillModal";
 import VoidBillModal from "../components/VoidBillModal";
 import TotalSalesModal from "../components/TotalSalesModal";
 import MemberModal from "../components/MemberModal";
+import { SettlementModal } from "../components/SettlementModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -550,6 +551,8 @@ export default function PosBillingScreen({
   const [showViewBillModal, setShowViewBillModal] = useState<boolean>(false);
   const [showVoidBillModal, setShowVoidBillModal] = useState<boolean>(false);
   const [showTotalSalesModal, setShowTotalSalesModal] =
+    useState<boolean>(false);
+  const [showSettlementModal, setShowSettlementModal] =
     useState<boolean>(false);
   const [showMemberManagementModal, setShowMemberManagementModal] =
     useState<boolean>(false);
@@ -2661,6 +2664,7 @@ export default function PosBillingScreen({
     processDirectSkuCode,
     handleFastPriceCommit,
     openVoidBillModal: () => setShowVoidBillModal(true),
+    openSettlementModal: () => setShowSettlementModal(true),
   });
 
   useEffect(() => {
@@ -2676,6 +2680,7 @@ export default function PosBillingScreen({
       processDirectSkuCode,
       handleFastPriceCommit,
       openVoidBillModal: () => setShowVoidBillModal(true),
+      openSettlementModal: () => setShowSettlementModal(true),
     };
   });
 
@@ -2725,6 +2730,11 @@ export default function PosBillingScreen({
         e.preventDefault();
         e.stopPropagation();
         keyboardActionsRef.current.handlePriceChangeClick();
+      } else if (key === "PAGEDOWN" || code === "PAGEDOWN") {
+        // VB.NET PageDown: Open Settlement
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.openSettlementModal();
       } else if (key === "DELETE" || code === "DELETE") {
         // Only trigger delete item if not inside a text input/textarea
         const tag = (document.activeElement?.tagName || "").toLowerCase();
@@ -4947,6 +4957,18 @@ export default function PosBillingScreen({
         primaryColor={currentTheme?.primary || "#7A1C30"}
       />
 
+      {/* POS Terminal Settlement Modal (frmSettlement.vb & clsSales.vb) */}
+      <SettlementModal
+        visible={showSettlementModal}
+        onClose={() => setShowSettlementModal(false)}
+        terminalCode={(terminalCode || "1").trim()}
+        locationCode={locationCode || "HQ"}
+        currentUserId={cashierName || "AMITH"}
+        onSettlementSaved={() => {
+          showAlert("Settlement Completed", "Settlement has been recorded successfully.", "success");
+        }}
+      />
+
       {/* Member Management Modal (VB.NET frmMember.vb) */}
       <MemberModal
         visible={showMemberManagementModal}
@@ -5186,11 +5208,7 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    showAlert(
-                      "Daily Settlement",
-                      `Station [${terminalCode || "1"}] Settlement is ready. Total Sales for session: $${grandTotal.toFixed(2)}`,
-                      "info",
-                    );
+                    setShowSettlementModal(true);
                   }}
                   activeOpacity={0.8}
                 >

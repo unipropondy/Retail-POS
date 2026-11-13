@@ -110,6 +110,10 @@ app.use("/api/members", memberRoutes);
 const totalSalesRoutes = require("./routes/totalSalesRoutes");
 app.use("/api/total-sales", totalSalesRoutes);
 
+// Mount Settlement routes (frmSettlement.vb & clsSales.vb Settlement Process)
+const settlementRoutes = require("./routes/settlementRoutes");
+app.use("/api/settlement", settlementRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================
