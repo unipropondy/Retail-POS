@@ -114,6 +114,10 @@ app.use("/api/total-sales", totalSalesRoutes);
 const settlementRoutes = require("./routes/settlementRoutes");
 app.use("/api/settlement", settlementRoutes);
 
+// Mount Paymode Change routes (frmPaymodeModification.vb & btn_PaymodeChange_Click)
+const paymodeChangeRoutes = require("./routes/paymodeChangeRoutes");
+app.use("/api/paymode-change", paymodeChangeRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

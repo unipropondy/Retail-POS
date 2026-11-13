@@ -48,6 +48,7 @@ import VoidBillModal from "../components/VoidBillModal";
 import TotalSalesModal from "../components/TotalSalesModal";
 import MemberModal from "../components/MemberModal";
 import { SettlementModal } from "../components/SettlementModal";
+import { PaymodeModificationModal } from "../components/PaymodeModificationModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -553,6 +554,8 @@ export default function PosBillingScreen({
   const [showTotalSalesModal, setShowTotalSalesModal] =
     useState<boolean>(false);
   const [showSettlementModal, setShowSettlementModal] =
+    useState<boolean>(false);
+  const [showPaymodeModificationModal, setShowPaymodeModificationModal] =
     useState<boolean>(false);
   const [showMemberManagementModal, setShowMemberManagementModal] =
     useState<boolean>(false);
@@ -2665,6 +2668,7 @@ export default function PosBillingScreen({
     handleFastPriceCommit,
     openVoidBillModal: () => setShowVoidBillModal(true),
     openSettlementModal: () => setShowSettlementModal(true),
+    openPaymodeModificationModal: () => setShowPaymodeModificationModal(true),
   });
 
   useEffect(() => {
@@ -2681,6 +2685,7 @@ export default function PosBillingScreen({
       handleFastPriceCommit,
       openVoidBillModal: () => setShowVoidBillModal(true),
       openSettlementModal: () => setShowSettlementModal(true),
+      openPaymodeModificationModal: () => setShowPaymodeModificationModal(true),
     };
   });
 
@@ -2731,10 +2736,15 @@ export default function PosBillingScreen({
         e.stopPropagation();
         keyboardActionsRef.current.handlePriceChangeClick();
       } else if (key === "PAGEDOWN" || code === "PAGEDOWN") {
-        // VB.NET PageDown: Open Settlement
         e.preventDefault();
         e.stopPropagation();
-        keyboardActionsRef.current.openSettlementModal();
+        if (e.shiftKey) {
+          // VB.NET Shift + PageDown: Open Paymode Modification
+          keyboardActionsRef.current.openPaymodeModificationModal();
+        } else {
+          // VB.NET PageDown: Open Settlement
+          keyboardActionsRef.current.openSettlementModal();
+        }
       } else if (key === "DELETE" || code === "DELETE") {
         // Only trigger delete item if not inside a text input/textarea
         const tag = (document.activeElement?.tagName || "").toLowerCase();
@@ -4969,6 +4979,18 @@ export default function PosBillingScreen({
         }}
       />
 
+      {/* POS Paymode Modification Modal (frmPaymodeModification.vb & btn_PaymodeChange_Click) */}
+      <PaymodeModificationModal
+        visible={showPaymodeModificationModal}
+        onClose={() => setShowPaymodeModificationModal(false)}
+        terminalCode={(terminalCode || "HQ-PC1").trim()}
+        cashierGroupCode="CASHIER"
+        loggedInUserId={cashierName || "ADMIN"}
+        backendUrl={API_URL}
+        gbAutoNETS="0"
+        showAlert={showAlert}
+      />
+
       {/* Member Management Modal (VB.NET frmMember.vb) */}
       <MemberModal
         visible={showMemberManagementModal}
@@ -5233,22 +5255,11 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    // Cycle paymode or show selector
-                    const nextMode =
-                      selectedPayMode === "CASH"
-                        ? "NETS"
-                        : selectedPayMode === "NETS"
-                          ? "PAYNOW"
-                          : "CASH";
-                    setSelectedPayMode(nextMode);
-                    showAlert(
-                      "Paymode Changed",
-                      `Payment mode switched to [${nextMode}].`,
-                      "info",
-                    );
+                    setShowPaymodeModificationModal(true);
                   }}
                   activeOpacity={0.8}
                 >
+                  <Text style={styles.menuGridTileKey}>Shift+PgDn</Text>
                   <Text style={styles.menuGridTileLabel}>Paymode</Text>
                   <Text style={styles.menuGridTileLabel}>Change</Text>
                 </TouchableOpacity>
