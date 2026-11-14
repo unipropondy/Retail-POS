@@ -451,9 +451,17 @@ export default function PosBillingScreen({
   const [showSearchModal, setShowSearchModal] = useState<boolean>(false);
   const [showPriceCheckModal, setShowPriceCheckModal] = useState(false);
   const [priceCheckQuery, setPriceCheckQuery] = useState("");
-  const [priceCheckResult, setPriceCheckResult] = useState<TouchItem | null>(
-    null,
-  );
+  const [isSearchingPriceCheck, setIsSearchingPriceCheck] = useState(false);
+  const [priceCheckResult, setPriceCheckResult] = useState<{
+    Description: string;
+    InventoryCode: string;
+    UOM?: string;
+    SellingPrice: number;
+    RetailPrice?: number;
+    QOH?: number;
+    GroupCode?: string;
+  } | null>(null);
+  const priceCheckInputRef = useRef<any>(null);
 
   const [showPriceChangeModal, setShowPriceChangeModal] = useState(false);
   const [overridePrice, setOverridePrice] = useState("");
@@ -2155,6 +2163,94 @@ export default function PosBillingScreen({
 
     return () => clearTimeout(timer);
   }, [skuDesc]);
+
+  // PRICE CHECK QUERY DEBOUNCE & BACKEND LOOKUP
+  useEffect(() => {
+    if (!showPriceCheckModal) return;
+    const q = priceCheckQuery.trim();
+    if (!q) {
+      setPriceCheckResult(null);
+      setIsSearchingPriceCheck(false);
+      return;
+    }
+
+    // First check local category items
+    const localMatch = items.find(
+      (it) =>
+        it.InventoryCode.toLowerCase() === q.toLowerCase() ||
+        it.Description.toLowerCase().includes(q.toLowerCase()),
+    );
+    if (localMatch) {
+      setPriceCheckResult({
+        InventoryCode: localMatch.InventoryCode,
+        Description: localMatch.Description,
+        SellingPrice: localMatch.SellingPrice,
+        RetailPrice: localMatch.RetailPrice,
+        UOM: localMatch.UOM,
+        GroupCode: localMatch.GroupCode,
+        QOH: undefined,
+      });
+    }
+
+    // Query server backend for live master inventory match (by barcode/sku or description)
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingPriceCheck(true);
+        // Attempt 1: Direct item lookup by barcode / SKU code
+        const lookupRes = await fetch(`${API_URL}/api/inventory/lookup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rawCode: q,
+            locationCode: effectiveLocation,
+            terminalCode: (terminalCode || "").trim(),
+          }),
+        });
+        const lookupData = await lookupRes.json();
+        if (lookupRes.ok && lookupData.success && lookupData.item) {
+          setPriceCheckResult({
+            InventoryCode: lookupData.item.InventoryCode,
+            Description: lookupData.item.Description,
+            SellingPrice: lookupData.item.SellingPrice ?? lookupData.item.Price ?? 0,
+            RetailPrice: lookupData.item.RetailPrice,
+            UOM: lookupData.item.UOM,
+            GroupCode: lookupData.item.DepartmentCode,
+            QOH: lookupData.item.QOH,
+          });
+          return;
+        }
+
+        // Attempt 2: Search by description
+        const searchRes = await fetch(
+          `${API_URL}/api/inventory/search-desc?q=${encodeURIComponent(q)}&limit=1`,
+        );
+        const searchData = await searchRes.json();
+        if (searchRes.ok && searchData.success && Array.isArray(searchData.items) && searchData.items.length > 0) {
+          const first = searchData.items[0];
+          setPriceCheckResult({
+            InventoryCode: first.InventoryCode,
+            Description: first.Description,
+            SellingPrice: Number(first.SellingPrice) || 0,
+            RetailPrice: Number(first.RetailPrice) || 0,
+            UOM: first.UOM,
+            GroupCode: first.DepartmentCode,
+            QOH: first.Stock ?? first.QOH,
+          });
+          return;
+        }
+
+        if (!localMatch) {
+          setPriceCheckResult(null);
+        }
+      } catch {
+        if (!localMatch) setPriceCheckResult(null);
+      } finally {
+        setIsSearchingPriceCheck(false);
+      }
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [priceCheckQuery, showPriceCheckModal, items, effectiveLocation, terminalCode]);
 
   // ---------------------------------------------------------------------------
   // COMPLETE VB.NET POS ITEM LOOKUP & PROCESSING PIPELINE (txtInventoryCode_Leave)
@@ -4392,46 +4488,68 @@ export default function PosBillingScreen({
       </View>
 
       {/* =========================================================================
-          MODAL: Price Check / Search Modal
+          MODAL: Price Check / Search Modal (VB.NET BtnPricecheck / frmMessage)
       ========================================================================= */}
       <Modal
         visible={showPriceCheckModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowPriceCheckModal(false)}
+        onRequestClose={() => {
+          setShowPriceCheckModal(false);
+          setPriceCheckQuery("");
+          setPriceCheckResult(null);
+        }}
+        onShow={() => {
+          setTimeout(() => {
+            priceCheckInputRef.current?.focus();
+          }, 100);
+        }}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { maxWidth: 440 }]}>
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>Price Check & Search</Text>
-              <TouchableOpacity onPress={() => setShowPriceCheckModal(false)}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <MaterialCommunityIcons
+                  name="tag-search-outline"
+                  size={22}
+                  color={currentTheme.primary}
+                />
+                <Text style={styles.modalTitle}>Price Check & Stock</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowPriceCheckModal(false);
+                  setPriceCheckQuery("");
+                  setPriceCheckResult(null);
+                }}
+              >
                 <MaterialCommunityIcons
                   name="close"
-                  size={20}
+                  size={22}
                   color="#475569"
                 />
               </TouchableOpacity>
             </View>
 
             <View style={styles.modalInputRow}>
-              <TextInput
-                style={styles.modalTextInput}
-                placeholder="Enter SKU Code or Item Name..."
-                placeholderTextColor="#94a3b8"
-                value={priceCheckQuery}
-                onChangeText={(text) => {
-                  setPriceCheckQuery(text);
-                  const found = items.find(
-                    (it) =>
-                      it.InventoryCode.toLowerCase() ===
-                        text.trim().toLowerCase() ||
-                      it.Description.toLowerCase().includes(
-                        text.trim().toLowerCase(),
-                      ),
-                  );
-                  setPriceCheckResult(found || null);
-                }}
-              />
+              <View style={{ position: "relative", justifyContent: "center" }}>
+                <TextInput
+                  ref={priceCheckInputRef}
+                  style={styles.modalTextInput}
+                  placeholder="Scan Barcode or Type SKU / Name..."
+                  placeholderTextColor="#94a3b8"
+                  value={priceCheckQuery}
+                  onChangeText={(text) => setPriceCheckQuery(text)}
+                  autoFocus={true}
+                />
+                {isSearchingPriceCheck && (
+                  <ActivityIndicator
+                    size="small"
+                    color={currentTheme.primary}
+                    style={{ position: "absolute", right: 12, top: 20 }}
+                  />
+                )}
+              </View>
             </View>
 
             {priceCheckResult ? (
@@ -4440,16 +4558,46 @@ export default function PosBillingScreen({
                   {priceCheckResult.Description}
                 </Text>
                 <Text style={styles.priceResultCode}>
-                  Code: {priceCheckResult.InventoryCode} • UOM:{" "}
-                  {priceCheckResult.UOM}
+                  Code: {priceCheckResult.InventoryCode}
+                  {priceCheckResult.UOM ? ` • UOM: ${priceCheckResult.UOM}` : ""}
+                  {priceCheckResult.QOH !== undefined ? ` • QOH: ${priceCheckResult.QOH}` : ""}
                 </Text>
-                <Text style={styles.priceResultAmount}>
-                  Selling Price: ${priceCheckResult.SellingPrice.toFixed(2)}
-                </Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    marginTop: 8,
+                  }}
+                >
+                  <Text style={styles.priceResultAmount}>
+                    ${priceCheckResult.SellingPrice.toFixed(2)}
+                  </Text>
+                  {priceCheckResult.RetailPrice &&
+                    priceCheckResult.RetailPrice > priceCheckResult.SellingPrice && (
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: "#94a3b8",
+                          textDecorationLine: "line-through",
+                        }}
+                      >
+                        ${priceCheckResult.RetailPrice.toFixed(2)}
+                      </Text>
+                    )}
+                </View>
                 <TouchableOpacity
-                  style={styles.modalAddBtn}
+                  style={[styles.modalAddBtn, { backgroundColor: currentTheme.primary }]}
                   onPress={() => {
-                    handleAddItem(priceCheckResult);
+                    handleAddItem({
+                      InventoryCode: priceCheckResult.InventoryCode,
+                      Description: priceCheckResult.Description,
+                      SellingPrice: priceCheckResult.SellingPrice,
+                      RetailPrice: priceCheckResult.RetailPrice || priceCheckResult.SellingPrice,
+                      UOM: priceCheckResult.UOM || "PCS",
+                      GroupCode: priceCheckResult.GroupCode || "GENERAL",
+                      SortOrder: 0,
+                    });
                     setShowPriceCheckModal(false);
                     setPriceCheckQuery("");
                     setPriceCheckResult(null);
@@ -4458,7 +4606,7 @@ export default function PosBillingScreen({
                   <Text style={styles.modalAddBtnText}>Add To Cart</Text>
                 </TouchableOpacity>
               </View>
-            ) : priceCheckQuery ? (
+            ) : priceCheckQuery.trim() && !isSearchingPriceCheck ? (
               <Text style={styles.noResultText}>No matching item found.</Text>
             ) : null}
           </View>
@@ -5547,6 +5695,19 @@ export default function PosBillingScreen({
                   <Text style={styles.menuGridTileLabelSmall}>Transaction</Text>
                 </TouchableOpacity>
 
+                {/* Price Check / Search */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    setShowPriceCheckModal(true);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileLabel}>Price</Text>
+                  <Text style={styles.menuGridTileLabel}>Check</Text>
+                </TouchableOpacity>
+
                 {/* Close (Red/Rose Button) */}
                 <TouchableOpacity
                   style={styles.menuGridTileClose}
@@ -5557,7 +5718,6 @@ export default function PosBillingScreen({
                 </TouchableOpacity>
 
                 {/* Empty placeholders to maintain 5-column grid alignment */}
-                <View style={styles.menuGridTilePlaceholder} />
                 <View style={styles.menuGridTilePlaceholder} />
                 <View style={styles.menuGridTilePlaceholder} />
               </View>
@@ -6827,6 +6987,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 16,
+    zIndex: 99999,
   },
   modalCard: {
     width: "100%",
