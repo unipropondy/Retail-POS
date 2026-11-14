@@ -330,11 +330,11 @@ router.get('/transactions', async (req, res) => {
     const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
     // Calculate limit (default 20, up to 200 for ALL)
+    // When "All Counters" is checked, respect user's selected limit (10, 20, 50, etc.) unless 'ALL' was explicitly clicked
     let limitNum = 20;
     if (transactionLimit && !isNaN(parseInt(transactionLimit, 10))) {
       limitNum = parseInt(transactionLimit, 10);
-    }
-    if (String(transactionLimit).toUpperCase() === 'ALL' || isAll) {
+    } else if (String(transactionLimit).toUpperCase() === 'ALL') {
       limitNum = 200;
     }
 
