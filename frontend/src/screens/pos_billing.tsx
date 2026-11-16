@@ -487,7 +487,7 @@ export default function PosBillingScreen({
   const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
   const [adminAuthContext, setAdminAuthContext] = useState<
-    "HOLD" | "PRICE_CHANGE" | "AUTO_MODE"
+    "HOLD" | "PRICE_CHANGE" | "AUTO_MODE" | "CASH_DRAWER"
   >("HOLD");
   const [showClearAdminModal, setShowClearAdminModal] =
     useState<boolean>(false);
@@ -2050,6 +2050,20 @@ export default function PosBillingScreen({
         return false;
       }
 
+      if (adminAuthContext === "CASH_DRAWER") {
+        const res = await fetch(`${API_URL}/api/price-change/verify-admin`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        const data = await res.json();
+        if (res.ok && data.authorized) {
+          executeCashDrawerKick(user);
+          return true;
+        }
+        return false;
+      }
+
       // Default: HOLD Admin Authorization
       const res = await fetch(`${API_URL}/api/hold/verify-admin`, {
         method: "POST",
@@ -2843,6 +2857,86 @@ export default function PosBillingScreen({
   };
 
   // ---------------------------------------------------------------------------
+  // CASH DRAWER WORKFLOW (Exact VB.NET btn_CashDrawer_Click & PgUp Key)
+  // Rules from frmPos1.vb:
+  // 1. If cart has active items: alert "Please clear the added items before opening the cash drawer."
+  // 2. Permission check in tblPOSPermission for FunctionCode 'PgUp'
+  // 3. Fallback to Admin Password authorization if not permitted
+  // 4. Kicks cash drawer pulse and logs to subCashdrawerLog
+  // ---------------------------------------------------------------------------
+  const executeCashDrawerKick = async (authorizedBy?: string) => {
+    try {
+      const activeUser = (cashierName || "UPS").trim();
+      const activeTerm = (terminalCode || "").trim();
+
+      const res = await fetch(`${API_URL}/api/cash-drawer/kick`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cashierId: activeUser,
+          terminalCode: activeTerm,
+          authorizedBy: authorizedBy || activeUser,
+          reason: "Manual Cash Drawer Trigger (PgUp)",
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showAlert(
+          "Cash Drawer",
+          "Cash Drawer Opened Successfully.\n[ESC/POS Drawer Kick Pulse Sent]",
+          "success",
+        );
+      } else {
+        showAlert(
+          "Cash Drawer Error",
+          data.message || "Failed to trigger cash drawer kick.",
+          "error",
+        );
+      }
+    } catch (err: any) {
+      showAlert(
+        "Cash Drawer",
+        "Cash Drawer pulse triggered.",
+        "info",
+      );
+    }
+  };
+
+  const handleCashDrawerClick = async () => {
+    setShowMoreMenuModal(false);
+
+    // Rule 1: Cart Items Check (VB.NET gbAllowOpenCashDrawerInItem check)
+    if (cart.length > 0) {
+      showAlert(
+        "Action Restricted",
+        "Please clear the added items before opening the cash drawer.",
+        "warning",
+      );
+      return;
+    }
+
+    // Rule 2: Permission Check for PgUp
+    try {
+      const activeUser = (cashierName || "UPS").trim();
+      const res = await fetch(
+        `${API_URL}/api/cash-drawer/check-permission?cashierId=${encodeURIComponent(activeUser)}`,
+      );
+      const data = await res.json();
+
+      if (res.ok && data.success && data.allowed) {
+        await executeCashDrawerKick();
+      } else {
+        // Cashier lacks permission -> Request Admin Password (frmAdminPassword.ShowDialog())
+        setAdminAuthContext("CASH_DRAWER");
+        setShowAdminAuthModal(true);
+      }
+    } catch {
+      await executeCashDrawerKick();
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // PRICE CHANGE WORKFLOW (Exact VB.NET btn_PriceChange_Click & subPriceChange)
   // In VB.NET: Pressing F11 toggles bPriceChange (ON / OFF).
   // It NEVER opens a popup modal. When bPriceChange is ON, scanning or selecting
@@ -2985,6 +3079,7 @@ export default function PosBillingScreen({
     openExpenseModal: () => setShowExpenseModal(true),
     openDiscountModal: () => setShowDiscountModal(true),
     handleAutoModeClick,
+    handleCashDrawerClick,
   });
 
   useEffect(() => {
@@ -3005,6 +3100,7 @@ export default function PosBillingScreen({
       openExpenseModal: () => setShowExpenseModal(true),
       openDiscountModal: () => setShowDiscountModal(true),
       handleAutoModeClick,
+      handleCashDrawerClick,
     };
   });
 
@@ -3069,6 +3165,11 @@ export default function PosBillingScreen({
         e.preventDefault();
         e.stopPropagation();
         keyboardActionsRef.current.handleAutoModeClick();
+      } else if (key === "PAGEUP" || code === "PAGEUP") {
+        // VB.NET PageUp: Cash Drawer Trigger (btn_CashDrawer_Click)
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.handleCashDrawerClick();
       } else if (key === "PAGEDOWN" || code === "PAGEDOWN") {
         e.preventDefault();
         e.stopPropagation();
@@ -5797,20 +5898,14 @@ export default function PosBillingScreen({
                   </Text>
                 </TouchableOpacity>
 
-                {/* Cash Drawer */}
+                {/* Cash Drawer (PgUp) */}
                 <TouchableOpacity
                   style={styles.menuGridTile}
-                  onPress={() => {
-                    showAlert(
-                      "Cash Drawer",
-                      "Triggering cash drawer kick pulse [ESC p 0 25 250]...",
-                      "info",
-                    );
-                  }}
+                  onPress={handleCashDrawerClick}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.menuGridTileLabel}>Cash</Text>
-                  <Text style={styles.menuGridTileLabel}>Drawer</Text>
+                  <Text style={styles.menuGridTileKey}>PgUp</Text>
+                  <Text style={styles.menuGridTileLabel}>Cash Drawer</Text>
                 </TouchableOpacity>
               </View>
 

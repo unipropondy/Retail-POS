@@ -130,6 +130,10 @@ app.use("/api/discounts", discountRoutes);
 const denominationRoutes = require("./routes/denominationRoutes");
 app.use("/api/denomination", denominationRoutes);
 
+// Mount Cash Drawer routes (btn_CashDrawer_Click / PgUp & subCashdrawerLog)
+const cashDrawerRoutes = require("./routes/cashDrawerRoutes");
+app.use("/api/cash-drawer", cashDrawerRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================
