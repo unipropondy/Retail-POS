@@ -92,6 +92,11 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     date: string;
   } | null>(null);
 
+  // Active focused input for on-screen touch keyboard/keypad
+  const [activeInput, setActiveInput] = useState<"desc" | "amount">("desc");
+  const [keypadMode, setKeypadMode] = useState<"alpha" | "num">("alpha");
+  const [capsLock, setCapsLock] = useState<boolean>(true);
+
   const descInputRef = useRef<any>(null);
   const amountInputRef = useRef<any>(null);
   const adminPassRef = useRef<any>(null);
@@ -129,6 +134,50 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   };
 
   // 1. Permission check (Ctrl + E)
+  const handleVirtualKeyPress = (char: string) => {
+    if (activeInput === "desc") {
+      descInputRef.current?.focus();
+      if (char === "BACKSPACE") {
+        setDescription((prev) => (prev.length > 0 ? prev.slice(0, -1) : ""));
+      } else if (char === "CLEAR") {
+        setDescription("");
+      } else if (char === "SPACE") {
+        setDescription((prev) => prev + " ");
+      } else if (char === "ENTER") {
+        setActiveInput("amount");
+        setKeypadMode("num");
+        amountInputRef.current?.focus();
+      } else {
+        setDescription((prev) => prev + char);
+      }
+    } else {
+      // Amount input
+      amountInputRef.current?.focus();
+      if (char === "BACKSPACE") {
+        setAmount((prev) => (prev.length > 0 ? prev.slice(0, -1) : ""));
+      } else if (char === "CLEAR") {
+        setAmount("");
+      } else if (char === "ENTER") {
+        handleSave();
+      } else if (char === ".") {
+        if (!amount.includes(".")) {
+          setAmount((prev) => (prev === "" ? "0." : prev + "."));
+        }
+      } else if (char === "00") {
+        if (amount && !amount.includes(".")) {
+          setAmount((prev) => prev + "00");
+        }
+      } else if (/^[0-9]$/.test(char)) {
+        // Enforce max 2 decimal places
+        if (amount.includes(".")) {
+          const parts = amount.split(".");
+          if (parts[1] && parts[1].length >= 2) return;
+        }
+        setAmount((prev) => (prev === "0" ? char : prev + char));
+      }
+    }
+  };
+
   const checkCashierPermission = async () => {
     try {
       setCheckingAuth(true);
@@ -293,17 +342,42 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <View style={styles.headerIconBadge}>
-                <Feather name="dollar-sign" size={18} color="#fff" />
+                <Feather name="dollar-sign" size={17} color="#fff" />
               </View>
-              <Text style={styles.headerTitle}>Petty Cash / Expense Entry</Text>
+              <Text style={styles.headerTitle}>Expense Entry</Text>
               <View style={styles.terminalBadge}>
                 <Text style={styles.terminalBadgeText}>COUNTER: {terminalCode}</Text>
               </View>
+              <View style={[styles.terminalBadge, { backgroundColor: "rgba(255, 255, 255, 0.25)" }]}>
+                <Text style={styles.terminalBadgeText}>CASHIER: {loggedInUserId}</Text>
+              </View>
             </View>
 
-            <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
-              <Feather name="x" size={20} color="#fff" />
-            </TouchableOpacity>
+            <View style={styles.headerRight}>
+              <TouchableOpacity
+                style={[styles.headerHistoryBtn, showHistory && styles.headerHistoryBtnActive]}
+                onPress={() => {
+                  const next = !showHistory;
+                  setShowHistory(next);
+                  if (next) loadExpenseList();
+                }}
+                activeOpacity={0.8}
+              >
+                <Feather
+                  name={showHistory ? "edit" : "list"}
+                  size={13}
+                  color={showHistory ? "#7c1a22" : "#ffffff"}
+                  style={{ marginRight: 5 }}
+                />
+                <Text style={[styles.headerHistoryBtnText, showHistory && styles.headerHistoryBtnTextActive]}>
+                  {showHistory ? "New Entry" : "View Recent Expenses"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
+                <Feather name="x" size={20} color="#fff" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Admin Password Prompt Overlay */}
@@ -449,36 +523,6 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
           {/* Main Body */}
           {isAuthorized && (
             <View style={styles.contentBody}>
-              {/* Top View Selector / Bar */}
-              <View style={styles.navBar}>
-                <View style={styles.navBarLeft}>
-                  <Text style={styles.navInfo}>
-                    Cashier: <Text style={{ fontWeight: "700" }}>{loggedInUserId}</Text> | Counter:{" "}
-                    <Text style={{ fontWeight: "700" }}>{terminalCode}</Text>
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.historyToggleBtn, showHistory && styles.historyToggleBtnActive]}
-                  onPress={() => {
-                    const next = !showHistory;
-                    setShowHistory(next);
-                    if (next) loadExpenseList();
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Feather
-                    name={showHistory ? "edit" : "list"}
-                    size={14}
-                    color={showHistory ? "#7c1a22" : "#475569"}
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={[styles.historyToggleText, showHistory && styles.historyToggleTextActive]}>
-                    {showHistory ? "New Expense Entry" : "View Recent Expenses (frmExpensesList)"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
               {/* View 1: New Expense Entry Form */}
               {!showHistory ? (
                 <View style={styles.formContainer}>
@@ -488,46 +532,70 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                       <Text style={styles.formSectionTitle}>Enter Payout Information</Text>
                     </View>
 
-                    {/* Description Input */}
-                    <View style={styles.inputFieldGroup}>
-                      <Text style={styles.fieldLabel}>
-                        Expense Description / Reason <Text style={{ color: "#b91c1c" }}>*</Text>
-                      </Text>
-                      <TextInput
-                        ref={descInputRef}
-                        style={styles.textInputBox}
-                        placeholder="e.g. Cleaning Supplies, Water Bottle, Urgent Dispatch..."
-                        placeholderTextColor="#94a3b8"
-                        value={description}
-                        onChangeText={setDescription}
-                        returnKeyType="next"
-                        onSubmitEditing={() => amountInputRef.current?.focus()}
-                      />
-                    </View>
-
-                    {/* Amount Input */}
-                    <View style={styles.inputFieldGroup}>
-                      <Text style={styles.fieldLabel}>
-                        Amount ($) <Text style={{ color: "#b91c1c" }}>*</Text>
-                      </Text>
-                      <View style={styles.amountInputWrap}>
-                        <Text style={styles.currencyPrefix}>$</Text>
+                    {/* Inputs Row: Description & Amount Side-by-Side */}
+                    <View style={styles.inputsInlineRow}>
+                      {/* Left: Description Input */}
+                      <View style={[styles.inputFieldGroup, { flex: 2.2 }]}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Text style={styles.fieldLabel}>
+                            Expense Description / Reason <Text style={{ color: "#b91c1c" }}>*</Text>
+                          </Text>
+                          {activeInput === "desc" && (
+                            <Text style={styles.activeFieldTag}>Active</Text>
+                          )}
+                        </View>
                         <TextInput
-                          ref={amountInputRef}
-                          style={styles.amountInputBox}
-                          placeholder="0.00"
+                          ref={descInputRef}
+                          style={[styles.textInputBox, activeInput === "desc" && styles.inputBoxActive]}
+                          placeholder="e.g. Cleaning Supplies, Water Bottle..."
                           placeholderTextColor="#94a3b8"
-                          keyboardType="numeric"
-                          value={amount}
-                          onChangeText={(val) => {
-                            // Only allow valid numeric input
-                            if (val === "" || /^\d*\.?\d{0,2}$/.test(val)) {
-                              setAmount(val);
-                            }
+                          value={description}
+                          onFocus={() => {
+                            setActiveInput("desc");
+                            setKeypadMode("alpha");
                           }}
-                          returnKeyType="done"
-                          onSubmitEditing={handleSave}
+                          onChangeText={setDescription}
+                          returnKeyType="next"
+                          onSubmitEditing={() => {
+                            setActiveInput("amount");
+                            setKeypadMode("num");
+                            amountInputRef.current?.focus();
+                          }}
                         />
+                      </View>
+
+                      {/* Right: Amount Input */}
+                      <View style={[styles.inputFieldGroup, { flex: 1 }]}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Text style={styles.fieldLabel}>
+                            Amount ($) <Text style={{ color: "#b91c1c" }}>*</Text>
+                          </Text>
+                          {activeInput === "amount" && (
+                            <Text style={styles.activeFieldTag}>Active</Text>
+                          )}
+                        </View>
+                        <View style={[styles.amountInputWrap, activeInput === "amount" && styles.inputBoxActive]}>
+                          <Text style={styles.currencyPrefix}>$</Text>
+                          <TextInput
+                            ref={amountInputRef}
+                            style={styles.amountInputBox}
+                            placeholder="0.00"
+                            placeholderTextColor="#94a3b8"
+                            keyboardType="numeric"
+                            value={amount}
+                            onFocus={() => {
+                              setActiveInput("amount");
+                              setKeypadMode("num");
+                            }}
+                            onChangeText={(val) => {
+                              if (val === "" || /^\d*\.?\d{0,2}$/.test(val)) {
+                                setAmount(val);
+                              }
+                            }}
+                            returnKeyType="done"
+                            onSubmitEditing={handleSave}
+                          />
+                        </View>
                       </View>
                     </View>
 
@@ -538,12 +606,220 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                         <TouchableOpacity
                           key={preset}
                           style={styles.presetChip}
-                          onPress={() => setAmount(preset)}
+                          onPress={() => {
+                            setAmount(preset);
+                            setActiveInput("amount");
+                          }}
                           activeOpacity={0.7}
                         >
                           <Text style={styles.presetChipText}>${preset}</Text>
                         </TouchableOpacity>
                       ))}
+                    </View>
+
+                    {/* ON-SCREEN TOUCH KEYBOARD (ALPHABET + NUMBERS) */}
+                    <View style={styles.touchKeypadContainer}>
+                      {/* Keyboard mode switcher */}
+                      <View style={styles.keypadModeBar}>
+                        <View style={{ flexDirection: "row", gap: 6 }}>
+                          <TouchableOpacity
+                            style={[styles.modeTab, keypadMode === "alpha" && styles.modeTabActive]}
+                            onPress={() => setKeypadMode("alpha")}
+                          >
+                            <Feather name="type" size={13} color={keypadMode === "alpha" ? "#7c1a22" : "#64748b"} />
+                            <Text style={[styles.modeTabText, keypadMode === "alpha" && styles.modeTabTextActive]}>
+                              Letters (A-Z)
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.modeTab, keypadMode === "num" && styles.modeTabActive]}
+                            onPress={() => setKeypadMode("num")}
+                          >
+                            <Feather name="hash" size={13} color={keypadMode === "num" ? "#7c1a22" : "#64748b"} />
+                            <Text style={[styles.modeTabText, keypadMode === "num" && styles.modeTabTextActive]}>
+                              Numpad (123)
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.targetFieldNotice}>
+                          Typing to: <Text style={{ fontWeight: "800", color: "#0f172a" }}>{activeInput === "desc" ? "Description" : "Amount ($)"}</Text>
+                        </Text>
+                      </View>
+
+                      {keypadMode === "alpha" ? (
+                        /* Full QWERTY / Alphabetical Touch Keyboard with Numbers row */
+                        <View style={styles.keyboardBody}>
+                          {/* Numbers Row */}
+                          <View style={styles.keyboardRow}>
+                            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((k) => (
+                              <TouchableOpacity
+                                key={k}
+                                style={styles.kKey}
+                                onPress={() => handleVirtualKeyPress(k)}
+                              >
+                                <Text style={styles.kKeyText}>{k}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+
+                          {/* Row 1: Q-P */}
+                          <View style={styles.keyboardRow}>
+                            {["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"].map((k) => {
+                              const char = capsLock ? k : k.toLowerCase();
+                              return (
+                                <TouchableOpacity
+                                  key={k}
+                                  style={styles.kKey}
+                                  onPress={() => handleVirtualKeyPress(char)}
+                                >
+                                  <Text style={styles.kKeyText}>{char}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+
+                          {/* Row 2: A-L */}
+                          <View style={[styles.keyboardRow, { paddingHorizontal: 12 }]}>
+                            {["A", "S", "D", "F", "G", "H", "J", "K", "L"].map((k) => {
+                              const char = capsLock ? k : k.toLowerCase();
+                              return (
+                                <TouchableOpacity
+                                  key={k}
+                                  style={styles.kKey}
+                                  onPress={() => handleVirtualKeyPress(char)}
+                                >
+                                  <Text style={styles.kKeyText}>{char}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+
+                          {/* Row 3: CAPS, Z-M, BACKSPACE */}
+                          <View style={styles.keyboardRow}>
+                            <TouchableOpacity
+                              style={[styles.kKeySpecial, capsLock && styles.kKeyCapsActive]}
+                              onPress={() => setCapsLock((prev) => !prev)}
+                            >
+                              <Feather name="arrow-up" size={15} color={capsLock ? "#7c1a22" : "#64748b"} />
+                            </TouchableOpacity>
+
+                            {["Z", "X", "C", "V", "B", "N", "M"].map((k) => {
+                              const char = capsLock ? k : k.toLowerCase();
+                              return (
+                                <TouchableOpacity
+                                  key={k}
+                                  style={styles.kKey}
+                                  onPress={() => handleVirtualKeyPress(char)}
+                                >
+                                  <Text style={styles.kKeyText}>{char}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+
+                            <TouchableOpacity
+                              style={styles.kKeySpecial}
+                              onPress={() => handleVirtualKeyPress("BACKSPACE")}
+                            >
+                              <Feather name="delete" size={16} color="#64748b" />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Row 4: Space, Clear, Enter */}
+                          <View style={styles.keyboardRow}>
+                            <TouchableOpacity
+                              style={[styles.kKeySpecial, { flex: 1.2, backgroundColor: "#fef2f2" }]}
+                              onPress={() => handleVirtualKeyPress("CLEAR")}
+                            >
+                              <Text style={{ fontSize: 11, fontWeight: "800", color: "#dc2626" }}>CLR</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[styles.kKey, { flex: 4, backgroundColor: "#f1f5f9" }]}
+                              onPress={() => handleVirtualKeyPress("SPACE")}
+                            >
+                              <Text style={[styles.kKeyText, { fontSize: 12, color: "#64748b" }]}>SPACE</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[styles.kKeySpecial, { flex: 1.5, backgroundColor: "#7c1a22" }]}
+                              onPress={() => handleVirtualKeyPress("ENTER")}
+                            >
+                              <Text style={{ fontSize: 11, fontWeight: "800", color: "#ffffff" }}>NEXT ↵</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ) : (
+                        /* POS Numeric Numpad - Broad and Wide */
+                        <View style={styles.numpadBody}>
+                          <View style={styles.numpadGrid}>
+                            <View style={styles.numpadRow}>
+                              {["7", "8", "9"].map((n) => (
+                                <TouchableOpacity key={n} style={styles.numPadBtn} onPress={() => handleVirtualKeyPress(n)}>
+                                  <Text style={styles.numPadBtnText}>{n}</Text>
+                                </TouchableOpacity>
+                              ))}
+                              <TouchableOpacity
+                                style={[styles.numPadBtn, styles.numPadBtnAction]}
+                                onPress={() => handleVirtualKeyPress("BACKSPACE")}
+                              >
+                                <Feather name="delete" size={20} color="#64748b" />
+                              </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.numpadRow}>
+                              {["4", "5", "6"].map((n) => (
+                                <TouchableOpacity key={n} style={styles.numPadBtn} onPress={() => handleVirtualKeyPress(n)}>
+                                  <Text style={styles.numPadBtnText}>{n}</Text>
+                                </TouchableOpacity>
+                              ))}
+                              <TouchableOpacity
+                                style={[styles.numPadBtn, { backgroundColor: "#fef2f2" }]}
+                                onPress={() => handleVirtualKeyPress("CLEAR")}
+                              >
+                                <Text style={{ fontSize: 13, fontWeight: "800", color: "#dc2626" }}>CLR</Text>
+                              </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.numpadRow}>
+                              {["1", "2", "3"].map((n) => (
+                                <TouchableOpacity key={n} style={styles.numPadBtn} onPress={() => handleVirtualKeyPress(n)}>
+                                  <Text style={styles.numPadBtnText}>{n}</Text>
+                                </TouchableOpacity>
+                              ))}
+                              <TouchableOpacity
+                                style={[styles.numPadBtn, { backgroundColor: "#7c1a22" }]}
+                                onPress={() => handleVirtualKeyPress("ENTER")}
+                              >
+                                <Text style={{ fontSize: 12, fontWeight: "900", color: "#ffffff" }}>DONE ↵</Text>
+                              </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.numpadRow}>
+                              <TouchableOpacity style={styles.numPadBtn} onPress={() => handleVirtualKeyPress("0")}>
+                                <Text style={styles.numPadBtnText}>0</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity style={styles.numPadBtn} onPress={() => handleVirtualKeyPress("00")}>
+                                <Text style={styles.numPadBtnText}>00</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity style={styles.numPadBtn} onPress={() => handleVirtualKeyPress(".")}>
+                                <Text style={styles.numPadBtnText}>.</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[styles.numPadBtn, { backgroundColor: "#f0fdf4" }]}
+                                onPress={() => {
+                                  setActiveInput("desc");
+                                  setKeypadMode("alpha");
+                                  descInputRef.current?.focus();
+                                }}
+                              >
+                                <Text style={{ fontSize: 12, fontWeight: "800", color: "#16a34a" }}>ABC</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        </View>
+                      )}
                     </View>
                   </View>
                 </View>
@@ -663,159 +939,172 @@ const styles = StyleSheet.create({
     flexDirection: "column",
   },
   header: {
-    height: 52,
+    height: 48,
     backgroundColor: "#7c1a22",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
   },
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 8,
   },
   headerIconBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 6,
     backgroundColor: "rgba(255, 255, 255, 0.2)",
     justifyContent: "center",
     alignItems: "center",
   },
   headerTitle: {
     color: "#ffffff",
-    fontSize: 17,
+    fontSize: 15.5,
     fontWeight: "800",
     letterSpacing: 0.5,
   },
   terminalBadge: {
     backgroundColor: "rgba(255, 255, 255, 0.18)",
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 6,
-    marginLeft: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 5,
   },
   terminalBadgeText: {
     color: "#ffffff",
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: "700",
   },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerHistoryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+  },
+  headerHistoryBtnActive: {
+    backgroundColor: "#ffffff",
+  },
+  headerHistoryBtnText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#ffffff",
+  },
+  headerHistoryBtnTextActive: {
+    color: "#7c1a22",
+  },
   closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 6,
     backgroundColor: "rgba(255, 255, 255, 0.15)",
     justifyContent: "center",
     alignItems: "center",
   },
   contentBody: {
     backgroundColor: "#f8fafc",
-    padding: 16,
-  },
-  navBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 14,
-  },
-  navBarLeft: {
-    flex: 1,
-  },
-  navInfo: {
-    fontSize: 12,
-    color: "#64748b",
-  },
-  historyToggleBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: "#e2e8f0",
-  },
-  historyToggleBtnActive: {
-    backgroundColor: "#fee2e2",
-  },
-  historyToggleText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#475569",
-  },
-  historyToggleTextActive: {
-    color: "#7c1a22",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   formContainer: {
-    marginTop: 4,
+    marginTop: 0,
   },
   formCard: {
     backgroundColor: "#ffffff",
-    borderRadius: 10,
-    padding: 18,
+    borderRadius: 8,
+    padding: 12,
     borderWidth: 1,
     borderColor: "#e2e8f0",
   },
   formSectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 16,
-    paddingBottom: 8,
+    gap: 6,
+    marginBottom: 10,
+    paddingBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#f1f5f9",
   },
   formSectionTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "800",
     color: "#0f172a",
     letterSpacing: 0.3,
   },
+  inputsInlineRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
   inputFieldGroup: {
-    marginBottom: 14,
+    marginBottom: 8,
   },
   fieldLabel: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: "700",
     color: "#334155",
-    marginBottom: 6,
+    marginBottom: 4,
+  },
+  activeFieldTag: {
+    fontSize: 10.5,
+    color: "#0284c7",
+    fontWeight: "800",
   },
   textInputBox: {
-    height: 42,
+    height: 38,
     borderWidth: 1.5,
     borderColor: "#cbd5e1",
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderRadius: 6,
+    paddingHorizontal: 10,
     fontSize: 13,
     color: "#0f172a",
     backgroundColor: "#ffffff",
+    outlineStyle: "none" as any,
+    cursor: "text" as any,
+  },
+  inputBoxActive: {
+    borderColor: "#0284c7",
+    backgroundColor: "#f0f9ff",
   },
   amountInputWrap: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1.5,
     borderColor: "#cbd5e1",
-    borderRadius: 8,
+    borderRadius: 6,
     backgroundColor: "#ffffff",
-    paddingHorizontal: 12,
-    height: 48,
+    paddingHorizontal: 10,
+    height: 38,
   },
   currencyPrefix: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: "900",
     color: "#047857",
-    marginRight: 6,
+    marginRight: 4,
   },
   amountInputBox: {
     flex: 1,
-    fontSize: 20,
-    fontWeight: "900",
+    fontSize: 15,
+    fontWeight: "800",
     color: "#0f172a",
+    borderWidth: 0,
+    outlineStyle: "none" as any,
+    cursor: "text" as any,
   },
   presetsWrap: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginTop: 6,
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 8,
   },
   presetsLabel: {
     fontSize: 11,
@@ -824,16 +1113,132 @@ const styles = StyleSheet.create({
   },
   presetChip: {
     backgroundColor: "#f1f5f9",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3.5,
+    borderRadius: 5,
     borderWidth: 1,
     borderColor: "#cbd5e1",
   },
   presetChipText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: "700",
     color: "#334155",
+  },
+
+  // ON-SCREEN TOUCH KEYPAD STYLES
+  touchKeypadContainer: {
+    marginTop: 4,
+    backgroundColor: "#f8fafc",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 6,
+  },
+  keypadModeBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingBottom: 6,
+    marginBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+  modeTab: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+  },
+  modeTabActive: {
+    backgroundColor: "#fee2e2",
+    borderColor: "#fca5a5",
+  },
+  modeTabText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748b",
+  },
+  modeTabTextActive: {
+    color: "#7c1a22",
+  },
+  targetFieldNotice: {
+    fontSize: 11,
+    color: "#64748b",
+  },
+  keyboardBody: {
+    gap: 5,
+    paddingVertical: 2,
+  },
+  keyboardRow: {
+    flexDirection: "row",
+    gap: 5,
+    justifyContent: "center",
+  },
+  kKey: {
+    flex: 1,
+    height: 44,
+    backgroundColor: "#ffffff",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "#cbd5e1",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  kKeySpecial: {
+    height: 44,
+    minWidth: 46,
+    paddingHorizontal: 12,
+    backgroundColor: "#f1f5f9",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "#cbd5e1",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  kKeyCapsActive: {
+    backgroundColor: "#fee2e2",
+    borderColor: "#fca5a5",
+  },
+  kKeyText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0f172a",
+  },
+  numpadBody: {
+    paddingVertical: 4,
+    alignItems: "center",
+  },
+  numpadGrid: {
+    width: "100%",
+    maxWidth: 500,
+    gap: 6,
+  },
+  numpadRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  numPadBtn: {
+    flex: 1,
+    height: 48,
+    backgroundColor: "#ffffff",
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "#cbd5e1",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  numPadBtnAction: {
+    backgroundColor: "#f1f5f9",
+  },
+  numPadBtnText: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0f172a",
   },
   historyContainer: {
     backgroundColor: "#ffffff",

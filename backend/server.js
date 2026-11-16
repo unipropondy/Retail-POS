@@ -126,6 +126,10 @@ app.use("/api/expenses", expenseRoutes);
 const discountRoutes = require("./routes/discountRoutes");
 app.use("/api/discounts", discountRoutes);
 
+// Mount Denomination Check routes (FrmDinaminationCheck.vb & tblPOSTerminalDinamination)
+const denominationRoutes = require("./routes/denominationRoutes");
+app.use("/api/denomination", denominationRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

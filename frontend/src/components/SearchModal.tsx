@@ -304,7 +304,7 @@ export default function SearchModal({
           <View style={[styles.header, { backgroundColor: primaryCol }]}>
             <View style={styles.headerLeft}>
               <MaterialCommunityIcons name="magnify" size={22} color="#ffffff" />
-              <Text style={styles.headerTitle}>Inventory Search (frmSearch)</Text>
+              <Text style={styles.headerTitle}>Inventory Search</Text>
               <View style={styles.locBadge}>
                 <Text style={styles.locBadgeText}>LOC: {currentLocationCode}</Text>
               </View>
@@ -679,23 +679,41 @@ export default function SearchModal({
                   <ScrollView style={{ flex: 1 }}>
                     <View style={styles.treeGrid}>
                       {treeList.map((item, idx) => {
-                        const val = item.DeptCode || item.CategoryCode || item.BrandCode || item.InventoryCode;
-                        const label = item.DeptCode ? item.DeptCode.trim() :
-                                      item.CategoryCode ? item.CategoryCode.trim() :
-                                      item.BrandCode ? (item.BrandCode.trim() || "[NO BRAND]") :
-                                      item.Description ? item.Description.trim() : val;
+                        const isFinalItem = treeStep === "ITEMS";
+                        const val = isFinalItem 
+                          ? (item.InventoryCode || item.BarCode || item.Description)
+                          : (item.DeptCode || item.CategoryCode || item.BrandCode || item.InventoryCode);
+                        
+                        const label = isFinalItem
+                          ? (item.Description ? item.Description.trim() : (item.InventoryCode ? item.InventoryCode.trim() : ""))
+                          : (item.DeptCode ? item.DeptCode.trim() :
+                             item.CategoryCode ? item.CategoryCode.trim() :
+                             item.BrandCode ? (item.BrandCode.trim() || "[NO BRAND]") :
+                             item.Description ? item.Description.trim() : val);
+
+                        const itemCode = isFinalItem ? (item.InventoryCode || "").trim() : "";
+                        const barcodeVal = isFinalItem ? (item.BarCode || "").trim() : "";
+                        const displayCode = itemCode || barcodeVal;
+
                         return (
                           <TouchableOpacity
                             key={`${val}_${idx}`}
-                            style={styles.treeTile}
+                            style={[styles.treeTile, isFinalItem && styles.treeTileItem]}
                             onPress={() => handleTreeSelect(val)}
                             activeOpacity={0.8}
                           >
                             <MaterialCommunityIcons
-                              name={treeStep === "ITEMS" ? "barcode-scan" : "folder-open"}
-                              size={24}
+                              name={isFinalItem ? "barcode-scan" : "folder-open"}
+                              size={isFinalItem ? 20 : 26}
                               color={primaryCol}
                             />
+                            {isFinalItem && displayCode ? (
+                              <View style={styles.treeTileCodeBadge}>
+                                <Text style={styles.treeTileCodeText} numberOfLines={1}>
+                                  {displayCode}
+                                </Text>
+                              </View>
+                            ) : null}
                             <Text style={styles.treeTileText} numberOfLines={2}>
                               {label}
                             </Text>
@@ -1142,24 +1160,43 @@ const styles = StyleSheet.create({
   },
   treeTile: {
     width: 140,
-    height: 100,
+    minHeight: 105,
     backgroundColor: "#f8fafc",
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1.5,
     borderColor: "#cbd5e1",
     justifyContent: "center",
     alignItems: "center",
     padding: 8,
   },
+  treeTileItem: {
+    backgroundColor: "#ffffff",
+    borderColor: "#e2e8f0",
+  },
+  treeTileCodeBadge: {
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    marginTop: 4,
+    maxWidth: "95%",
+  },
+  treeTileCodeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748b",
+  },
   treeTileText: {
     fontSize: 12,
     fontWeight: "700",
     color: "#1e293b",
     textAlign: "center",
-    marginTop: 6,
+    marginTop: 4,
   },
   treeTilePrice: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "800",
     color: "#15803d",
     marginTop: 2,

@@ -47,15 +47,17 @@ router.get('/check-permission', async (req, res) => {
       });
     }
 
-    // 2. Query tblPOSPermission for F11
+    // 2. Query tblPOSPermission for F11 or requested functionCode
+    const functionCode = (req.query.functionCode || 'F11').trim().toUpperCase();
     const cashierGroup = (user.CashierGroupCode || user.UserGroupCode || '').trim();
     const permReq = pool.request();
     permReq.input('grp', sql.VarChar(50), cashierGroup);
+    permReq.input('fcode', sql.VarChar(50), functionCode);
     const permRes = await permReq.query(`
       SELECT Status
       FROM tblPOSPermission
       WHERE UPPER(RTRIM(LTRIM(CashierGroupCode))) = UPPER(@grp)
-        AND UPPER(RTRIM(LTRIM(FunctionCode))) = 'F11'
+        AND UPPER(RTRIM(LTRIM(FunctionCode))) = UPPER(@fcode)
     `);
 
     let allowed = false;

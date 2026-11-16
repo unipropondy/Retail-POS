@@ -51,6 +51,7 @@ import { SettlementModal } from "../components/SettlementModal";
 import { PaymodeModificationModal } from "../components/PaymodeModificationModal";
 import { ExpenseModal } from "../components/ExpenseModal";
 import { DiscountModal } from "../components/DiscountModal";
+import DenominationModal from "../components/DenominationModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -486,7 +487,7 @@ export default function PosBillingScreen({
   const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
   const [adminAuthContext, setAdminAuthContext] = useState<
-    "HOLD" | "PRICE_CHANGE"
+    "HOLD" | "PRICE_CHANGE" | "AUTO_MODE"
   >("HOLD");
   const [showClearAdminModal, setShowClearAdminModal] =
     useState<boolean>(false);
@@ -548,7 +549,8 @@ export default function PosBillingScreen({
 
   // Quick Action Menu States (matching Desktop POS three-dot menu)
   const [isPrintOn, setIsPrintOn] = useState<boolean>(true);
-  const [isAutoMode, setIsAutoMode] = useState<boolean>(false);
+  // Exact VB.NET bAutoMaual parity: true = Auto (default high-speed scan), false = Manual (jumps to quantity on scan)
+  const [isAutoMode, setIsAutoMode] = useState<boolean>(true);
 
   // License validation states (tblMaCompany ValidateDate)
   const [licenseExpired, setLicenseExpired] = useState(false);
@@ -569,6 +571,7 @@ export default function PosBillingScreen({
     useState<boolean>(false);
   const [showExpenseModal, setShowExpenseModal] = useState<boolean>(false);
   const [showDiscountModal, setShowDiscountModal] = useState<boolean>(false);
+  const [showDenominationModal, setShowDenominationModal] = useState<boolean>(false);
   const [billDiscountAmount, setBillDiscountAmount] = useState<number>(0);
   const [billDiscountPerc, setBillDiscountPerc] = useState<number>(0);
   const [billDiscountRemarks, setBillDiscountRemarks] = useState<string>("");
@@ -985,6 +988,33 @@ export default function PosBillingScreen({
       return;
     }
 
+    // Exact VB.NET Parity: If Manual Mode is ON (isAutoMode === false) and not in explicit quantity override
+    // Stage the selected item on the item bar and immediately highlight the Quantity input box for manual cashier entry
+    if (!isAutoMode && explicitQty === undefined) {
+      setSkuCode(item.InventoryCode);
+      setSkuDesc(finalDesc);
+      setFastPrice(Number(finalPrice).toFixed(2));
+      setFastQty(String(qtyToAdd));
+      setActiveItem({
+        name: finalDesc,
+        qty: qtyToAdd,
+        price: finalPrice,
+        stock: initialStock,
+      });
+
+      setPendingItemAdd({
+        touchItem: item,
+        price: finalPrice,
+        desc: finalDesc,
+        salesman: finalSalesman,
+      });
+
+      setTimeout(() => {
+        fastQtyInputRef.current?.focus();
+      }, 50);
+      return;
+    }
+
     // App.config Conditions: AbovePrice, Aboveqty, ISValueAbove validation alerts
     const isValueAboveCheck = isEnabled("ISValueAbove");
     const abovePriceLimit = getNum("AbovePrice", 2000);
@@ -1099,6 +1129,7 @@ export default function PosBillingScreen({
     setSkuDesc("");
     setShowDescDropdown(false);
     setIsExchangeMode(false);
+    setPendingZeroPriceItem(null);
     setFastQty("1");
     setFastPrice("0.00");
     setFastDisc("0.00");
@@ -1194,6 +1225,9 @@ export default function PosBillingScreen({
 
         // Clear pending item and reset input bar
         setPendingZeroPriceItem(null);
+        if (targetItem.isPriceChangeMode) {
+          setBPriceChange(false);
+        }
         setSkuCode("");
         setSkuDesc("");
         setFastQty("1");
@@ -1279,6 +1313,19 @@ export default function PosBillingScreen({
     }
 
     setFastQty(String(parsed));
+
+    // If there is a pending item waiting in Manual Mode (F12 Manual), commit it now with the entered quantity
+    if (pendingItemAdd) {
+      const p = pendingItemAdd;
+      setPendingItemAdd(null);
+      handleAddItem(p.touchItem, parsed, p.price, p.desc, p.salesman);
+      setSkuCode("");
+      setSkuDesc("");
+      setFastQty("1");
+      setFastPrice("0.00");
+      skuInputRef.current?.focus();
+      return;
+    }
 
     // If an item is currently selected in the cart, update its quantity immediately
     if (cart.length > 0) {
@@ -1684,7 +1731,11 @@ export default function PosBillingScreen({
     setSkuCode("");
     setSkuDesc("");
     setIsExchangeMode(false);
+    setPendingZeroPriceItem(null);
+    setPendingItemAdd(null);
+    setBPriceChange(false);
     setFastQty("1");
+    setFastPrice("0.00");
     setFastDisc("0.00");
     setBillDiscountAmount(0);
     setBillDiscountPerc(0);
@@ -1980,6 +2031,20 @@ export default function PosBillingScreen({
         const data = await res.json();
         if (res.ok && data.authorized) {
           subPriceChange();
+          return true;
+        }
+        return false;
+      }
+
+      if (adminAuthContext === "AUTO_MODE") {
+        const res = await fetch(`${API_URL}/api/price-change/verify-admin`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        const data = await res.json();
+        if (res.ok && data.authorized) {
+          subAutoManual();
           return true;
         }
         return false;
@@ -2326,6 +2391,48 @@ export default function PosBillingScreen({
         return;
       }
 
+      // Exact VB.NET Parity: If Manual Mode is ON (isAutoMode === false)
+      // Stage the scanned item on the item bar and immediately focus the Quantity input box
+      if (!isAutoMode && data.item) {
+        const itemData = data.item;
+        const finalPrice =
+          data.price !== undefined && !isNaN(Number(data.price))
+            ? Number(data.price)
+            : Number(itemData.SellingPrice || itemData.RetailPrice || 0);
+
+        setSkuCode(itemData.InventoryCode);
+        setSkuDesc(itemData.Description);
+        setFastPrice(finalPrice.toFixed(2));
+        setFastQty(String(Number(data.quantity || fastQty) || 1));
+        setActiveItem({
+          name: itemData.Description,
+          qty: Number(data.quantity || fastQty) || 1,
+          price: finalPrice,
+          stock: data.stock !== null ? Number(data.stock) : 0,
+        });
+
+        // Set pending item for confirmation
+        setPendingItemAdd({
+          touchItem: {
+            GroupCode: itemData.GroupCode || "GENERAL",
+            InventoryCode: itemData.InventoryCode,
+            SortOrder: 0,
+            Description: itemData.Description,
+            SellingPrice: finalPrice,
+            RetailPrice: Number(itemData.RetailPrice) || finalPrice,
+            UOM: itemData.UOM || "PCS",
+          },
+          price: finalPrice,
+          desc: itemData.Description,
+          salesman: data.salesman || forcedSalesman,
+        });
+
+        setTimeout(() => {
+          fastQtyInputRef.current?.focus();
+        }, 60);
+        return;
+      }
+
       // Complete cart insertion
       finalizeValidatedItemAdd(data, data.salesman || forcedSalesman);
     } catch (err: any) {
@@ -2387,6 +2494,7 @@ export default function PosBillingScreen({
     setSkuCode("");
     setSkuDesc("");
     setShowDescDropdown(false);
+    setPendingZeroPriceItem(null);
     setFastQty("1");
     setFastPrice("0.00");
     setFastDisc("0.00");
@@ -2410,6 +2518,78 @@ export default function PosBillingScreen({
       const activeTerm = (terminalCode || "").trim();
       const currentQtyNum = parseFloat(fastQty) || 1;
       const currentDiscNum = parseFloat(fastDisc) || 0;
+
+      // Exact VB.NET Parity: If Manual Mode is ON (isAutoMode === false)
+      // Do NOT insert directly into tblTempSales. Look up item details and focus Fast Quantity input!
+      if (!isAutoMode) {
+        const lookupRes = await fetch(`${API_URL}/api/inventory/lookup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rawCode: enteredSku,
+            rawInput: enteredSku,
+            currentQty: fastQty,
+            currentCartItems: cart.map((c) => ({
+              InventoryCode: c.code,
+              Qty: c.qty,
+            })),
+            locationCode: effectiveLocation,
+            salesmanCode: salesMan || effectiveLocation,
+            cashierId: cashierName || "",
+            terminalCode: activeTerm,
+            allowWeighingScale: true,
+          }),
+        });
+
+        const lookupData = await lookupRes.json();
+        if (!lookupRes.ok || !lookupData.success || !lookupData.item) {
+          showAlert(
+            "Invalid SKU Code",
+            lookupData.message || "Invalid SKU Code. Item not found in Inventory.",
+            "error",
+          );
+          setSkuCode("");
+          skuInputRef.current?.focus();
+          return;
+        }
+
+        const itemData = lookupData.item;
+        const finalPrice =
+          lookupData.price !== undefined && !isNaN(Number(lookupData.price))
+            ? Number(lookupData.price)
+            : Number(itemData.SellingPrice || itemData.RetailPrice || 0);
+
+        setSkuCode(itemData.InventoryCode);
+        setSkuDesc(itemData.Description);
+        setFastPrice(finalPrice.toFixed(2));
+        setFastQty(String(Number(lookupData.quantity || fastQty) || 1));
+        setActiveItem({
+          name: itemData.Description,
+          qty: Number(lookupData.quantity || fastQty) || 1,
+          price: finalPrice,
+          stock: lookupData.stock !== null && lookupData.stock !== undefined ? Number(lookupData.stock) : 0,
+        });
+
+        setPendingItemAdd({
+          touchItem: {
+            GroupCode: itemData.GroupCode || "GENERAL",
+            InventoryCode: itemData.InventoryCode,
+            SortOrder: 0,
+            Description: itemData.Description,
+            SellingPrice: finalPrice,
+            RetailPrice: Number(itemData.RetailPrice) || finalPrice,
+            UOM: itemData.UOM || "PCS",
+          },
+          price: finalPrice,
+          desc: itemData.Description,
+          salesman: lookupData.salesman || salesMan || effectiveLocation,
+        });
+
+        setTimeout(() => {
+          fastQtyInputRef.current?.focus();
+        }, 60);
+        return;
+      }
 
       const currentSeq = ++cartMutationSeqRef.current;
       const res = await fetch(`${API_URL}/api/inventory/direct-sku`, {
@@ -2520,6 +2700,7 @@ export default function PosBillingScreen({
       setSkuDesc("");
       setShowDescDropdown(false);
       setIsExchangeMode(false);
+      setPendingZeroPriceItem(null);
       setFastQty("1");
       setFastPrice("0.00");
       setFastDisc("0.00");
@@ -2619,37 +2800,59 @@ export default function PosBillingScreen({
   };
 
   // ---------------------------------------------------------------------------
+  // AUTO / MANUAL WORKFLOW (Exact VB.NET btn_Auto_Click & subAutoManual - F12)
+  // In VB.NET: Pressing F12 toggles bAutoMaual (True = Auto, False = Manual).
+  // - Auto: Item scan/tap automatically submits to cart with current qty.
+  // - Manual: Item scan/tap stages item & immediately focuses Quantity box for cashier input.
+  // ---------------------------------------------------------------------------
+  const subAutoManual = () => {
+    setIsAutoMode((prev) => {
+      const nextMode = !prev;
+      showAlert(
+        "F12 Mode Toggled",
+        nextMode
+          ? "AUTO SCAN MODE: Scanned items will be added directly to cart."
+          : "MANUAL MODE: Scanned items will prompt to enter Quantity.",
+        "info",
+      );
+      setTimeout(() => {
+        skuInputRef.current?.focus();
+      }, 50);
+      return nextMode;
+    });
+  };
+
+  const handleAutoModeClick = async () => {
+    try {
+      const activeUser = (cashierName || "UPS").trim();
+      const res = await fetch(
+        `${API_URL}/api/price-change/check-permission?cashierId=${encodeURIComponent(activeUser)}&functionCode=F12`,
+      );
+      const data = await res.json();
+
+      if (res.ok && data.success && data.allowed) {
+        subAutoManual();
+      } else {
+        // Request Admin Password (frmAdminPassword.ShowDialog())
+        setAdminAuthContext("AUTO_MODE");
+        setShowAdminAuthModal(true);
+      }
+    } catch {
+      subAutoManual();
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // PRICE CHANGE WORKFLOW (Exact VB.NET btn_PriceChange_Click & subPriceChange)
+  // In VB.NET: Pressing F11 toggles bPriceChange (ON / OFF).
+  // It NEVER opens a popup modal. When bPriceChange is ON, scanning or selecting
+  // an item routes focus directly into the Price input box on the item bar.
   // ---------------------------------------------------------------------------
   const subPriceChange = () => {
-    // If cart has items, open the Price Change Modal for selected or last item
-    if (cart.length > 0) {
-      const targetIdx =
-        selectedCartIndex >= 0 && selectedCartIndex < cart.length
-          ? selectedCartIndex
-          : cart.length - 1;
-      const targetItem = cart[targetIdx];
-
-      if (targetItem) {
-        if ((targetItem as any).isFixedPrice) {
-          showAlert(
-            "Price Change Not Allowed",
-            "This item has a fixed price and cannot be changed.",
-            "warning",
-          );
-          return;
-        }
-        setOverridePrice(targetItem.price ? targetItem.price.toFixed(2) : "");
-        setShowPriceChangeModal(true);
-        return;
-      }
-    }
-
-    // If cart is empty, toggle bPriceChange mode for upcoming scanned item
     setBPriceChange((prev) => {
       const nextState = !prev;
       if (nextState) {
-        // Mode ON: Focus SKU code input ready for scanning or manual price entry
+        // Mode ON: Focus SKU code input ready for scanning item
         setTimeout(() => {
           skuInputRef.current?.focus();
         }, 50);
@@ -2781,6 +2984,7 @@ export default function PosBillingScreen({
     openPaymodeModificationModal: () => setShowPaymodeModificationModal(true),
     openExpenseModal: () => setShowExpenseModal(true),
     openDiscountModal: () => setShowDiscountModal(true),
+    handleAutoModeClick,
   });
 
   useEffect(() => {
@@ -2800,6 +3004,7 @@ export default function PosBillingScreen({
       openPaymodeModificationModal: () => setShowPaymodeModificationModal(true),
       openExpenseModal: () => setShowExpenseModal(true),
       openDiscountModal: () => setShowDiscountModal(true),
+      handleAutoModeClick,
     };
   });
 
@@ -2859,6 +3064,11 @@ export default function PosBillingScreen({
         e.preventDefault();
         e.stopPropagation();
         keyboardActionsRef.current.handlePriceChangeClick();
+      } else if (key === "F12" || code === "F12") {
+        // VB.NET F12: Toggle Auto/Manual Mode (btn_Auto_Click & subAutoManual)
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.handleAutoModeClick();
       } else if (key === "PAGEDOWN" || code === "PAGEDOWN") {
         e.preventDefault();
         e.stopPropagation();
@@ -2998,6 +3208,21 @@ export default function PosBillingScreen({
           >
             Stock : {activeItem.stock}
           </Text>
+          {!isAutoMode && (
+            <View
+              style={{
+                marginLeft: 6,
+                backgroundColor: "#fef3c7",
+                borderColor: "#f59e0b",
+                borderWidth: 1,
+                paddingHorizontal: 6,
+                paddingVertical: 1,
+                borderRadius: 4,
+              }}
+            >
+              <Text style={{ fontSize: 9.5, fontWeight: "800", color: "#b45309" }}>MANUAL QTY</Text>
+            </View>
+          )}
         </View>
 
         {/* SKU Code Input (lifted next to Stock) */}
@@ -4963,7 +5188,7 @@ export default function PosBillingScreen({
               style={{ fontSize: 13, color: "#475569", marginVertical: 12 }}
             >
               {pendingItemAdd
-                ? `Item [ ${pendingItemAdd.item.Description} ] requires a valid Salesman code:`
+                ? `Item [ ${pendingItemAdd.desc || pendingItemAdd.touchItem?.Description || pendingItemAdd.item?.Description || "Item"} ] requires a valid Salesman code:`
                 : "Enter Salesman Code to assign for sales transactions:"}
             </Text>
 
@@ -5219,6 +5444,18 @@ export default function PosBillingScreen({
           setBillDiscountReasonCode("");
         }}
         showAlert={showAlert}
+      />
+
+      {/* POS Dinamination Check Modal (FrmDinaminationCheck.vb) */}
+      <DenominationModal
+        visible={showDenominationModal}
+        onClose={() => setShowDenominationModal(false)}
+        apiUrl={API_URL}
+        terminalCode={terminalCode || "HQPC2"}
+        locationCode={effectiveLocation || "HQ"}
+        cashierName={cashierName || "UPS"}
+        shiftNo={1}
+        theme={currentTheme}
       />
 
       {/* Member Management Modal (VB.NET frmMember.vb) */}
@@ -5527,41 +5764,37 @@ export default function PosBillingScreen({
                   <Text style={styles.menuGridTileLabel}>Discount</Text>
                 </TouchableOpacity>
 
-                {/* Dinamination Check */}
+                {/* Denomination Check */}
                 <TouchableOpacity
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    showAlert(
-                      "Dinamination Check",
-                      `Terminal Cash Denomination Check:\nCash Tendered: $${currentTender.toFixed(2)}\nBalance: $${balance.toFixed(2)}`,
-                      "info",
-                    );
+                    setShowDenominationModal(true);
                   }}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.menuGridTileLabel}>Dinamination</Text>
+                  <Text style={styles.menuGridTileLabel}>Denomination</Text>
                   <Text style={styles.menuGridTileLabel}>Check</Text>
                 </TouchableOpacity>
 
-                {/* F12 Auto */}
+                {/* F12 Auto / Manual Toggle */}
                 <TouchableOpacity
                   style={[
                     styles.menuGridTile,
-                    isAutoMode && styles.menuGridTileActiveBorder,
+                    isAutoMode
+                      ? styles.menuGridTileActiveBorder
+                      : { borderColor: "#f59e0b", borderWidth: 2, backgroundColor: "#fffbeb" },
                   ]}
                   onPress={() => {
-                    setIsAutoMode((prev) => !prev);
-                    showAlert(
-                      "F12 Auto Mode",
-                      `Auto checkout mode is now ${!isAutoMode ? "ENABLED" : "DISABLED"}.`,
-                      "info",
-                    );
+                    setShowMoreMenuModal(false);
+                    handleAutoModeClick();
                   }}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.menuGridTileKey}>F12</Text>
-                  <Text style={styles.menuGridTileLabel}>Auto</Text>
+                  <Text style={[styles.menuGridTileKey, !isAutoMode && { color: "#d97706" }]}>F12</Text>
+                  <Text style={[styles.menuGridTileLabel, !isAutoMode && { color: "#b45309", fontWeight: "900" }]}>
+                    {isAutoMode ? "Auto" : "Manual"}
+                  </Text>
                 </TouchableOpacity>
 
                 {/* Cash Drawer */}
