@@ -90,7 +90,7 @@ router.post('/kick', async (req, res) => {
     const activeTerm = (terminalCode || '').trim();
 
     // 1. Trigger physical drawer kick via rawPrinter helper
-    let kickResult = { success: false, printer: printerName || 'TD80 Printer' };
+    let kickResult = { success: false, printer: printerName || '' };
     try {
       kickResult = await kickCashDrawer(activeTerm, printerName);
     } catch (spoolErr) {

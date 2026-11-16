@@ -44,8 +44,8 @@ router.get('/summary', async (req, res) => {
     const pool = await getPool();
     if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
 
-    const terminalCode = cleanStr(req.query.terminalCode) || 'HQPC2';
-    const locationCode = cleanStr(req.query.locationCode) || 'HQ';
+    const terminalCode = cleanStr(req.query.terminalCode);
+    const locationCode = cleanStr(req.query.locationCode);
     const shiftNo = parseInt(req.query.shiftNo, 10) || 1;
 
     // A. Terminal Float / Till Amount
@@ -144,17 +144,17 @@ router.post('/save', async (req, res) => {
     if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
 
     const {
-      locationCode = 'HQ',
-      terminalCode = 'HQPC2',
+      locationCode = '',
+      terminalCode = '',
       shiftNo = 1,
-      cashierId = 'UPS',
+      cashierId = '',
       denominations = [],
     } = req.body;
 
-    const loc = cleanStr(locationCode) || 'HQ';
-    const term = cleanStr(terminalCode) || 'HQPC2';
+    const loc = cleanStr(locationCode);
+    const term = cleanStr(terminalCode);
     const shift = parseInt(shiftNo, 10) || 1;
-    const cashier = cleanStr(cashierId) || 'UPS';
+    const cashier = cleanStr(cashierId);
 
     if (!Array.isArray(denominations) || denominations.length === 0) {
       return res.status(400).json({ success: false, message: 'No denomination items provided' });

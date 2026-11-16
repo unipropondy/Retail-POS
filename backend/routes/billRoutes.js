@@ -267,6 +267,56 @@ async function runBillCancelDataSync(pool) {
 }
 
 // ------------------------------------------------------------------------------
+// GET /api/bills/last-transaction
+// Exact equivalent of VB.NET clsSales.vb fncGetLastInvoiceDetails(TerminalCode)
+// Returns the most recent invoice header from tblPOSSalesHeaderCur for reprint
+// ------------------------------------------------------------------------------
+router.get('/last-transaction', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+
+    const terminalCode = String(req.query.terminalCode || '').trim();
+    const queryReq = pool.request();
+    let queryStr = 'SELECT TOP 1 * FROM tblPOSSalesHeaderCur';
+    if (terminalCode) {
+      queryReq.input('term', sql.VarChar(50), terminalCode);
+      queryStr += ' WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term)';
+    }
+    queryStr += ' ORDER BY CreateDate DESC';
+
+    const result = await queryReq.query(queryStr);
+    if (!result.recordset || result.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'No transactions found on this terminal' });
+    }
+
+    const row = result.recordset[0];
+    return res.status(200).json({
+      success: true,
+      transaction: {
+        invoiceNo: String(row.InvoiceNo || '').trim(),
+        invoiceDate: row.InvoiceDate,
+        totalValue: Number(row.TotalValue) || 0,
+        netTotal: Number(row.NetTotal) || 0,
+        gst: Number(row.Gst) || 0,
+        cashierId: String(row.CashierID || '').trim(),
+        locationCode: String(row.LocationCode || '').trim(),
+        terminalCode: String(row.TerminalCode || '').trim(),
+        tenderAmount: Number(row.TenderAmount) || 0,
+        balance: Number(row.Balance) || 0,
+        salesType: String(row.SalesType || '').trim(),
+        customerCode: String(row.CustomerCode || '').trim(),
+        customerName: String(row.CustomerName || '').trim(),
+        roundOff: Number(row.RoundOff) || 0,
+      },
+    });
+  } catch (err) {
+    console.error('❌ [LAST TRANSACTION ERROR]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ------------------------------------------------------------------------------
 // 1. GET /api/bills/transactions
 // Retrieves transaction list matching subGetHeaderData & subGetHeaderData_CREDIT
 // ------------------------------------------------------------------------------

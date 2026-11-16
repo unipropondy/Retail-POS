@@ -201,12 +201,12 @@ async function getActiveReceiptPrinter(terminalCode, requestedPrinter) {
   // 4. Fallback to any receipt / thermal printer in installed list
   const receiptCandidate = installed.find(p => {
     const u = p.toUpperCase();
-    return u.includes('RECEIPT') || u.includes('POS') || u.includes('THERMAL') || u.includes('TD80');
+    return u.includes('RECEIPT') || u.includes('POS') || u.includes('THERMAL');
   });
   if (receiptCandidate) return receiptCandidate;
 
   // 5. Ultimate fallback: First installed printer
-  return installed[0] || 'TD80 Printer';
+  return installed[0] || '';
 }
 
 /**

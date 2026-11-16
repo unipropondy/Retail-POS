@@ -476,7 +476,9 @@ export default function PosBillingScreen({
     tender: number;
     balance: number;
     payMode: string;
+    items?: CartItem[];
   } | null>(null);
+  const [lastFinishedInvoice, setLastFinishedInvoice] = useState<string>("");
 
   // Hold & Release Modal States (F6 Hold / F7 Release)
   const [showHoldListModal, setShowHoldListModal] = useState<boolean>(false);
@@ -2773,6 +2775,69 @@ export default function PosBillingScreen({
     setNumpadValue((prev) => prev + key);
   };
 
+  // ---------------------------------------------------------------------------
+  // F1 REPRINT WORKFLOW (Exact VB.NET subLoadLastBill / frmReprint / frmLastTransaction)
+  // ---------------------------------------------------------------------------
+  const handleF1Reprint = async (explicitInvoiceNo?: string) => {
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      const activeCashier = (cashierName || "").trim();
+      let invToPrint = explicitInvoiceNo || lastFinishedInvoice;
+
+      // If no invoice in state, query the most recent transaction on this terminal
+      if (!invToPrint) {
+        const lastRes = await fetch(`${API_URL}/api/bills/last-transaction?terminalCode=${encodeURIComponent(activeTerm)}`);
+        const lastData = await lastRes.json();
+        if (lastData.success && lastData.transaction) {
+          invToPrint = lastData.transaction.invoiceNo;
+        }
+      }
+
+      if (!invToPrint) {
+        showAlert("RePrint", "No previous transaction found on this terminal to re-print.", "warning");
+        return;
+      }
+
+      const billRes = await fetch(`${API_URL}/api/bills/${encodeURIComponent(invToPrint)}`);
+      const billData = await billRes.json();
+      if (billData.success && (billData.header || billData.bill)) {
+        const h = billData.header || billData.bill;
+        const printer = (config.ReceiptPrinter || "").trim();
+
+        await fetch(`${API_URL}/api/print/receipt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            billNo: h.invoiceNo || h.InvoiceNo,
+            date: h.invoiceDate || h.InvoiceDate,
+            cashier: h.cashierId || h.CashierID || activeCashier,
+            counter: h.terminalCode || h.TerminalCode || activeTerm,
+            salesman: h.locationCode || h.LocationCode || (effectiveLocation || "").trim(),
+            items: billData.items || [],
+            subTotal: h.totalValue !== undefined ? h.totalValue : (h.TotalValue || h.netTotal),
+            discount: h.totalDiscount !== undefined ? h.totalDiscount : (h.TotalDiscount || 0),
+            tax: h.gst !== undefined ? h.gst : (h.Gst || 0),
+            grandTotal: h.netTotal !== undefined ? h.netTotal : h.NetTotal,
+            payments: billData.payments && billData.payments.length > 0
+              ? billData.payments.map((p: any) => ({ mode: p.payMode || p.PayMode, amount: p.amount || p.Amount }))
+              : [{ mode: h.salesType || h.SalesType || "CASH", amount: h.netTotal || h.NetTotal }],
+            tendered: h.tenderAmount !== undefined ? h.tenderAmount : (h.TenderAmount || h.netTotal),
+            change: h.balance !== undefined ? h.balance : (h.Balance || 0),
+            isReprint: true,
+            printerName: printer,
+            terminalCode: activeTerm,
+          }),
+        });
+
+        showAlert("RePrint", `Receipt for ${invToPrint} re-printed successfully (Duplicate Copy).`, "info");
+      } else {
+        showAlert("RePrint", "Unable to load invoice details for re-print.", "warning");
+      }
+    } catch (e: any) {
+      showAlert("RePrint Error", e.message || "Failed to re-print receipt.", "warning");
+    }
+  };
+
   // Checkout (Net Total to Pay F4)
   const handleCheckout = () => {
     if (cart.length === 0) return;
@@ -2780,32 +2845,89 @@ export default function PosBillingScreen({
     setReceiptSummary({
       total: grandTotal,
       tender: finalTender,
-      balance: Math.max(0, finalTender - grandTotal),
+      balance: Math.max(0, parseFloat((finalTender - grandTotal).toFixed(2))),
       payMode: selectedPayMode,
+      items: [...cart],
     });
     setShowReceiptModal(true);
   };
 
-  const handleFinishSale = async () => {
+  const handleFinishSale = async (shouldPrintReceipt: boolean = false) => {
     try {
       const activeTerm = (terminalCode || "").trim();
-      const activeUser = (cashierName || "ADMIN").trim();
-      const activeLoc = (locationCode || "HQ").trim();
-      const invNo = "INV" + Date.now().toString().slice(-10);
+      const activeUser = (cashierName || "").trim();
+      const activeLoc = (locationCode || "").trim();
+      const finalTender = receiptSummary?.tender || (currentTender > 0 ? currentTender : grandTotal);
+      const finalNet = receiptSummary?.total || grandTotal;
+      const finalBal = receiptSummary?.balance !== undefined ? receiptSummary.balance : Math.max(0, parseFloat((finalTender - finalNet).toFixed(2)));
+      const finalPayMode = receiptSummary?.payMode || selectedPayMode || "CASH";
+      const cartSnapshot = (receiptSummary?.items && receiptSummary.items.length > 0) ? receiptSummary.items : [...cart];
 
-      await fetch(`${API_URL}/api/cart/checkout`, {
+      // 1. Transactional persist to SQL Server (sp_POS_GetNextPosInvoiceNo -> sp_POS_SalesHeader -> sp_SalesDetail -> sp_POS_PayModeDetail)
+      const res = await fetch(`${API_URL}/api/cart/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           terminalCode: activeTerm,
-          invoiceNo: invNo,
           cashierId: activeUser,
           locationCode: activeLoc,
-          items: cart,
-          payMode: receiptSummary?.payMode || selectedPayMode || "CASH",
-          tenderAmount: receiptSummary?.tender || grandTotal,
+          items: cartSnapshot,
+          payMode: finalPayMode,
+          tenderAmount: finalTender,
+          totalValue: subTotal,
+          netTotal: finalNet,
+          detailDiscount: cartSnapshot.reduce((acc, c) => acc + (Number(c.disc) || 0), 0),
+          billDiscount: billDiscountAmount || 0,
+          billDiscPerc: billDiscountPerc || 0,
+          tax: taxAmount || 0,
+          roundOff: roundOff || 0,
+          balance: finalBal,
+          customerCode: "CASH",
+          customerName: "CASH",
+          salesType: finalPayMode,
+          gstType: "Z",
         }),
       });
+
+      const data = await res.json();
+      const generatedInvoiceNo = (data.success && data.invoiceNo) ? data.invoiceNo : "";
+      if (generatedInvoiceNo) {
+        setLastFinishedInvoice(generatedInvoiceNo);
+      }
+
+      // 2. Direct Spooler Print + Cash Drawer Kick
+      if (shouldPrintReceipt || isEnabled("PrintReceipt")) {
+        const printer = (config.ReceiptPrinter || "").trim();
+        try {
+          await fetch(`${API_URL}/api/print/receipt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              billNo: generatedInvoiceNo || "INV-NEW",
+              cashier: activeUser,
+              counter: activeTerm,
+              salesman: salesMan || activeLoc,
+              items: cartSnapshot,
+              subTotal: subTotal,
+              discount: billDiscountAmount,
+              tax: taxAmount,
+              grandTotal: finalNet,
+              payments: [
+                {
+                  mode: finalPayMode,
+                  amount: finalNet,
+                },
+              ],
+              tendered: finalTender,
+              change: finalBal,
+              printerName: printer,
+              terminalCode: activeTerm,
+            }),
+          });
+        } catch (printErr) {
+          console.warn("Direct receipt print warning:", printErr);
+        }
+      }
     } catch (e) {
       console.warn("Checkout sync warning:", e);
     }
@@ -3080,6 +3202,7 @@ export default function PosBillingScreen({
     openDiscountModal: () => setShowDiscountModal(true),
     handleAutoModeClick,
     handleCashDrawerClick,
+    handleF1Reprint,
   });
 
   useEffect(() => {
@@ -3101,6 +3224,7 @@ export default function PosBillingScreen({
       openDiscountModal: () => setShowDiscountModal(true),
       handleAutoModeClick,
       handleCashDrawerClick,
+      handleF1Reprint,
     };
   });
 
@@ -3115,7 +3239,12 @@ export default function PosBillingScreen({
       const code = (e.code || "").toUpperCase();
 
       // Check if function key or shortcut
-      if (key === "F2" || code === "F2") {
+      if (key === "F1" || code === "F1") {
+        // Exact VB.NET F1: Bill RePrint (frmLastTransaction.vb / subLoadLastBill)
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.handleF1Reprint();
+      } else if (key === "F2" || code === "F2") {
         e.preventDefault();
         e.stopPropagation();
         keyboardActionsRef.current.handleClearCart();
@@ -5046,62 +5175,23 @@ export default function PosBillingScreen({
 
             <View style={styles.modalBtnRow}>
               {/* Controlled by PrintReceipt setting (App.config PrintReceipt = 1) */}
-              {isEnabled("PrintReceipt") && (
-                <TouchableOpacity
-                  style={styles.modalSecondaryBtn}
-                  onPress={async () => {
-                    const printer = config.ReceiptPrinter || "TD80 Printer";
-                    try {
-                      const activeTerm = (terminalCode || "").trim();
-                      const activeUser = (cashierName || "UPS").trim();
-                      const activeLoc = (locationCode || "HQ").trim();
-                      const invNo = "INV" + Date.now().toString().slice(-10);
-
-                      await fetch(`${API_URL}/api/print/receipt`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          billNo: invNo,
-                          cashier: activeUser,
-                          counter: activeTerm || "HQPC2",
-                          salesman: salesMan || activeLoc,
-                          items: cart,
-                          subTotal: subTotal,
-                          discount: billDiscountAmount,
-                          tax: taxAmount,
-                          grandTotal: receiptSummary?.total || grandTotal,
-                          payments: [
-                            {
-                              mode: receiptSummary?.payMode || selectedPayMode || "CASH",
-                              amount: receiptSummary?.total || grandTotal,
-                            },
-                          ],
-                          tendered: receiptSummary?.tender || grandTotal,
-                          change: receiptSummary?.balance || 0,
-                          printerName: printer,
-                          terminalCode: activeTerm,
-                        }),
-                      });
-                    } catch (printErr) {
-                      console.warn("Direct receipt print warning:", printErr);
-                    }
-                    handleFinishSale();
-                  }}
-                >
-                  <MaterialCommunityIcons
-                    name="printer"
-                    size={18}
-                    color="#334155"
-                  />
-                  <Text style={styles.modalSecondaryBtnText}>
-                    Print ({config.ReceiptTemplate || "Tpl2"})
-                  </Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={styles.modalSecondaryBtn}
+                onPress={() => handleFinishSale(true)}
+              >
+                <MaterialCommunityIcons
+                  name="printer"
+                  size={18}
+                  color="#334155"
+                />
+                <Text style={styles.modalSecondaryBtnText}>
+                  Print ({config.ReceiptTemplate || "Tpl2"})
+                </Text>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.modalPrimaryBtn}
-                onPress={handleFinishSale}
+                onPress={() => handleFinishSale(false)}
               >
                 <Text style={styles.modalPrimaryBtnText}>Next Sale (F4)</Text>
               </TouchableOpacity>
@@ -5453,16 +5543,10 @@ export default function PosBillingScreen({
         onClose={() => setShowViewBillModal(false)}
         apiUrl={API_URL}
         activeTerminal={(terminalCode || "").trim()}
-        activeCashier={(cashierName || "UPS").trim()}
-        activeLocation={(effectiveLocation || "HQ").trim()}
+        activeCashier={(cashierName || "").trim()}
+        activeLocation={(effectiveLocation || "").trim()}
         primaryColor={currentTheme?.primary || "#7A1C30"}
-        onReprintBill={(invoiceNo) => {
-          showAlert(
-            "Print Receipt",
-            `Printing receipt for invoice #${invoiceNo}...`,
-            "info",
-          );
-        }}
+        onReprintBill={(invoiceNo) => handleF1Reprint(invoiceNo)}
         onAdminAuthRequest={handleAdminAuthSubmit}
       />
 
@@ -5757,21 +5841,7 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    if (cart.length > 0 || grandTotal > 0) {
-                      setReceiptSummary({
-                        total: grandTotal,
-                        tender: currentTender,
-                        balance: balance,
-                        payMode: selectedPayMode,
-                      });
-                      setShowReceiptModal(true);
-                    } else {
-                      showAlert(
-                        "RePrint",
-                        "No previous receipt found to re-print.",
-                        "warning",
-                      );
-                    }
+                    handleF1Reprint();
                   }}
                   activeOpacity={0.8}
                 >

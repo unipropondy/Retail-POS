@@ -51,12 +51,12 @@ router.post('/test', async (req, res) => {
     const b = new ReceiptBuilder(42);
     b.alignCenter();
     b.setBold(true).setDoubleHeight(true);
-    b.textLine('TD80 PRINTER TEST');
+    b.textLine('HARDWARE PRINTER TEST');
     b.setDoubleHeight(false).setBold(false);
     b.doubleDivider();
     b.alignLeft();
     b.textLine(`PRINTER  : ${targetPrinter}`);
-    b.textLine(`TERMINAL : ${terminalCode || 'HQPC2'}`);
+    b.textLine(`TERMINAL : ${terminalCode || os.hostname()}`);
     b.textLine(`WORKSTN  : ${os.hostname()}`);
     b.textLine(`DATE/TIME: ${new Date().toLocaleString()}`);
     b.divider('-');
@@ -144,8 +144,8 @@ router.post('/receipt', async (req, res) => {
       company,
       billNo: billNo || 'INV-00000',
       date: date || new Date(),
-      cashier: cashier || 'UPS',
-      counter: counter || terminalCode || 'HQPC2',
+      cashier: cashier || 'ADMIN',
+      counter: counter || terminalCode || os.hostname(),
       salesman: salesman || '',
       items: items || [],
       subTotal: subTotal !== undefined ? subTotal : grandTotal,

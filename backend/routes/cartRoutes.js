@@ -1042,8 +1042,13 @@ router.post('/temp-sales/sync-full', async (req, res) => {
 });
 
 // ------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 // POST /api/cart/checkout
-// Finalizes sale and persists line items into tblPOSSalesDetail (via sp_SalesDetail)
+// Finalizes sale, generates consecutive invoice number via sp_POS_GetNextPosInvoiceNo,
+// saves header into tblPOSSalesHeaderCur via sp_POS_SalesHeader,
+// persists line items into tblPOSSalesDetailCur via sp_SalesDetail,
+// writes payment mode into tblPOSPaymodeDetailCur via sp_POS_PayModeDetail,
+// and purges temporary cart items from tblTempSales.
 // ------------------------------------------------------------------------------
 router.post('/checkout', async (req, res) => {
   try {
@@ -1052,32 +1057,120 @@ router.post('/checkout', async (req, res) => {
 
     const {
       terminalCode,
-      invoiceNo,
-      cashierId = 'ADMIN',
+      cashierId = 'UPS',
       locationCode = 'HQ',
       items = [],
       payMode = 'CASH',
       tenderAmount = 0,
+      totalValue = 0,
+      netTotal = 0,
+      detailDiscount = 0,
+      billDiscount = 0,
+      billDiscPerc = 0,
+      tax = 0,
+      roundOff = 0,
+      balance = 0,
+      customerCode = 'CASH',
+      customerName = 'CASH',
+      salesType = 'CASH',
+      gstType = 'Z',
+      remarks = '',
     } = req.body;
 
     const termCode = getCleanTerminalCode(terminalCode);
     if (!termCode) return res.status(400).json({ success: false, message: 'terminalCode is required' });
-    if (!invoiceNo) return res.status(400).json({ success: false, message: 'invoiceNo is required' });
     if (!items || items.length === 0) return res.status(400).json({ success: false, message: 'No items in cart to checkout' });
 
     const transaction = new sql.Transaction(pool);
     await transaction.begin();
 
     try {
+      // 1. Generate consecutive tax invoice number (e.g. HQ0007416)
+      const nextInvReq = new sql.Request(transaction);
+      const nextInvRes = await nextInvReq.execute('sp_POS_GetNextPosInvoiceNo');
+      let officialInvoiceNo = '';
+      if (nextInvRes.recordset && nextInvRes.recordset.length > 0) {
+        officialInvoiceNo = String(nextInvRes.recordset[0].NextInvoiceNo || '').trim();
+      }
+      if (!officialInvoiceNo) {
+        throw new Error('Failed to generate consecutive invoice number from sp_POS_GetNextPosInvoiceNo');
+      }
+
+      console.log(`🧾 [CHECKOUT] Generated Official InvoiceNo: ${officialInvoiceNo} for Terminal: ${termCode}`);
+
+      // Calculate totals if not passed directly
+      let computedTotalValue = 0;
+      let computedDetailDiscount = 0;
+      let computedGst = 0;
+
+      for (const it of items) {
+        const qtyNum = Number(it.qty) || 1;
+        const priceNum = Number(it.price) || 0;
+        const discNum = Number(it.disc) || 0;
+        const lineTotal = parseFloat((qtyNum * priceNum).toFixed(2));
+        computedTotalValue += lineTotal;
+        computedDetailDiscount += discNum;
+        const netAmt = qtyNum < 0 ? (lineTotal - discNum) : Math.max(0, lineTotal - discNum);
+        const gstPrec = Number(it.gstPrec) || 0;
+        if (gstPrec > 0) {
+          computedGst += parseFloat(((netAmt * gstPrec) / (100 + gstPrec)).toFixed(2));
+        }
+      }
+
+      const finalTotalValue = totalValue ? Number(totalValue) : parseFloat(computedTotalValue.toFixed(2));
+      const finalDetailDiscount = detailDiscount ? Number(detailDiscount) : parseFloat(computedDetailDiscount.toFixed(2));
+      const finalBillDiscount = Number(billDiscount) || 0;
+      const finalBillDiscPerc = Number(billDiscPerc) || 0;
+      const finalNetDiscount = parseFloat((finalDetailDiscount + finalBillDiscount).toFixed(2));
+      const finalGst = tax ? Number(tax) : parseFloat(computedGst.toFixed(2));
+      const finalNetTotal = netTotal ? Number(netTotal) : parseFloat((finalTotalValue - finalNetDiscount + Number(roundOff || 0)).toFixed(2));
+      const finalTender = Number(tenderAmount) || finalNetTotal;
+      const finalBalance = Number(balance) || Math.max(0, parseFloat((finalTender - finalNetTotal).toFixed(2)));
+
+      // 2. Save Header via sp_POS_SalesHeader
+      const hdrReq = new sql.Request(transaction);
+      hdrReq.input('InvoiceNo', sql.VarChar(20), officialInvoiceNo);
+      hdrReq.input('InvoiceDate', sql.SmallDateTime, new Date());
+      hdrReq.input('TotalValue', sql.Decimal(18, 2), finalTotalValue);
+      hdrReq.input('DetailDiscount', sql.Decimal(18, 2), finalDetailDiscount);
+      hdrReq.input('NetDiscountAmount', sql.Decimal(18, 2), finalBillDiscount);
+      hdrReq.input('NetDiscountPerc', sql.Decimal(18, 2), finalBillDiscPerc);
+      hdrReq.input('MemberDiscount', sql.Decimal(18, 2), 0);
+      hdrReq.input('TotalDiscount', sql.Decimal(18, 2), finalNetDiscount);
+      hdrReq.input('DiscountType', sql.VarChar(20), '');
+      hdrReq.input('Gst', sql.Decimal(18, 2), finalGst);
+      hdrReq.input('NetTotal', sql.Decimal(18, 2), finalNetTotal);
+      hdrReq.input('CashierID', sql.VarChar(10), String(cashierId || 'UPS').slice(0, 10));
+      hdrReq.input('LocationCode', sql.VarChar(10), String(locationCode || 'HQ').slice(0, 10));
+      hdrReq.input('TerminalCode', sql.VarChar(10), String(termCode).slice(0, 10));
+      hdrReq.input('TotalLines', sql.Int, items.length);
+      hdrReq.input('TenderAmount', sql.Decimal(18, 2), finalTender);
+      hdrReq.input('Balance', sql.Decimal(18, 2), finalBalance);
+      hdrReq.input('SalesType', sql.VarChar(10), String(salesType || payMode || 'CASH').slice(0, 10));
+      hdrReq.input('CustomerCode', sql.VarChar(10), String(customerCode || 'CASH').slice(0, 10));
+      hdrReq.input('CustomerName', sql.VarChar(50), String(customerName || 'CASH').slice(0, 50));
+      hdrReq.input('Address1', sql.VarChar(50), '');
+      hdrReq.input('Address2', sql.VarChar(50), '');
+      hdrReq.input('Address3', sql.VarChar(50), '');
+      hdrReq.input('Phone', sql.VarChar(15), '');
+      hdrReq.input('Fax', sql.VarChar(15), '');
+      hdrReq.input('GstType', sql.Char(1), String(gstType || 'Z').slice(0, 1));
+      hdrReq.input('RoundOff', sql.Decimal(18, 2), Number(roundOff) || 0);
+      hdrReq.input('Remarks', sql.NVarChar(400), String(remarks || ''));
+      hdrReq.input('UserID', sql.Char(10), String(cashierId || 'UPS').slice(0, 10));
+
+      await hdrReq.execute('sp_POS_SalesHeader');
+
+      // 3. Save Line Items via sp_SalesDetail
       for (const it of items) {
         const invCode = String(it.code || '').trim();
         const qtyNum = Number(it.qty) || 1;
         const priceNum = Number(it.price) || 0;
-        const totalValue = parseFloat((qtyNum * priceNum).toFixed(2));
+        const totalVal = parseFloat((qtyNum * priceNum).toFixed(2));
         const discNum = Number(it.disc) || 0;
         const netAmount = qtyNum < 0 
-          ? parseFloat((totalValue - discNum).toFixed(2))
-          : Math.max(0, parseFloat((totalValue - discNum).toFixed(2)));
+          ? parseFloat((totalVal - discNum).toFixed(2))
+          : Math.max(0, parseFloat((totalVal - discNum).toFixed(2)));
         const gstPrec = Number(it.gstPrec) || 0;
         const gst = gstPrec > 0 ? parseFloat(((netAmount * gstPrec) / (100 + gstPrec)).toFixed(2)) : 0;
         const actualSales = parseFloat((netAmount - gst).toFixed(2));
@@ -1092,12 +1185,12 @@ router.post('/checkout', async (req, res) => {
         const promoName = String(it.promoName || invCode).slice(0, 100);
 
         const spReq = new sql.Request(transaction);
-        spReq.input('InvoiceNo', sql.Char(15), String(invoiceNo).slice(0, 15));
+        spReq.input('InvoiceNo', sql.Char(15), officialInvoiceNo.slice(0, 15));
         spReq.input('InventoryCode', sql.Char(20), invCode.slice(0, 20));
         spReq.input('Description', sql.NVarChar(200), String(it.description || '').slice(0, 200));
         spReq.input('Qty', sql.Decimal(18, 2), qtyNum);
         spReq.input('Price', sql.Decimal(18, 2), priceNum);
-        spReq.input('TotalValue', sql.Decimal(18, 2), totalValue);
+        spReq.input('TotalValue', sql.Decimal(18, 2), totalVal);
         spReq.input('Discount', sql.Decimal(18, 2), discNum);
         spReq.input('NetDiscount', sql.Decimal(18, 2), discNum);
         spReq.input('NetAmount', sql.Decimal(18, 2), netAmount);
@@ -1107,10 +1200,10 @@ router.post('/checkout', async (req, res) => {
         spReq.input('DeptCode', sql.Char(10), String(attr.DepartmentCode || '').slice(0, 10));
         spReq.input('CategoryCode', sql.Char(20), String(attr.CategoryCode || '').slice(0, 20));
         spReq.input('BrandCode', sql.Char(20), String(attr.BrandCode || '').slice(0, 20));
-        spReq.input('UserID', sql.Char(10), String(cashierId).slice(0, 10));
-        spReq.input('LocationCode', sql.Char(10), String(locationCode).slice(0, 10));
+        spReq.input('UserID', sql.Char(10), String(cashierId || 'UPS').slice(0, 10));
+        spReq.input('LocationCode', sql.Char(10), String(locationCode || 'HQ').slice(0, 10));
         spReq.input('MemberDiscount', sql.Decimal(18, 2), 0);
-        spReq.input('GSTType', sql.Char(10), 'I');
+        spReq.input('GSTType', sql.Char(10), String(gstType || 'I').slice(0, 10));
         spReq.input('PRMFlag', sql.Char(1), prmFlag);
         spReq.input('EventDesc', sql.VarChar(100), promoName);
         spReq.input('FreeItem', sql.Char(10), '');
@@ -1129,20 +1222,39 @@ router.post('/checkout', async (req, res) => {
 
         // Also update PromotionCode and PromotionName explicitly on tblPOSSalesDetail
         const upReq = new sql.Request(transaction);
-        upReq.input('invNo', sql.VarChar(20), invoiceNo);
+        upReq.input('invNo', sql.VarChar(20), officialInvoiceNo);
         upReq.input('code', sql.VarChar(20), invCode);
         upReq.input('pCode', sql.VarChar(10), String(it.promoCode || '').slice(0, 10));
         upReq.input('pName', sql.VarChar(50), promoName.slice(0, 50));
         await upReq.query('UPDATE tblPOSSalesDetail SET PromotionCode = @pCode, PromotionName = @pName WHERE RTRIM(LTRIM(InvoiceNo)) = @invNo AND RTRIM(LTRIM(InventoryCode)) = @code');
       }
 
-      // Clean temporary sales table for this terminal
+      // 4. Save Payment Mode Detail via sp_POS_PayModeDetail
+      const payReq = new sql.Request(transaction);
+      payReq.input('InvoiceNo', sql.VarChar(10), officialInvoiceNo.slice(0, 10));
+      payReq.input('sDate', sql.DateTime, new Date());
+      payReq.input('PayMode', sql.VarChar(20), String(payMode || 'CASH').slice(0, 20));
+      payReq.input('Amount', sql.Money, finalNetTotal);
+      payReq.input('Commision', sql.Money, 0);
+      payReq.input('SlipNo', sql.VarChar(10), '');
+      payReq.input('UserID', sql.VarChar(10), String(cashierId || 'UPS').slice(0, 10));
+
+      await payReq.execute('sp_POS_PayModeDetail');
+
+      // 5. Clean temporary sales table for this terminal
       const clearTemp = new sql.Request(transaction);
       clearTemp.input('term', sql.VarChar(20), termCode);
       await clearTemp.query('DELETE FROM tblTempSales WHERE RTRIM(LTRIM(TerminalCode)) = @term');
 
       await transaction.commit();
-      return res.status(200).json({ success: true, invoiceNo, message: 'Checkout completed and promotions persisted' });
+      return res.status(200).json({
+        success: true,
+        invoiceNo: officialInvoiceNo,
+        netTotal: finalNetTotal,
+        tenderAmount: finalTender,
+        balance: finalBalance,
+        message: 'Checkout completed successfully',
+      });
     } catch (txErr) {
       await transaction.rollback();
       throw txErr;
