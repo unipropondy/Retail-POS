@@ -5049,16 +5049,43 @@ export default function PosBillingScreen({
               {isEnabled("PrintReceipt") && (
                 <TouchableOpacity
                   style={styles.modalSecondaryBtn}
-                  onPress={() => {
-                    const printer = config.ReceiptPrinter || "RECEIPT PRINTER";
-                    const tpl = config.ReceiptTemplate || "Template2";
-                    const store = config.CompanyName || "SUPERMART";
-                    showAlert(
-                      "Printing Receipt",
-                      `Spooling receipt to thermal printer [${printer}] using template [${tpl}] for ${store}...`,
-                      "info",
-                      () => handleFinishSale(),
-                    );
+                  onPress={async () => {
+                    const printer = config.ReceiptPrinter || "TD80 Printer";
+                    try {
+                      const activeTerm = (terminalCode || "").trim();
+                      const activeUser = (cashierName || "UPS").trim();
+                      const activeLoc = (locationCode || "HQ").trim();
+                      const invNo = "INV" + Date.now().toString().slice(-10);
+
+                      await fetch(`${API_URL}/api/print/receipt`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          billNo: invNo,
+                          cashier: activeUser,
+                          counter: activeTerm || "HQPC2",
+                          salesman: salesMan || activeLoc,
+                          items: cart,
+                          subTotal: subTotal,
+                          discount: billDiscountAmount,
+                          tax: taxAmount,
+                          grandTotal: receiptSummary?.total || grandTotal,
+                          payments: [
+                            {
+                              mode: receiptSummary?.payMode || selectedPayMode || "CASH",
+                              amount: receiptSummary?.total || grandTotal,
+                            },
+                          ],
+                          tendered: receiptSummary?.tender || grandTotal,
+                          change: receiptSummary?.balance || 0,
+                          printerName: printer,
+                          terminalCode: activeTerm,
+                        }),
+                      });
+                    } catch (printErr) {
+                      console.warn("Direct receipt print warning:", printErr);
+                    }
+                    handleFinishSale();
                   }}
                 >
                   <MaterialCommunityIcons

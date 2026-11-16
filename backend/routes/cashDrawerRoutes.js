@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const { sql, getPool } = require('../config/db');
+const { kickCashDrawer } = require('../utils/rawPrinter');
 
 // ------------------------------------------------------------------------------
 // GET /api/cash-drawer/check-permission
@@ -78,29 +79,29 @@ router.get('/check-permission', async (req, res) => {
 
 // ------------------------------------------------------------------------------
 // POST /api/cash-drawer/kick
-// Mirrors VB.NET:
-// 1. objPrint.subOpenCashDrawer(gsReceiptPrinterName) -> sends ESC p 0 25 50
-// 2. subCashdrawerLog() -> Exec Sp_CashdrawerLog @UserId
+// Direct Physical Hardware Spooling: Sends ESC p 0 25 50 to TD80 Printer / Windows Spooler
 // ------------------------------------------------------------------------------
 router.post('/kick', async (req, res) => {
   try {
     const pool = await getPool();
-    const { cashierId, terminalCode, reason, authorizedBy } = req.body;
+    const { cashierId, terminalCode, reason, authorizedBy, printerName } = req.body;
 
     const activeUser = (cashierId || 'UPS').trim();
     const activeTerm = (terminalCode || '').trim();
 
-    // ESC/POS Cash Drawer Pulse sequence:
-    // Chr(27) & Chr(112) & Chr(0) & Chr(25) & Chr(50) = \x1B\x70\x00\x19\x32
-    // Base64: G3AACTA=
-    const escposPulseBase64 = Buffer.from([0x1B, 0x70, 0x00, 0x19, 0x32]).toString('base64');
+    // 1. Trigger physical drawer kick via rawPrinter helper
+    let kickResult = { success: false, printer: printerName || 'TD80 Printer' };
+    try {
+      kickResult = await kickCashDrawer(activeTerm, printerName);
+    } catch (spoolErr) {
+      console.warn('⚠️ [PHYSICAL DRAWER SPOOL ERROR]:', spoolErr.message);
+    }
 
-    // Attempt subCashdrawerLog execution (safe fallback if stored proc or table doesn't exist)
+    // 2. Attempt subCashdrawerLog execution (safe fallback if stored proc or table doesn't exist)
     if (pool) {
       try {
         const logReq = pool.request();
         logReq.input('user', sql.VarChar(50), activeUser);
-        // Attempt stored proc if available
         await logReq.query(`
           IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'Sp_CashdrawerLog')
           BEGIN
@@ -114,8 +115,8 @@ router.post('/kick', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Cash drawer kick signal sent successfully.',
-      pulseCommand: escposPulseBase64,
+      message: `Cash drawer kick sent successfully to [${kickResult.printer}].`,
+      printer: kickResult.printer,
       details: {
         cashierId: activeUser,
         terminalCode: activeTerm,
@@ -130,4 +131,3 @@ router.post('/kick', async (req, res) => {
 });
 
 module.exports = router;
-

@@ -134,6 +134,10 @@ app.use("/api/denomination", denominationRoutes);
 const cashDrawerRoutes = require("./routes/cashDrawerRoutes");
 app.use("/api/cash-drawer", cashDrawerRoutes);
 
+// Mount Inbuilt Print Bridge routes (ESC/POS Receipt Spooler & Test Print)
+const printRoutes = require("./routes/printRoutes");
+app.use("/api/print", printRoutes);
+
 // ==============================================================================
 // 4. SERVER STARTUP (NON-BLOCKING)
 // ==============================================================================

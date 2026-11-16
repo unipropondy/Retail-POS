@@ -50,6 +50,8 @@ export default function AppConfigScreen({ onClose }: AppConfigScreenProps) {
   const [editedValues, setEditedValues] = useState<Record<string, any>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [isTestingPrinter, setIsTestingPrinter] = useState(false);
+  const [isTestingDrawer, setIsTestingDrawer] = useState(false);
 
   // Group items by category
   const filteredItems = useMemo(() => {
@@ -274,6 +276,111 @@ export default function AppConfigScreen({ onClose }: AppConfigScreenProps) {
               </TouchableOpacity>
             ) : null}
           </View>
+
+          {/* Quick Hardware Diagnostic Actions for Printer Settings */}
+          {activeCategory === "Printer Settings" && (
+            <View
+              style={{
+                flexDirection: "row",
+                gap: 12,
+                backgroundColor: "#f8fafc",
+                padding: 12,
+                borderRadius: 8,
+                marginBottom: 14,
+                borderWidth: 1,
+                borderColor: "#e2e8f0",
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "700", color: "#334155", marginRight: "auto" }}>
+                Hardware Diagnostics:
+              </Text>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  backgroundColor: "#0284c7",
+                  paddingVertical: 7,
+                  paddingHorizontal: 12,
+                  borderRadius: 6,
+                }}
+                disabled={isTestingPrinter}
+                onPress={async () => {
+                  setIsTestingPrinter(true);
+                  try {
+                    const targetPrinter = config.ReceiptPrinter || "TD80 Printer";
+                    const res = await fetch(`http://localhost:5000/api/print/test`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ printerName: targetPrinter, terminalCode: "HQPC2" }),
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.success) {
+                      setSaveStatus({ type: "success", msg: `Test slip spooled to [${data.printer}]!` });
+                    } else {
+                      setSaveStatus({ type: "error", msg: data.message || "Failed to print test slip." });
+                    }
+                  } catch (e: any) {
+                    setSaveStatus({ type: "error", msg: e.message || "Cannot reach print service." });
+                  } finally {
+                    setIsTestingPrinter(false);
+                  }
+                }}
+              >
+                {isTestingPrinter ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <MaterialCommunityIcons name="printer-check" size={16} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>Test Receipt Slip</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  backgroundColor: "#059669",
+                  paddingVertical: 7,
+                  paddingHorizontal: 12,
+                  borderRadius: 6,
+                }}
+                disabled={isTestingDrawer}
+                onPress={async () => {
+                  setIsTestingDrawer(true);
+                  try {
+                    const targetPrinter = config.ReceiptPrinter || "TD80 Printer";
+                    const res = await fetch(`http://localhost:5000/api/cash-drawer/kick`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ printerName: targetPrinter, terminalCode: "HQPC2" }),
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.success) {
+                      setSaveStatus({ type: "success", msg: `Drawer kick pulse sent to [${data.printer}]!` });
+                    } else {
+                      setSaveStatus({ type: "error", msg: data.message || "Failed to kick drawer." });
+                    }
+                  } catch (e: any) {
+                    setSaveStatus({ type: "error", msg: e.message || "Cannot reach cash drawer service." });
+                  } finally {
+                    setIsTestingDrawer(false);
+                  }
+                }}
+              >
+                {isTestingDrawer ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <MaterialCommunityIcons name="cash-register" size={16} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>Test Kick Drawer</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
 
           {isLoading ? (
             <View style={styles.centerBox}>
