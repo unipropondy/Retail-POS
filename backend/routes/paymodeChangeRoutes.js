@@ -283,7 +283,7 @@ router.post('/save', async (req, res) => {
   }
 
   const cleanInvoiceNo = String(invoiceNo).trim();
-  const cleanUserId = String(userId || 'ADMIN').trim();
+  const cleanUserId = String(userId || '').trim();
 
   const pool = await getPool();
   if (!pool) {

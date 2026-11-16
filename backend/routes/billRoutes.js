@@ -317,6 +317,61 @@ router.get('/last-transaction', async (req, res) => {
 });
 
 // ------------------------------------------------------------------------------
+// GET /api/bills/active-suggestions
+// Returns recent bills from tblPOSSalesHeaderCur on the active terminal / location
+// for fast suggestion / one-tap selection in Void Bill and related modals
+// ------------------------------------------------------------------------------
+router.get('/active-suggestions', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+
+    const terminalCode = String(req.query.terminalCode || '').trim();
+    const locationCode = String(req.query.locationCode || '').trim();
+    const limit = parseInt(req.query.limit, 10) || 12;
+
+    const queryReq = pool.request();
+    queryReq.input('limit', sql.Int, limit);
+
+    let whereClauses = [];
+    if (terminalCode) {
+      queryReq.input('term', sql.VarChar(50), terminalCode);
+      whereClauses.push('UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term)');
+    }
+    if (locationCode) {
+      queryReq.input('loc', sql.VarChar(50), locationCode);
+      whereClauses.push('UPPER(RTRIM(LTRIM(LocationCode))) = UPPER(@loc)');
+    }
+
+    const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const q = `
+      SELECT TOP (@limit)
+        RTRIM(LTRIM(InvoiceNo)) AS invoiceNo,
+        InvoiceDate AS invoiceDate,
+        ISNULL(NetTotal, 0) AS netTotal,
+        ISNULL(TotalLines, 0) AS totalLines,
+        RTRIM(LTRIM(ISNULL(SalesType, 'CASH'))) AS salesType,
+        RTRIM(LTRIM(ISNULL(CashierID, ''))) AS cashierId,
+        RTRIM(LTRIM(ISNULL(TerminalCode, ''))) AS terminalCode,
+        CreateDate AS createDate
+      FROM tblPOSSalesHeaderCur
+      ${whereStr}
+      ORDER BY CreateDate DESC
+    `;
+
+    const result = await queryReq.query(q);
+    return res.status(200).json({
+      success: true,
+      suggestions: result.recordset || [],
+    });
+  } catch (err) {
+    console.error('❌ [ACTIVE SUGGESTIONS ERROR]:', err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ------------------------------------------------------------------------------
 // 1. GET /api/bills/transactions
 // Retrieves transaction list matching subGetHeaderData & subGetHeaderData_CREDIT
 // ------------------------------------------------------------------------------

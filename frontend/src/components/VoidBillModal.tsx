@@ -83,12 +83,39 @@ export default function VoidBillModal({
   // Notice alert banner
   const [notice, setNotice] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
 
+  // Suggestions state (recent counter bills on current terminal)
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState<boolean>(false);
+
   const inputRef = useRef<any>(null);
 
   const showNotice = (msg: string, type: "success" | "error" | "info" = "info") => {
     setNotice({ msg, type });
     if (type !== "error") {
       setTimeout(() => setNotice(null), 4000);
+    }
+  };
+
+  // Fetch recent bills on current terminal for instant selection
+  const fetchSuggestions = async () => {
+    setLoadingSuggestions(true);
+    try {
+      const q = new URLSearchParams({
+        terminalCode: activeTerminal || "",
+        locationCode: activeLocation || "",
+        limit: "10",
+      });
+      const res = await fetch(`${apiUrl}/api/bills/active-suggestions?${q.toString()}`);
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.suggestions)) {
+        setSuggestions(data.suggestions);
+      } else {
+        setSuggestions([]);
+      }
+    } catch {
+      setSuggestions([]);
+    } finally {
+      setLoadingSuggestions(false);
     }
   };
 
@@ -104,13 +131,16 @@ export default function VoidBillModal({
       setShowStep2PrintConfirm(false);
       setNotice(null);
 
+      // Fetch suggestions for current terminal
+      fetchSuggestions();
+
       if (initialInvoiceNo.trim()) {
         fetchBillHeader(initialInvoiceNo.trim());
       } else {
         setTimeout(() => inputRef.current?.focus(), 150);
       }
     }
-  }, [visible, initialInvoiceNo, activeLocation]);
+  }, [visible, initialInvoiceNo, activeLocation, activeTerminal]);
 
   // Fetch bill details from backend
   const fetchBillHeader = async (invToFetch: string) => {
@@ -646,11 +676,43 @@ export default function VoidBillModal({
             <View style={styles.receiptActionsRow}>
               <TouchableOpacity
                 style={[styles.receiptBtn, { backgroundColor: "#0284c7" }]}
-                onPress={() => {
-                  if (Platform.OS === "web" && typeof window !== "undefined") {
-                    window.print();
-                  } else {
-                    showNotice("Sent to thermal receipt printer.", "success");
+                onPress={async () => {
+                  try {
+                    const h = voidReceiptData.header;
+                    const items = voidReceiptData.items || [];
+                    const payments = voidReceiptData.payments || [];
+
+                    await fetch(`${apiUrl}/api/print/receipt`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        billNo: h.InvoiceNo,
+                        date: h.InvoiceDate,
+                        cashier: h.CashierID || activeCashier,
+                        counter: h.TerminalCode || activeTerminal,
+                        salesman: h.LocationCode || activeLocation,
+                        items: items.map((it: any) => ({
+                          code: it.InventoryCode,
+                          description: it.Description,
+                          qty: it.Qty,
+                          price: it.Price,
+                          amount: it.NetAmount,
+                        })),
+                        subTotal: h.TotalValue || h.NetTotal,
+                        discount: h.TotalDiscount || 0,
+                        tax: h.Gst || 0,
+                        grandTotal: h.NetTotal,
+                        payments: payments.map((p: any) => ({ mode: p.PayMode, amount: p.Amount })),
+                        tendered: h.TenderAmount || h.NetTotal,
+                        change: h.Balance || 0,
+                        isVoid: true,
+                        terminalCode: activeTerminal,
+                      }),
+                    });
+                    showNotice("Void receipt sent to thermal printer.", "success");
+                  } catch (pErr) {
+                    console.warn("Void print error:", pErr);
+                    showNotice("Sent to printer with preview.", "info");
                   }
                   setShowVoidReceiptModal(false);
                   onClose();

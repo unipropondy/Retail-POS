@@ -5596,9 +5596,9 @@ export default function PosBillingScreen({
       <PaymodeModificationModal
         visible={showPaymodeModificationModal}
         onClose={() => setShowPaymodeModificationModal(false)}
-        terminalCode={(terminalCode || "HQ-PC1").trim()}
+        terminalCode={(terminalCode || "").trim()}
         cashierGroupCode="CASHIER"
-        loggedInUserId={cashierName || "ADMIN"}
+        loggedInUserId={cashierName || ""}
         backendUrl={API_URL}
         gbAutoNETS="0"
         showAlert={showAlert}
