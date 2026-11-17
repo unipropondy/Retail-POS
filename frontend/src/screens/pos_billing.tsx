@@ -54,6 +54,7 @@ import { DiscountModal } from "../components/DiscountModal";
 import DenominationModal from "../components/DenominationModal";
 import { PosPaymentModal, SplitPaymentLine } from "../components/PosPaymentModal";
 import { DayEndModal, DayEndReportData } from "../components/DayEndModal";
+import CustomerReceiptsModal from "../components/CustomerReceiptsModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -492,7 +493,7 @@ export default function PosBillingScreen({
   const [suggestedHoldNo, setSuggestedHoldNo] = useState<number>(1);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
   const [adminAuthContext, setAdminAuthContext] = useState<
-    "HOLD" | "PRICE_CHANGE" | "AUTO_MODE" | "CASH_DRAWER"
+    "HOLD" | "PRICE_CHANGE" | "AUTO_MODE" | "CASH_DRAWER" | "REFUND"
   >("HOLD");
   const [showClearAdminModal, setShowClearAdminModal] =
     useState<boolean>(false);
@@ -578,6 +579,7 @@ export default function PosBillingScreen({
   const [showDiscountModal, setShowDiscountModal] = useState<boolean>(false);
   const [showDenominationModal, setShowDenominationModal] = useState<boolean>(false);
   const [showDayEndModal, setShowDayEndModal] = useState<boolean>(false);
+  const [showCustomerReceiptsModal, setShowCustomerReceiptsModal] = useState<boolean>(false);
   const [dayEndReportData, setDayEndReportData] = useState<DayEndReportData | null>(null);
   const [billDiscountAmount, setBillDiscountAmount] = useState<number>(0);
   const [billDiscountPerc, setBillDiscountPerc] = useState<number>(0);
@@ -586,6 +588,7 @@ export default function PosBillingScreen({
   const [showMemberManagementModal, setShowMemberManagementModal] =
     useState<boolean>(false);
   const [isExchangeMode, setIsExchangeMode] = useState<boolean>(false);
+  const [isRefundMode, setIsRefundMode] = useState<boolean>(false);
 
   // Refs for auto-focusing inputs
   const skuInputRef = useRef<any>(null);
@@ -907,17 +910,18 @@ export default function PosBillingScreen({
       return;
     }
 
+    const isNegativeMode = isExchangeMode || isRefundMode;
     const rawQtyToAdd =
       explicitQty !== undefined
         ? explicitQty
         : isManualFastQtyEnteredRef.current
           ? parseFloat(fastQty) || 1
-          : isExchangeMode
+          : isNegativeMode
             ? -1
             : 1;
-    const qtyToAdd = isExchangeMode ? -Math.abs(rawQtyToAdd) : rawQtyToAdd;
+    const qtyToAdd = isNegativeMode ? -Math.abs(rawQtyToAdd) : rawQtyToAdd;
     isManualFastQtyEnteredRef.current = false;
-    const discToAdd = isExchangeMode ? 0 : parseFloat(fastDisc) || 0;
+    const discToAdd = isNegativeMode ? 0 : parseFloat(fastDisc) || 0;
     const finalPrice =
       explicitPrice !== undefined ? explicitPrice : item.SellingPrice;
     const finalDesc = explicitDesc || item.Description;
@@ -1131,11 +1135,12 @@ export default function PosBillingScreen({
         .catch(() => {});
     } catch {}
 
-    // Reset top item-entry fields and clear exchange mode (VB.NET subClearDetail)
+    // Reset top item-entry fields and clear exchange/refund mode (VB.NET subClearDetail)
     setSkuCode("");
     setSkuDesc("");
     setShowDescDropdown(false);
     setIsExchangeMode(false);
+    setIsRefundMode(false);
     setPendingZeroPriceItem(null);
     setFastQty("1");
     setFastPrice("0.00");
@@ -1152,10 +1157,53 @@ export default function PosBillingScreen({
       "info",
       () => {
         setIsExchangeMode(true);
+        setIsRefundMode(false);
         setFastQty("-1");
         skuInputRef.current?.focus();
       },
     );
+  };
+
+  // VB.NET subRefund() & btn_Refund_Click - Initiates Refund Mode (-1 qty with permission check)
+  const subRefund = () => {
+    setIsRefundMode(true);
+    setIsExchangeMode(false);
+    setFastQty("-1");
+    showAlert(
+      "Refund Mode Active",
+      "Refund mode initiated (-1 Qty). Scan or select the item to refund.",
+      "info",
+      () => {
+        skuInputRef.current?.focus();
+      },
+    );
+  };
+
+  const handleRefundClick = async () => {
+    setShowMoreMenuModal(false);
+    if (isRefundMode) {
+      // Toggle off if already active
+      setIsRefundMode(false);
+      setFastQty("1");
+      return;
+    }
+
+    try {
+      const activeUser = (cashierName || "").trim();
+      const res = await fetch(
+        `${API_URL}/api/price-change/check-permission?cashierId=${encodeURIComponent(activeUser)}`,
+      );
+      const data = await res.json();
+      if (res.ok && data.success && data.allowed) {
+        subRefund();
+      } else {
+        // Request Admin Password (frmAdminPassword.ShowDialog())
+        setAdminAuthContext("REFUND");
+        setShowAdminAuthModal(true);
+      }
+    } catch {
+      subRefund();
+    }
   };
   const handleFastPriceCommit = async (enteredPriceStr: string) => {
     if (isCommittingPriceRef.current) return;
@@ -1738,6 +1786,7 @@ export default function PosBillingScreen({
     setSkuCode("");
     setSkuDesc("");
     setIsExchangeMode(false);
+    setIsRefundMode(false);
     setPendingZeroPriceItem(null);
     setPendingItemAdd(null);
     setBPriceChange(false);
@@ -2066,6 +2115,20 @@ export default function PosBillingScreen({
         const data = await res.json();
         if (res.ok && data.authorized) {
           executeCashDrawerKick(user);
+          return true;
+        }
+        return false;
+      }
+
+      if (adminAuthContext === "REFUND") {
+        const res = await fetch(`${API_URL}/api/price-change/verify-admin`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        const data = await res.json();
+        if (res.ok && data.authorized) {
+          subRefund();
           return true;
         }
         return false;
@@ -3666,7 +3729,7 @@ export default function PosBillingScreen({
           style={[
             styles.pillInputBox,
             isScaleLockedQty && { backgroundColor: "#f1f5f9", opacity: 0.7 },
-            isExchangeMode && {
+            (isExchangeMode || isRefundMode) && {
               backgroundColor: "#fee2e2",
               borderColor: "#ef4444",
               borderWidth: 2,
@@ -3677,7 +3740,7 @@ export default function PosBillingScreen({
             ref={fastQtyInputRef}
             style={[
               styles.pillInput,
-              isExchangeMode && { color: "#b91c1c", fontWeight: "900" },
+              (isExchangeMode || isRefundMode) && { color: "#b91c1c", fontWeight: "900" },
             ]}
             value={fastQty}
             editable={!isScaleLockedQty}
@@ -5233,6 +5296,16 @@ export default function PosBillingScreen({
       />
 
       {/* =========================================================================
+          MODAL: Customer Receipts (frmCustomerReceipts.vb Parity)
+      ========================================================================= */}
+      <CustomerReceiptsModal
+        visible={showCustomerReceiptsModal}
+        onClose={() => setShowCustomerReceiptsModal(false)}
+        apiUrl={API_URL}
+        primaryColor={currentTheme.primary}
+      />
+
+      {/* =========================================================================
           MODAL: Checkout Receipt Confirmation
       ========================================================================= */}
       <Modal
@@ -6200,15 +6273,11 @@ export default function PosBillingScreen({
 
                 {/* Refund */}
                 <TouchableOpacity
-                  style={styles.menuGridTile}
-                  onPress={() => {
-                    setShowMoreMenuModal(false);
-                    showAlert(
-                      "Refund",
-                      "Refund mode initiated. Enter original receipt / bill number.",
-                      "info",
-                    );
-                  }}
+                  style={[
+                    styles.menuGridTile,
+                    isRefundMode && styles.menuGridTileActiveBorder,
+                  ]}
+                  onPress={handleRefundClick}
                   activeOpacity={0.8}
                 >
                   <Text style={styles.menuGridTileLabelSingle}>Refund</Text>
@@ -6219,21 +6288,7 @@ export default function PosBillingScreen({
                   style={styles.menuGridTile}
                   onPress={() => {
                     setShowMoreMenuModal(false);
-                    if (cart.length > 0) {
-                      setReceiptSummary({
-                        total: grandTotal,
-                        tender: currentTender,
-                        balance: balance,
-                        payMode: selectedPayMode,
-                      });
-                      setShowReceiptModal(true);
-                    } else {
-                      showAlert(
-                        "Customer Receipts",
-                        "Showing Customer Receipts history...",
-                        "info",
-                      );
-                    }
+                    setShowCustomerReceiptsModal(true);
                   }}
                   activeOpacity={0.8}
                 >

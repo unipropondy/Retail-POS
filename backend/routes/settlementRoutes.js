@@ -732,13 +732,7 @@ router.post('/day-end', async (req, res) => {
       });
     }
 
-    // Step 3: Fetch Server Date and Company Short Code
-    const compRes = await pool.request().query(`
-      SELECT TOP 1 ISNULL(CompanyShortCode, 'HQ') AS ShortCode, CompanyName 
-      FROM tblMaCompany
-    `);
-    const shortCode = String(compRes.recordset[0]?.ShortCode || 'HQ').trim();
-
+    // Step 3: Fetch Server Date
     const serverDateRes = await pool.request().query('SELECT GETDATE() AS ServerDate');
     const serverDate = serverDateRes.recordset[0]?.ServerDate || new Date();
 

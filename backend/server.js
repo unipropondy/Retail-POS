@@ -114,6 +114,10 @@ app.use("/api/total-sales", totalSalesRoutes);
 const settlementRoutes = require("./routes/settlementRoutes");
 app.use("/api/settlement", settlementRoutes);
 
+// Mount Customer Receipts routes (frmCustomerReceipts.vb & Accounts Receivable)
+const customerReceiptsRoutes = require("./routes/customerReceiptsRoutes");
+app.use("/api/customer-receipts", customerReceiptsRoutes);
+
 // Mount Paymode Change routes (frmPaymodeModification.vb & btn_PaymodeChange_Click)
 const paymodeChangeRoutes = require("./routes/paymodeChangeRoutes");
 app.use("/api/paymode-change", paymodeChangeRoutes);
