@@ -10,20 +10,32 @@ const path = require('path');
 const os = require('os');
 const { getPool, sql } = require('../config/db');
 
+// In-memory cache for installed Windows printers (refreshed every 60 seconds)
+let cachedPrinters = null;
+let lastPrinterCacheTime = 0;
+const PRINTER_CACHE_TTL = 60000;
+
 /**
  * Enumerates all installed Windows printers dynamically via WMI / Win32_Printer
  * @returns {string[]} Array of printer names
  */
 function getInstalledPrinters() {
+  const now = Date.now();
+  if (cachedPrinters && (now - lastPrinterCacheTime) < PRINTER_CACHE_TTL) {
+    return cachedPrinters;
+  }
+
   try {
     const ps = 'Get-CimInstance Win32_Printer | Select-Object -ExpandProperty Name';
     const res = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`, {
       encoding: 'utf8',
-      timeout: 6000,
+      timeout: 3000,
     });
-    return res.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    cachedPrinters = res.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    lastPrinterCacheTime = now;
+    return cachedPrinters;
   } catch (e) {
-    return [];
+    return cachedPrinters || [];
   }
 }
 
@@ -31,17 +43,27 @@ function getInstalledPrinters() {
  * Gets the system default Windows printer
  * @returns {string|null}
  */
+let cachedDefaultPrinter = null;
+let lastDefaultCacheTime = 0;
+
 function getDefaultPrinter() {
+  const now = Date.now();
+  if (cachedDefaultPrinter && (now - lastDefaultCacheTime) < PRINTER_CACHE_TTL) {
+    return cachedDefaultPrinter;
+  }
+
   try {
     const ps = '(Get-CimInstance Win32_Printer | Where-Object { $_.Default -eq $true } | Select-Object -ExpandProperty Name)';
     const res = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`, {
       encoding: 'utf8',
-      timeout: 6000,
+      timeout: 3000,
     });
     const def = res.trim();
-    return def || null;
+    cachedDefaultPrinter = def || null;
+    lastDefaultCacheTime = now;
+    return cachedDefaultPrinter;
   } catch (e) {
-    return null;
+    return cachedDefaultPrinter || null;
   }
 }
 

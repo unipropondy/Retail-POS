@@ -2517,6 +2517,21 @@ export default function PosBillingScreen({
         return;
       }
 
+      // Live Serial Scale Polling (VB.NET txtQty_GotFocus: fncGetWeightfromWeighingScale)
+      // If item is priced by weight (UOM = 'KG') and not pre-weighed via sticker barcode
+      let scaleResolvedQty = data.quantity;
+      if (data.item?.UOM === "KG" && !data.isWeighingScale) {
+        try {
+          const scaleRes = await fetch(`${API_URL}/api/scale/read`);
+          const scaleData = await scaleRes.json();
+          if (scaleRes.ok && scaleData.success && Number(scaleData.weight) > 0) {
+            scaleResolvedQty = Number(scaleData.weight);
+            data.quantity = scaleResolvedQty;
+            data.isWeighingScale = true; // Lock weight from hardware scale
+          }
+        } catch {}
+      }
+
       // Complete cart insertion
       finalizeValidatedItemAdd(data, data.salesman || forcedSalesman);
     } catch (err: any) {
@@ -2961,41 +2976,39 @@ export default function PosBillingScreen({
         setLastFinishedInvoice(generatedInvoiceNo);
       }
 
-      // 2. Direct Spooler Print + Cash Drawer Kick
-      if (shouldPrintReceipt || isEnabled("PrintReceipt")) {
-        const printer = (config.ReceiptPrinter || "").trim();
-        try {
-          await fetch(`${API_URL}/api/print/receipt`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              billNo: generatedInvoiceNo || "INV-NEW",
-              cashier: activeUser,
-              counter: activeTerm,
-              salesman: salesMan || activeLoc,
-              items: cartSnapshot,
-              subTotal: subTotal,
-              discount: billDiscountAmount,
-              tax: taxAmount,
-              grandTotal: finalNet,
-              payments: payments.map(p => ({
-                mode: p.payMode,
-                amount: p.amount,
-              })),
-              tendered: finalTender,
-              change: changeDue,
-              printerName: printer,
-              terminalCode: activeTerm,
-            }),
-          });
-        } catch (printErr) {
-          console.warn("Direct receipt print warning:", printErr);
-        }
-      }
-
-      // Close POS payment modal & reset cart
+      // Close POS payment modal & reset cart immediately for instant cashier feedback
       setShowPosPaymentModal(false);
       resetPosScreenState();
+
+      // 2. Direct Spooler Print + Cash Drawer Kick (non-blocking in background)
+      if (shouldPrintReceipt || isEnabled("PrintReceipt")) {
+        const printer = (config.ReceiptPrinter || "").trim();
+        fetch(`${API_URL}/api/print/receipt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            billNo: generatedInvoiceNo || "INV-NEW",
+            cashier: activeUser,
+            counter: activeTerm,
+            salesman: salesMan || activeLoc,
+            items: cartSnapshot,
+            subTotal: subTotal,
+            discount: billDiscountAmount,
+            tax: taxAmount,
+            grandTotal: finalNet,
+            payments: payments.map(p => ({
+              mode: p.payMode,
+              amount: p.amount,
+            })),
+            tendered: finalTender,
+            change: changeDue,
+            printerName: printer,
+            terminalCode: activeTerm,
+          }),
+        }).catch((printErr) => {
+          console.warn("Direct receipt print warning:", printErr);
+        });
+      }
     } catch (e: any) {
       console.warn("Checkout sync warning:", e);
       showAlert("Checkout Error", e.message || "Failed to complete checkout.", "warning");

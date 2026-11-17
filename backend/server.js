@@ -118,6 +118,10 @@ app.use("/api/settlement", settlementRoutes);
 const customerReceiptsRoutes = require("./routes/customerReceiptsRoutes");
 app.use("/api/customer-receipts", customerReceiptsRoutes);
 
+// Mount Live Serial Counter Scale routes (frmPos1.vb fncGetWeightfromWeighingScale)
+const scaleRoutes = require("./routes/scaleRoutes");
+app.use("/api/scale", scaleRoutes);
+
 // Mount Paymode Change routes (frmPaymodeModification.vb & btn_PaymodeChange_Click)
 const paymodeChangeRoutes = require("./routes/paymodeChangeRoutes");
 app.use("/api/paymode-change", paymodeChangeRoutes);
