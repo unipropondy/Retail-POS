@@ -32,7 +32,7 @@
   "DBConnStandAlone": "server=26.79.167.123\\sql2008;uid=ups;pwd=ups;database=StandAlone",
   "ReceiptPrinter": "TD80 Printer",
   "ReceiptTemplate": "Template3",
-  "LoginPrint": 1,
+  "LoginPrint": 0,
   "CrystalReport": 2,
   "PrintReceipt": 1,
   "PrintDeposit": 1,

@@ -6288,20 +6288,14 @@ export default function PosBillingScreen({
                       }
                     };
 
-                    if (Platform.OS === 'web') {
-                      if (window.confirm("Are you sure you want to run Day End closing? Ensure all terminal settlements are completed.")) {
-                        executeDayEnd();
-                      }
-                    } else {
-                      Alert.alert(
-                        "Confirm Day End",
-                        "Are you sure you want to run Day End closing? Ensure all terminal settlements are completed.",
-                        [
-                          { text: "Cancel", style: "cancel" },
-                          { text: "Run Day End", onPress: executeDayEnd }
-                        ]
-                      );
-                    }
+                    showConfirm(
+                      "Confirm Day End",
+                      "Are you sure you want to run Day End closing? Ensure all terminal settlements are completed.",
+                      executeDayEnd,
+                      undefined,
+                      "Run Day End",
+                      "Cancel"
+                    );
                   }}
                   activeOpacity={0.8}
                 >

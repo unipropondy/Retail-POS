@@ -86,6 +86,22 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   const [activeInputIndex, setActiveInputIndex] = useState<number>(0);
   const [showTouchKeypad, setShowTouchKeypad] = useState<boolean>(true);
 
+  // Custom In-App Modal Dialog States
+  const [confirmDialog, setConfirmDialog] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    onConfirm: () => void;
+  }>({ visible: false, title: '', message: '', onConfirm: () => {} });
+
+  const [feedbackAlert, setFeedbackAlert] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type: 'success' | 'error' | 'info';
+  }>({ visible: false, title: '', message: '', type: 'info' });
+
   // Handle Touch Numpad press
   const handleKeypadPress = (val: string) => {
     if (activeInputType === 'denom' && activeInputIndex >= 0) {
@@ -348,24 +364,27 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        if (Platform.OS === 'web') {
-          window.alert('Settlement slip sent to thermal printer!');
-        } else {
-          Alert.alert('Printed', 'Settlement slip sent to thermal printer!');
-        }
+        setFeedbackAlert({
+          visible: true,
+          title: 'Print Successful',
+          message: 'Settlement slip sent to thermal printer!',
+          type: 'success'
+        });
       } else {
-        if (Platform.OS === 'web') {
-          window.alert(`Print Error: ${data.message || 'Failed to re-print'}`);
-        } else {
-          Alert.alert('Print Error', data.message || 'Failed to re-print');
-        }
+        setFeedbackAlert({
+          visible: true,
+          title: 'Print Error',
+          message: data.message || 'Failed to re-print settlement slip.',
+          type: 'error'
+        });
       }
     } catch (e: any) {
-      if (Platform.OS === 'web') {
-        window.alert(`Print Error: ${e.message}`);
-      } else {
-        Alert.alert('Print Error', e.message);
-      }
+      setFeedbackAlert({
+        visible: true,
+        title: 'Print Error',
+        message: e.message || 'Error communicating with printer.',
+        type: 'error'
+      });
     } finally {
       setReprinting(false);
     }
@@ -442,50 +461,48 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
 
         const result = await res.json();
         if (!res.ok || !result.success) {
-          if (Platform.OS === 'web') {
-            window.alert(`Save Failed: ${result.message || 'Error occurred while saving settlement.'}`);
-          } else {
-            Alert.alert('Save Failed', result.message || 'Error occurred while saving settlement.');
-          }
+          setFeedbackAlert({
+            visible: true,
+            title: 'Save Failed',
+            message: result.message || 'Error occurred while saving settlement.',
+            type: 'error'
+          });
           setSaving(false);
           return;
         }
 
-        if (Platform.OS === 'web') {
-          window.alert('Settlement saved successfully!');
-        } else {
-          Alert.alert('Success', 'Settlement saved successfully!');
-        }
+        setFeedbackAlert({
+          visible: true,
+          title: 'Settlement Saved',
+          message: `Shift ${shiftNo} settlement saved and recorded successfully.`,
+          type: 'success'
+        });
         if (onSettlementSaved) onSettlementSaved();
 
         // Automatically trigger print or fetch summary
         await fetchSummary();
       } catch (err: any) {
-        if (Platform.OS === 'web') {
-          window.alert(`Save Error: ${err.message || 'Network error while saving.'}`);
-        } else {
-          Alert.alert('Save Error', err.message || 'Network error while saving.');
-        }
+        setFeedbackAlert({
+          visible: true,
+          title: 'Save Error',
+          message: err.message || 'Network error while saving settlement.',
+          type: 'error'
+        });
       } finally {
         setSaving(false);
       }
     };
 
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm(`Are you sure you want to save settlement for Shift ${shiftNo}?`);
-      if (confirmed) {
+    setConfirmDialog({
+      visible: true,
+      title: 'Confirm Shift Settlement',
+      message: `Are you sure you want to save settlement for Shift ${shiftNo}?`,
+      confirmText: 'Save Settlement',
+      onConfirm: () => {
+        setConfirmDialog((prev) => ({ ...prev, visible: false }));
         executeSave();
       }
-    } else {
-      Alert.alert(
-        'Confirm Settlement',
-        `Are you sure you want to save settlement for Shift ${shiftNo}?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Save Settlement', onPress: executeSave }
-        ]
-      );
-    }
+    });
   };
 
   // Fetch Print Summary Report
@@ -1152,6 +1169,91 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
             </View>
           </View>
         )}
+
+        {/* Modern Confirmation Modal Dialog */}
+        <Modal visible={confirmDialog.visible} transparent animationType="fade">
+          <View style={styles.dialogBackdrop}>
+            <View style={styles.dialogCard}>
+              <View style={styles.dialogHeader}>
+                <View style={styles.dialogIconCircle}>
+                  <MaterialCommunityIcons name="help-circle-outline" size={26} color="#7A0C2E" />
+                </View>
+                <Text style={styles.dialogTitle}>{confirmDialog.title}</Text>
+              </View>
+              <Text style={styles.dialogMessage}>{confirmDialog.message}</Text>
+              <View style={styles.dialogActions}>
+                <TouchableOpacity
+                  style={styles.dialogCancelBtn}
+                  onPress={() => setConfirmDialog((prev) => ({ ...prev, visible: false }))}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.dialogCancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.dialogConfirmBtn}
+                  onPress={confirmDialog.onConfirm}
+                  activeOpacity={0.7}
+                >
+                  <MaterialCommunityIcons name="check" size={18} color="#FFFFFF" />
+                  <Text style={styles.dialogConfirmBtnText}>
+                    {confirmDialog.confirmText || 'OK'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Modern Alert / Notification Modal Dialog */}
+        <Modal visible={feedbackAlert.visible} transparent animationType="fade">
+          <View style={styles.dialogBackdrop}>
+            <View style={styles.dialogCard}>
+              <View style={styles.dialogHeader}>
+                <View
+                  style={[
+                    styles.dialogIconCircle,
+                    feedbackAlert.type === 'success' && { backgroundColor: '#DCFCE7' },
+                    feedbackAlert.type === 'error' && { backgroundColor: '#FEE2E2' },
+                    feedbackAlert.type === 'info' && { backgroundColor: '#E0F2FE' }
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={
+                      feedbackAlert.type === 'success'
+                        ? 'check-circle'
+                        : feedbackAlert.type === 'error'
+                        ? 'alert-circle'
+                        : 'information'
+                    }
+                    size={26}
+                    color={
+                      feedbackAlert.type === 'success'
+                        ? '#16A34A'
+                        : feedbackAlert.type === 'error'
+                        ? '#DC2626'
+                        : '#0284C7'
+                    }
+                  />
+                </View>
+                <Text style={styles.dialogTitle}>{feedbackAlert.title}</Text>
+              </View>
+              <Text style={styles.dialogMessage}>{feedbackAlert.message}</Text>
+              <View style={styles.dialogActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.dialogConfirmBtn,
+                    { flex: 1 },
+                    feedbackAlert.type === 'error' && { backgroundColor: '#DC2626' }
+                  ]}
+                  onPress={() => setFeedbackAlert((prev) => ({ ...prev, visible: false }))}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.dialogConfirmBtnText}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     </Modal>
   );
@@ -1920,5 +2022,87 @@ const styles = StyleSheet.create({
     color: '#333333',
     fontSize: 13,
     fontWeight: '700'
+  },
+
+  // Modern Dialog Styles (replacing native browser alert/confirm)
+  dialogBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20
+  },
+  dialogCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0'
+  },
+  dialogHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12
+  },
+  dialogIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FCE4EC',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  dialogTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0F172A',
+    flex: 1
+  },
+  dialogMessage: {
+    fontSize: 14,
+    color: '#475569',
+    lineHeight: 21,
+    marginBottom: 20
+  },
+  dialogActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10
+  },
+  dialogCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1'
+  },
+  dialogCancelBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#475569'
+  },
+  dialogConfirmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#7A0C2E'
+  },
+  dialogConfirmBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF'
   }
 });

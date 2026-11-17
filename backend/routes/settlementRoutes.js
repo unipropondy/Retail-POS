@@ -687,6 +687,7 @@ router.post('/reprint-slip', async (req, res) => {
  */
 router.post('/day-end', async (req, res) => {
   try {
+    const { cashierId, terminalCode, date } = req.body || {};
     const pool = await getPool();
 
     // 0. Resolve User and Company from DB
@@ -738,24 +739,24 @@ router.post('/day-end', async (req, res) => {
 
     console.log(`🔄 [DAY END] Executing sp_Dayend with Date=[${serverDate.toISOString().split('T')[0]}], User=[${user}], Company=[${shortCode}]...`);
 
-    // Step 4: Execute sp_Dayend
+    // Step 4: Execute sp_DayEnd with exact parameters (@MoveToHistory, @IDate, @UserID, @sCompanyShortCode)
     const spReq = pool.request();
-    spReq.input('Flag', sql.Char(1), 'N');
-    spReq.input('Date', sql.SmallDateTime, serverDate);
-    spReq.input('User', sql.VarChar(50), user);
-    spReq.input('CompanyCode', sql.VarChar(50), shortCode);
+    spReq.input('MoveToHistory', sql.Char(1), 'N');
+    spReq.input('IDate', sql.DateTime, serverDate);
+    spReq.input('UserID', sql.VarChar(50), user);
+    spReq.input('sCompanyShortCode', sql.VarChar(50), shortCode);
 
     try {
-      await spReq.execute('sp_Dayend');
-      console.log(`✅ [DAY END] sp_Dayend executed successfully! Day-end completed.`);
+      await spReq.execute('sp_DayEnd');
+      console.log(`✅ [DAY END] sp_DayEnd executed successfully! Day-end completed.`);
     } catch (spErr) {
       // Fallback: If SP uses raw query parameters instead of named
       console.warn(`⚠️ [DAY END] Stored procedure execution retry via direct query: ${spErr.message}`);
       const fallbackReq = pool.request();
-      fallbackReq.input('d', sql.SmallDateTime, serverDate);
+      fallbackReq.input('d', sql.DateTime, serverDate);
       fallbackReq.input('u', sql.VarChar(50), user);
       fallbackReq.input('c', sql.VarChar(50), shortCode);
-      await fallbackReq.query(`EXEC sp_Dayend 'N', @d, @u, @c`);
+      await fallbackReq.query(`EXEC sp_DayEnd 'N', @d, @u, @c`);
       console.log(`✅ [DAY END] Fallback execution succeeded.`);
     }
 
@@ -782,7 +783,7 @@ router.post('/day-end', async (req, res) => {
           RTRIM(LTRIM(Paymode)) AS Paymode,
           ISNULL(SUM(Amount), 0) AS TotalAmount
         FROM tblPOSPayModeDetail
-        WHERE CONVERT(varchar(10), SalesDate, 120) = @dStr
+        WHERE CONVERT(varchar(10), InvoiceDate, 120) = @dStr
         GROUP BY RTRIM(LTRIM(Paymode))
       `);
 
@@ -860,7 +861,7 @@ router.post('/day-end/print', async (req, res) => {
           RTRIM(LTRIM(Paymode)) AS Paymode,
           ISNULL(SUM(Amount), 0) AS TotalAmount
         FROM tblPOSPayModeDetail
-        WHERE CONVERT(varchar(10), SalesDate, 120) = @dStr
+        WHERE CONVERT(varchar(10), InvoiceDate, 120) = @dStr
         GROUP BY RTRIM(LTRIM(Paymode))
       `);
 
