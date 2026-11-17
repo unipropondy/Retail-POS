@@ -2809,7 +2809,8 @@ export default function PosBillingScreen({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             billNo: h.invoiceNo || h.InvoiceNo,
-            date: h.invoiceDate || h.InvoiceDate,
+            date: h.createDate || h.CreateDate || h.invoiceDate || h.InvoiceDate,
+            createDate: h.createDate || h.CreateDate,
             cashier: h.cashierId || h.CashierID || activeCashier,
             counter: h.terminalCode || h.TerminalCode || activeTerm,
             salesman: h.locationCode || h.LocationCode || (effectiveLocation || "").trim(),

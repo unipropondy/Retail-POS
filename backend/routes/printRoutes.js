@@ -109,6 +109,7 @@ router.post('/receipt', async (req, res) => {
       isVoid,
       printerName,
       terminalCode,
+      template,
     } = req.body;
 
     const targetPrinter = await getActiveReceiptPrinter(terminalCode || counter, printerName);
@@ -157,6 +158,7 @@ router.post('/receipt', async (req, res) => {
       change: change || 0,
       isReprint: Boolean(isReprint),
       isVoid: Boolean(isVoid),
+      template: template || undefined,
       kickDrawerOnCash: true,
     });
 

@@ -23,6 +23,11 @@ const { sql, getPool } = require("../config/db");
 // ParamMaster & Cash Customer loading service (matching VB.NET frmSignOn / clsCompany flow)
 const { loadParamMaster, fncGetCashMemberCode } = require("../services/paramService");
 
+// Config service & Raw thermal printer utils for Login Slip (LoginPrint)
+const configService = require("../config/configService");
+const { sendRawToPrinter, getActiveReceiptPrinter } = require("../utils/rawPrinter");
+const { ReceiptBuilder } = require("../utils/receiptBuilder");
+
 module.exports = function (jwtSecret) {
   // ----------------------------------------------------------------------------
   // Helper Function: Find and validate terminal in tblmaTerminal
@@ -493,10 +498,69 @@ module.exports = function (jwtSecret) {
         `✅ [LOGIN SUCCESS] User: ${user.UserName} (${user.UserGroupCode}) on Terminal: ${terminal.TerminalCode} | Params loaded: ${paramMaster.count} | CashCustomer: ${cashCustomerCode}`,
       );
 
+      // 11. Print Login Slip if LoginPrint is enabled in AppConfig
+      let loginSlipPrinted = false;
+      const shouldPrintLogin = configService.getBoolean("LoginPrint");
+
+      if (shouldPrintLogin) {
+        try {
+          const compRes = await pool.request().query("SELECT TOP 1 * FROM tblMaCompany");
+          const comp = compRes.recordset && compRes.recordset.length > 0 ? compRes.recordset[0] : {};
+          const compName = (comp.CompanyName || comp.Company_Name || "RETAIL SUPERMARKET").trim();
+          const targetPrinter = await getActiveReceiptPrinter(terminal.TerminalCode, terminal.PrinterName);
+
+          const b = new ReceiptBuilder(42);
+          // Kick cash drawer on login if configured
+          if (terminal.CashDrawerInterface && terminal.CashDrawerInterface !== "N") {
+            b.kickDrawer();
+          }
+
+          b.alignCenter();
+          b.setBold(true).setDoubleHeight(true);
+          b.textLine(compName);
+          b.setDoubleHeight(false).setBold(false);
+
+          if (comp.Address1) b.textLine(comp.Address1.trim());
+          if (comp.Phone || comp.TelNo) b.textLine(`Tel: ${(comp.Phone || comp.TelNo).trim()}`);
+
+          b.lineFeed();
+          b.setBold(true);
+          b.textLine("*** CASHIER SIGN-ON SLIP ***");
+          b.setBold(false);
+          b.doubleDivider();
+
+          b.alignLeft();
+          b.row(`TERMINAL : ${terminal.TerminalCode}`, `LOC: ${terminal.LocationCode || "HQ"}`);
+          b.row(`WORKSTN  : ${computerName}`, `DRAWER: OK`);
+          b.row(`CASHIER  : ${user.UserName}`, `CODE: ${user.UserCode}`);
+          b.row(`ROLE     : ${user.IsAdmin ? "ADMIN" : "CASHIER"}`, `GRP: ${user.UserGroupCode || ""}`);
+          b.row(`DATE/TIME: ${new Date().toLocaleDateString()}`, new Date().toLocaleTimeString());
+
+          if (terminal.TillAmount !== undefined && terminal.TillAmount !== null) {
+            b.divider("-");
+            b.row("OPENING FLOAT / TILL :", `$${Number(terminal.TillAmount || 0).toFixed(2)}`);
+          }
+
+          b.divider("-");
+          b.alignCenter();
+          b.textLine("REGISTER OPENED SUCCESSFULLY");
+          b.textLine("HAVE A PRODUCTIVE SHIFT!");
+          b.lineFeed();
+          b.cutPaper();
+
+          const slipBuffer = b.getBuffer();
+          loginSlipPrinted = sendRawToPrinter(targetPrinter, slipBuffer);
+          console.log(`🖨️ [LOGIN SLIP] Spooled sign-on slip to [${targetPrinter}] -> Result: ${loginSlipPrinted}`);
+        } catch (printErr) {
+          console.warn(`⚠️ [LOGIN SLIP NOTICE] Could not spool sign-on slip:`, printErr.message);
+        }
+      }
+
       // Return user profile, terminal configuration, loaded paramMaster, and session token
       return res.status(200).json({
         success: true,
         message: "Login successful",
+        loginSlipPrinted,
         token,
         terminal: {
           terminalCode: terminal.TerminalCode,

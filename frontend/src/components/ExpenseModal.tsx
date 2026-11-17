@@ -827,11 +827,11 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                 /* View 2: Expense History Grid (frmExpensesList) */
                 <View style={styles.historyContainer}>
                   <View style={styles.historyHeader}>
-                    <Text style={[styles.histCol, { flex: 1.2 }]}>Voucher #</Text>
-                    <Text style={[styles.histCol, { flex: 1 }]}>Time</Text>
+                    <Text style={[styles.histCol, { flex: 1.3 }]}>Voucher #</Text>
+                    <Text style={[styles.histCol, { flex: 1.1 }]}>Time</Text>
                     <Text style={[styles.histCol, { flex: 2.2 }]}>Description</Text>
-                    <Text style={[styles.histCol, { flex: 1, textAlign: "right" }]}>Amount ($)</Text>
-                    <Text style={[styles.histCol, { flex: 1 }]}>Cashier</Text>
+                    <Text style={[styles.histCol, { flex: 1.2, textAlign: "right", paddingRight: 10 }]}>Amount ($)</Text>
+                    <Text style={[styles.histCol, { flex: 1.1, textAlign: "center" }]}>Cashier</Text>
                   </View>
 
                   {loadingHistory ? (
@@ -847,10 +847,10 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                     <ScrollView style={{ flex: 1 }}>
                       {expenseHistory.map((item) => (
                         <View key={item.ExpenseID} style={styles.historyRow}>
-                          <Text style={[styles.histCell, { flex: 1.2, fontWeight: "700" }]}>
+                          <Text style={[styles.histCell, { flex: 1.3, fontWeight: "700" }]}>
                             {item.ExpenseID}
                           </Text>
-                          <Text style={[styles.histCell, { flex: 1, color: "#64748b" }]}>
+                          <Text style={[styles.histCell, { flex: 1.1, color: "#64748b" }]}>
                             {item.CreateDate
                               ? new Date(item.CreateDate).toLocaleTimeString([], {
                                   hour: "2-digit",
@@ -858,16 +858,18 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                                 })
                               : "-"}
                           </Text>
-                          <Text style={[styles.histCell, { flex: 2.2 }]}>{item.Description}</Text>
+                          <Text style={[styles.histCell, { flex: 2.2 }]} numberOfLines={1}>
+                            {item.Description}
+                          </Text>
                           <Text
                             style={[
                               styles.histCell,
-                              { flex: 1, textAlign: "right", fontWeight: "800", color: "#b91c1c" },
+                              { flex: 1.2, textAlign: "right", fontWeight: "800", color: "#b91c1c", paddingRight: 10 },
                             ]}
                           >
                             ${Number(item.Amount).toFixed(2)}
                           </Text>
-                          <Text style={[styles.histCell, { flex: 1, color: "#64748b" }]}>
+                          <Text style={[styles.histCell, { flex: 1.1, textAlign: "center", color: "#64748b" }]}>
                             {item.UserCode}
                           </Text>
                         </View>

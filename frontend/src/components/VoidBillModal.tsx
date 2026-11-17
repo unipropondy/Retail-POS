@@ -86,6 +86,7 @@ export default function VoidBillModal({
   // Suggestions state (recent counter bills on current terminal)
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState<boolean>(false);
+  const [showSuggestionsDropdown, setShowSuggestionsDropdown] = useState<boolean>(false);
 
   const inputRef = useRef<any>(null);
 
@@ -129,6 +130,7 @@ export default function VoidBillModal({
       setPayments([]);
       setShowStep1Confirm(false);
       setShowStep2PrintConfirm(false);
+      setShowSuggestionsDropdown(false);
       setNotice(null);
 
       // Fetch suggestions for current terminal
@@ -356,7 +358,10 @@ export default function VoidBillModal({
 
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.btnFetch, { backgroundColor: primaryColor }]}
-                  onPress={() => fetchBillHeader(billNo)}
+                  onPress={() => {
+                    setShowSuggestionsDropdown(false);
+                    fetchBillHeader(billNo);
+                  }}
                   disabled={fetchingHeader}
                   activeOpacity={0.85}
                 >
@@ -370,6 +375,31 @@ export default function VoidBillModal({
                   )}
                 </TouchableOpacity>
 
+                {/* Separate Dedicated "Recent Bills" Button to toggle suggestions menu */}
+                <TouchableOpacity
+                  style={[
+                    styles.actionBtn,
+                    styles.btnSuggestions,
+                    showSuggestionsDropdown && styles.btnSuggestionsActive,
+                  ]}
+                  onPress={() => setShowSuggestionsDropdown(!showSuggestionsDropdown)}
+                  activeOpacity={0.85}
+                >
+                  <MaterialCommunityIcons
+                    name={showSuggestionsDropdown ? "chevron-up" : "history"}
+                    size={18}
+                    color={showSuggestionsDropdown ? "#7A1C30" : "#334155"}
+                  />
+                  <Text
+                    style={[
+                      styles.btnText,
+                      { color: showSuggestionsDropdown ? "#7A1C30" : "#334155" },
+                    ]}
+                  >
+                    Recent Bills {suggestions.length > 0 ? `(${suggestions.length})` : ""}
+                  </Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.btnReset]}
                   onPress={() => {
@@ -378,6 +408,8 @@ export default function VoidBillModal({
                     setItems([]);
                     setPayments([]);
                     setNotice(null);
+                    setShowSuggestionsDropdown(false);
+                    fetchSuggestions();
                     inputRef.current?.focus();
                   }}
                   activeOpacity={0.85}
@@ -386,6 +418,108 @@ export default function VoidBillModal({
                   <Text style={[styles.btnText, { color: "#475569" }]}>Reset</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* Clean Dedicated Suggestions Panel / Dropdown (Toggled by "Recent Bills" button) */}
+              {showSuggestionsDropdown && (
+                <View style={styles.suggestionsDropdownCard}>
+                  <View style={styles.dropdownHeader}>
+                    <View style={styles.dropdownTitleGroup}>
+                      <MaterialCommunityIcons name="clock-outline" size={16} color="#7A1C30" />
+                      <Text style={styles.dropdownTitle}>
+                        Recent Completed Bills (Counter {activeTerminal})
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => setShowSuggestionsDropdown(false)}
+                      style={styles.dropdownCloseBtn}
+                    >
+                      <MaterialCommunityIcons name="close" size={16} color="#64748b" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {loadingSuggestions ? (
+                    <View style={styles.dropdownLoading}>
+                      <ActivityIndicator size="small" color="#7A1C30" />
+                      <Text style={styles.dropdownLoadingText}>Loading counter bills...</Text>
+                    </View>
+                  ) : suggestions.length === 0 ? (
+                    <Text style={styles.dropdownEmptyText}>
+                      No recent completed bills found for terminal {activeTerminal}.
+                    </Text>
+                  ) : (
+                    <ScrollView
+                      style={styles.dropdownScroll}
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator
+                    >
+                      {suggestions.map((sug, sIdx) => {
+                        const isSelected =
+                          billNo.trim().toUpperCase() ===
+                          String(sug.invoiceNo).trim().toUpperCase();
+                        const timeStr = sug.createDate
+                          ? new Date(sug.createDate).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "";
+
+                        return (
+                          <TouchableOpacity
+                            key={sug.invoiceNo || sIdx}
+                            style={[
+                              styles.dropdownItemRow,
+                              sIdx % 2 === 1 && styles.dropdownItemRowAlt,
+                              isSelected && styles.dropdownItemRowSelected,
+                            ]}
+                            onPress={() => {
+                              setBillNo(sug.invoiceNo);
+                              setShowSuggestionsDropdown(false);
+                              fetchBillHeader(sug.invoiceNo);
+                            }}
+                            activeOpacity={0.75}
+                          >
+                            <View style={styles.itemColInv}>
+                              <MaterialCommunityIcons
+                                name="receipt"
+                                size={16}
+                                color={isSelected ? "#7A1C30" : "#64748b"}
+                              />
+                              <Text
+                                style={[
+                                  styles.itemInvText,
+                                  isSelected && { color: "#7A1C30", fontWeight: "900" },
+                                ]}
+                              >
+                                {sug.invoiceNo}
+                              </Text>
+                            </View>
+
+                            <View style={styles.itemColMeta}>
+                              <Text style={styles.itemMetaTime}>{timeStr}</Text>
+                              <View style={styles.itemModeBadge}>
+                                <Text style={styles.itemModeBadgeText}>
+                                  {sug.salesType || "CASH"}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.itemColAmount}>
+                              <Text style={styles.itemAmountText}>
+                                ${Number(sug.netTotal || 0).toFixed(2)}
+                              </Text>
+                              <MaterialCommunityIcons
+                                name="chevron-right"
+                                size={16}
+                                color="#94a3b8"
+                              />
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  )}
+                </View>
+              )}
             </View>
 
             {/* Bill Details Summary Card */}
@@ -437,41 +571,53 @@ export default function VoidBillModal({
                     <Text style={[styles.thCell, { flex: 1.4, textAlign: "right" }]}>Total</Text>
                   </View>
 
-                  {items.map((it: any, idx: number) => (
-                    <View
-                      key={idx}
-                      style={[styles.itemsTableRow, idx % 2 === 1 && styles.itemsTableRowAlt]}
-                    >
-                      <Text style={[styles.tdCell, { flex: 1.2, fontFamily: "Courier" }]}>
-                        {it.InventoryCode}
-                      </Text>
-                      <Text style={[styles.tdCell, { flex: 3.5 }]} numberOfLines={1}>
-                        {it.Description}
-                      </Text>
-                      <Text style={[styles.tdCell, { flex: 1, textAlign: "right", fontWeight: "700" }]}>
-                        {it.Qty}
-                      </Text>
-                      <Text style={[styles.tdCell, { flex: 1.3, textAlign: "right" }]}>
-                        ${Number(it.Price || 0).toFixed(2)}
-                      </Text>
-                      <Text style={[styles.tdCell, { flex: 1.4, textAlign: "right", fontWeight: "800" }]}>
-                        ${Number(it.TotalValue || it.NetAmount || 0).toFixed(2)}
-                      </Text>
-                    </View>
-                  ))}
+                  {items.map((it: any, idx: number) => {
+                    const code = it.inventoryCode || it.InventoryCode || it.Barcode || it.barcode || "";
+                    const desc = it.description || it.Description || "";
+                    const qty = it.qty ?? it.Qty ?? 0;
+                    const price = it.price ?? it.Price ?? 0;
+                    const total = it.totalValue ?? it.TotalValue ?? it.netAmount ?? it.NetAmount ?? 0;
+
+                    return (
+                      <View
+                        key={idx}
+                        style={[styles.itemsTableRow, idx % 2 === 1 && styles.itemsTableRowAlt]}
+                      >
+                        <Text style={[styles.tdCell, { flex: 1.2, fontFamily: "Courier" }]}>
+                          {code}
+                        </Text>
+                        <Text style={[styles.tdCell, { flex: 3.5 }]} numberOfLines={1}>
+                          {desc}
+                        </Text>
+                        <Text style={[styles.tdCell, { flex: 1, textAlign: "right", fontWeight: "700" }]}>
+                          {qty}
+                        </Text>
+                        <Text style={[styles.tdCell, { flex: 1.3, textAlign: "right" }]}>
+                          ${Number(price).toFixed(2)}
+                        </Text>
+                        <Text style={[styles.tdCell, { flex: 1.4, textAlign: "right", fontWeight: "800" }]}>
+                          ${Number(total).toFixed(2)}
+                        </Text>
+                      </View>
+                    );
+                  })}
                 </ScrollView>
 
                 {/* Payment Breakdown Strip */}
                 {payments.length > 0 && (
                   <View style={styles.paymentStrip}>
                     <Text style={styles.payStripTitle}>Settlement:</Text>
-                    {payments.map((p: any, pIdx: number) => (
-                      <View key={pIdx} style={styles.payBadge}>
-                        <Text style={styles.payBadgeText}>
-                          {p.PayMode}: ${Number(p.Amount || 0).toFixed(2)}
-                        </Text>
-                      </View>
-                    ))}
+                    {payments.map((p: any, pIdx: number) => {
+                      const mode = p.payMode || p.PayMode || "CASH";
+                      const amt = p.amount ?? p.Amount ?? 0;
+                      return (
+                        <View key={pIdx} style={styles.payBadge}>
+                          <Text style={styles.payBadgeText}>
+                            {mode}: ${Number(amt).toFixed(2)}
+                          </Text>
+                        </View>
+                      );
+                    })}
                   </View>
                 )}
               </View>
@@ -891,10 +1037,139 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#cbd5e1",
   },
+  btnSuggestions: {
+    backgroundColor: "#f8fafc",
+    borderWidth: 1.5,
+    borderColor: "#cbd5e1",
+  },
+  btnSuggestionsActive: {
+    backgroundColor: "#fdf2f4",
+    borderColor: "#7A1C30",
+  },
   btnText: {
     color: "#ffffff",
     fontSize: 12.5,
     fontWeight: "800",
+  },
+
+  // Dedicated Suggestions Dropdown Card
+  suggestionsDropdownCard: {
+    marginTop: 10,
+    backgroundColor: "#ffffff",
+    borderWidth: 1.5,
+    borderColor: "#e2e8f0",
+    borderRadius: 8,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  dropdownHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+  dropdownTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  dropdownTitle: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#1e293b",
+  },
+  dropdownCloseBtn: {
+    padding: 2,
+  },
+  dropdownLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    gap: 8,
+  },
+  dropdownLoadingText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748b",
+  },
+  dropdownEmptyText: {
+    fontSize: 12,
+    color: "#64748b",
+    padding: 16,
+    textAlign: "center",
+  },
+  dropdownScroll: {
+    maxHeight: 180,
+  },
+  dropdownItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  dropdownItemRowAlt: {
+    backgroundColor: "#f8fafc",
+  },
+  dropdownItemRowSelected: {
+    backgroundColor: "#fdf2f4",
+  },
+  itemColInv: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    width: "36%",
+  },
+  itemInvText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#0f172a",
+    letterSpacing: 0.5,
+  },
+  itemColMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    width: "34%",
+  },
+  itemMetaTime: {
+    fontSize: 11.5,
+    fontWeight: "600",
+    color: "#64748b",
+  },
+  itemModeBadge: {
+    backgroundColor: "#e2e8f0",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  itemModeBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#334155",
+  },
+  itemColAmount: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 4,
+    width: "30%",
+  },
+  itemAmountText: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#0f172a",
   },
 
   // Bill Details Card

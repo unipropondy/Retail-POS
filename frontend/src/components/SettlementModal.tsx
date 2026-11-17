@@ -14,7 +14,8 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
-  Alert
+  Alert,
+  Platform
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getBackendBaseUrl } from '../config/appConfig';
@@ -238,52 +239,70 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   const handleSave = async () => {
     if (saving) return;
 
-    Alert.alert(
-      'Confirm Settlement',
-      `Are you sure you want to save settlement for Shift ${shiftNo}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Save Settlement',
-          onPress: async () => {
-            setSaving(true);
-            try {
-              const res = await fetch(`${API_BASE_URL}/api/settlement/save`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  locationCode,
-                  terminalCode: terminalCode || '1',
-                  shiftNo: parseInt(shiftNo, 10) || 1,
-                  date: new Date().toISOString().split('T')[0],
-                  cashierId: cashierId.trim(),
-                  denominations,
-                  payModes,
-                  expenseAmount: expenseTotal
-                })
-              });
+    const executeSave = async () => {
+      setSaving(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/settlement/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            locationCode,
+            terminalCode: terminalCode || '1',
+            shiftNo: parseInt(shiftNo, 10) || 1,
+            date: new Date().toISOString().split('T')[0],
+            cashierId: cashierId.trim(),
+            denominations,
+            payModes,
+            expenseAmount: expenseTotal
+          })
+        });
 
-              const result = await res.json();
-              if (!res.ok || !result.success) {
-                Alert.alert('Save Failed', result.message || 'Error occurred while saving settlement.');
-                setSaving(false);
-                return;
-              }
-
-              Alert.alert('Success', 'Settlement saved successfully!');
-              if (onSettlementSaved) onSettlementSaved();
-
-              // Fetch Print Summary
-              await fetchSummary();
-            } catch (err: any) {
-              Alert.alert('Save Error', err.message || 'Network error while saving.');
-            } finally {
-              setSaving(false);
-            }
+        const result = await res.json();
+        if (!res.ok || !result.success) {
+          if (Platform.OS === 'web') {
+            window.alert(`Save Failed: ${result.message || 'Error occurred while saving settlement.'}`);
+          } else {
+            Alert.alert('Save Failed', result.message || 'Error occurred while saving settlement.');
           }
+          setSaving(false);
+          return;
         }
-      ]
-    );
+
+        if (Platform.OS === 'web') {
+          window.alert('Settlement saved successfully!');
+        } else {
+          Alert.alert('Success', 'Settlement saved successfully!');
+        }
+        if (onSettlementSaved) onSettlementSaved();
+
+        // Automatically trigger print or fetch summary
+        await fetchSummary();
+      } catch (err: any) {
+        if (Platform.OS === 'web') {
+          window.alert(`Save Error: ${err.message || 'Network error while saving.'}`);
+        } else {
+          Alert.alert('Save Error', err.message || 'Network error while saving.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`Are you sure you want to save settlement for Shift ${shiftNo}?`);
+      if (confirmed) {
+        executeSave();
+      }
+    } else {
+      Alert.alert(
+        'Confirm Settlement',
+        `Are you sure you want to save settlement for Shift ${shiftNo}?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Save Settlement', onPress: executeSave }
+        ]
+      );
+    }
   };
 
   // Fetch Print Summary Report
