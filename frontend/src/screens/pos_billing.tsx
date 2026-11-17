@@ -2590,8 +2590,8 @@ export default function PosBillingScreen({
   // DIRECT SKU VALIDATION & TBLTEMPSALES INSERTION (txtInventoryCode_Leave / Enter)
   // Strict matching against tblInventory.InventoryCode only.
   // ---------------------------------------------------------------------------
-  const processDirectSkuCode = async () => {
-    const enteredSku = skuCode.trim();
+  const processDirectSkuCode = async (overrideSku?: string) => {
+    const enteredSku = (overrideSku !== undefined ? overrideSku : skuCode).trim();
     if (!enteredSku) return;
 
     if (isProcessingSkuRef.current) return;
@@ -3378,15 +3378,59 @@ export default function PosBillingScreen({
     };
   });
 
-  // Keyboard Shortcuts (Web/Desktop EXE)
-  // Uses capture phase { capture: true } and matches both e.key and e.code so browser defaults
-  // (F6 address bar, F7 caret browsing, F10 menubar, F11 fullscreen) do not hijack POS function keys.
+  // Keyboard Shortcuts & Global Hardware Scanner Interceptor (Web/Desktop EXE)
+  // Supports: USB / Bluetooth / Keyboard Wedge Barcode Scanners + POS Function Keys
   useEffect(() => {
     if (Platform.OS !== "web") return;
+
+    let scannerBuffer = "";
+    let lastKeyTime = 0;
+    const SCANNER_TIMING_THRESHOLD_MS = 45; // Hardware barcode scanners output chars in < 35-40ms
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = (e.key || "").toUpperCase();
       const code = (e.code || "").toUpperCase();
+      const now = Date.now();
+      const timeDiff = now - lastKeyTime;
+      lastKeyTime = now;
+
+      // Detect if user is currently typing in an editable input element
+      const activeEl = document.activeElement;
+      const activeTag = (activeEl?.tagName || "").toLowerCase();
+      const isInputFocused = activeTag === "input" || activeTag === "textarea";
+      const isSkuInputFocused =
+        activeEl?.getAttribute("data-test-id") === "sku-code-input" ||
+        activeEl === (skuInputRef.current as any);
+
+      // -----------------------------------------------------------------------
+      // HARDWARE SCANNER GLOBAL LISTENER (USB / Bluetooth / Wedge)
+      // When scanner triggers Enter or Tab, check if buffered chars arrived at high speed (< 45ms)
+      // -----------------------------------------------------------------------
+      if (key === "ENTER" || code === "ENTER" || key === "TAB" || code === "TAB") {
+        if (scannerBuffer.length >= 3) {
+          const scannedCode = scannerBuffer.trim();
+          scannerBuffer = "";
+          e.preventDefault();
+          e.stopPropagation();
+
+          // Dispatch directly to direct SKU validation
+          setSkuCode(scannedCode);
+          keyboardActionsRef.current.processDirectSkuCode(scannedCode);
+          return;
+        }
+        scannerBuffer = "";
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (timeDiff <= SCANNER_TIMING_THRESHOLD_MS) {
+          // Scanner burst detected
+          scannerBuffer += e.key;
+        } else {
+          // Reset buffer if delay is human typing speed
+          scannerBuffer = e.key;
+        }
+      } else {
+        // Non-character key resets scanner buffer
+        scannerBuffer = "";
+      }
 
       // Check if function key or shortcut
       if (key === "F1" || code === "F1") {
