@@ -1074,6 +1074,7 @@ router.post('/checkout', async (req, res) => {
       customerName = 'CASH',
       salesType = 'CASH',
       gstType = 'Z',
+      payments = [],
       remarks = '',
     } = req.body;
 
@@ -1229,17 +1230,27 @@ router.post('/checkout', async (req, res) => {
         await upReq.query('UPDATE tblPOSSalesDetail SET PromotionCode = @pCode, PromotionName = @pName WHERE RTRIM(LTRIM(InvoiceNo)) = @invNo AND RTRIM(LTRIM(InventoryCode)) = @code');
       }
 
-      // 4. Save Payment Mode Detail via sp_POS_PayModeDetail
-      const payReq = new sql.Request(transaction);
-      payReq.input('InvoiceNo', sql.VarChar(10), officialInvoiceNo.slice(0, 10));
-      payReq.input('sDate', sql.DateTime, new Date());
-      payReq.input('PayMode', sql.VarChar(20), String(payMode || 'CASH').slice(0, 20));
-      payReq.input('Amount', sql.Money, finalNetTotal);
-      payReq.input('Commision', sql.Money, 0);
-      payReq.input('SlipNo', sql.VarChar(10), '');
-      payReq.input('UserID', sql.VarChar(10), String(cashierId || 'UPS').slice(0, 10));
+      // 4. Save Payment Mode Detail via sp_POS_PayModeDetail (supports split payments or single mode)
+      const payList = (payments && Array.isArray(payments) && payments.length > 0)
+        ? payments.filter(p => Number(p.amount) > 0)
+        : [{ payMode: payMode || 'CASH', amount: finalNetTotal, slipNo: '' }];
 
-      await payReq.execute('sp_POS_PayModeDetail');
+      if (payList.length === 0) {
+        payList.push({ payMode: payMode || 'CASH', amount: finalNetTotal, slipNo: '' });
+      }
+
+      for (const p of payList) {
+        const payReq = new sql.Request(transaction);
+        payReq.input('InvoiceNo', sql.VarChar(10), officialInvoiceNo.slice(0, 10));
+        payReq.input('sDate', sql.DateTime, new Date());
+        payReq.input('PayMode', sql.VarChar(20), String(p.payMode || 'CASH').slice(0, 20));
+        payReq.input('Amount', sql.Money, Number(p.amount) || 0);
+        payReq.input('Commision', sql.Money, 0);
+        payReq.input('SlipNo', sql.VarChar(10), String(p.slipNo || '').slice(0, 10));
+        payReq.input('UserID', sql.VarChar(10), String(cashierId || 'UPS').slice(0, 10));
+
+        await payReq.execute('sp_POS_PayModeDetail');
+      }
 
       // 5. Clean temporary sales table for this terminal
       const clearTemp = new sql.Request(transaction);

@@ -58,6 +58,10 @@ class ReceiptBuilder {
     return this;
   }
 
+  feed(n = 1) {
+    return this.lineFeed(n);
+  }
+
   text(str) {
     if (!str) return this;
     const buf = Buffer.from(String(str), 'ascii');
@@ -105,6 +109,10 @@ class ReceiptBuilder {
     // ESC p 0 25 50 (\x1B\x70\x00\x19\x32)
     this.buffer.push(0x1B, 0x70, 0x00, 0x19, 0x32);
     return this;
+  }
+
+  kickCashDrawer() {
+    return this.kickDrawer();
   }
 
   cutPaper() {
@@ -431,9 +439,243 @@ function buildSaleReceipt(params) {
   }
 }
 
+// ==============================================================================
+// Settlement Receipt Generator (subPrintSettlemet_New)
+// Matches exact VB.NET clsPrint.vb subPrintSettlemet_New format
+// ==============================================================================
+function buildSettlementReceipt(params) {
+  const b = new ReceiptBuilder(42);
+
+  const companyName = String(params.companyName || configService.get('CompanyName') || '').trim();
+  const locationName = String(params.locationName || params.locationCode || '').trim();
+  const terminalCode = String(params.terminalCode || '').trim();
+  const cashierId = String(params.cashierId || '').trim();
+  const shiftNo = String(params.shiftNo || '1').trim();
+  const settlementDate = params.date || new Date().toLocaleDateString('en-GB');
+  const printTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  // 1. Header
+  b.alignCenter();
+  b.setBold(true);
+  b.textLine(companyName);
+  b.textLine('Cashier Settlement');
+  b.setBold(false);
+  b.divider();
+
+  // 2. Metadata Block
+  b.alignLeft();
+  b.row('Location', locationName);
+  b.row('Terminal', terminalCode);
+  b.row('Cashier', cashierId);
+  b.row(`Shift: ${shiftNo}`, `Print At: ${printTime}`);
+  b.row('Settlement Date', settlementDate);
+  b.divider();
+
+  // 3. Cash Denominations Table (Currency | Qty | Amount)
+  b.textLine('Currency   |   Qty   |       Amount');
+  b.divider();
+
+  const denoms = Array.isArray(params.denominations) ? params.denominations : [];
+  let totalCash = 0;
+
+  for (const d of denoms) {
+    const val = Number(d.currencyValue) || 0;
+    const qty = Number(d.qty) || 0;
+    const amt = Number(d.amount) || (val * qty);
+    if (qty > 0 || amt > 0) {
+      const valStr = `$${val.toFixed(2)}`.padEnd(10, ' ');
+      const qtyStr = String(qty).padStart(6, ' ');
+      const amtStr = amt.toFixed(2).padStart(12, ' ');
+      b.textLine(`${valStr} | ${qtyStr}  | ${amtStr}`);
+      totalCash += amt;
+    }
+  }
+
+  b.divider();
+  b.setBold(true);
+  b.row('Total Cash', totalCash.toFixed(2));
+  b.setBold(false);
+  b.divider();
+
+  // 4. Pay Mode Breakdown Table (Paymode | Sys$ | Mnl$ | Diff$)
+  b.textLine('Paymode        Sys$     Mnl$     Diff$');
+  b.divider();
+
+  const payModes = Array.isArray(params.payModes) ? params.payModes : [];
+  let totalComp = 0;
+  let totalManual = 0;
+
+  for (const pm of payModes) {
+    const mode = String(pm.payMode || '').trim();
+    if (mode.toUpperCase() !== 'EXPENSE AM' && mode.toUpperCase() !== 'CREDIT REC') {
+      const comp = Number(pm.computerAmount) || 0;
+      const man = Number(pm.manualAmount) || 0;
+      const diff = Number(pm.difference !== undefined ? pm.difference : (man - comp));
+
+      totalComp += comp;
+      totalManual += man;
+
+      const modeCol = mode.substring(0, 11).padEnd(12, ' ');
+      const compCol = comp.toFixed(2).padStart(9, ' ');
+      const manCol = man.toFixed(2).padStart(9, ' ');
+      const diffCol = diff.toFixed(2).padStart(9, ' ');
+
+      b.textLine(`${modeCol}${compCol}${manCol}${diffCol}`);
+    }
+  }
+
+  b.divider();
+  b.setBold(true);
+  const compTotStr = totalComp.toFixed(2).padStart(9, ' ');
+  const manTotStr = totalManual.toFixed(2).padStart(9, ' ');
+  const diffTotStr = (totalManual - totalComp).toFixed(2).padStart(9, ' ');
+  b.textLine(`Total       ${compTotStr}${manTotStr}${diffTotStr}`);
+  b.setBold(false);
+  b.divider();
+
+  // 5. Summary Breakdown
+  const subTotal = Number(params.subTotal || params.netTotal || totalComp) || 0;
+  const discount = Number(params.discount || 0);
+  const gst = Number(params.gst || 0);
+  const roundOff = Number(params.roundOff || 0);
+  const netTotal = Number(params.netTotal || subTotal) || 0;
+  const tillAmount = Number(params.tillAmount || 0);
+  const expenseAmount = Number(params.expenseAmount || 0);
+
+  b.row('Sub Total', subTotal.toFixed(2));
+  if (discount > 0) b.row('Discount', `-${discount.toFixed(2)}`);
+  if (gst > 0) b.row('GST', gst.toFixed(2));
+  if (roundOff !== 0) b.row('Round Off', roundOff.toFixed(2));
+  b.setBold(true);
+  b.row('Net Total', netTotal.toFixed(2));
+  b.setBold(false);
+  b.divider();
+
+  b.row('Total Manual', totalManual.toFixed(2));
+  if (tillAmount > 0) {
+    b.row('Till Float', `-${tillAmount.toFixed(2)}`);
+    b.row('Total Collection', (totalManual - tillAmount).toFixed(2));
+  }
+  if (expenseAmount > 0) {
+    b.row('Expense', expenseAmount.toFixed(2));
+  }
+
+  const grandTotal = totalManual + expenseAmount - tillAmount;
+  b.divider();
+  b.setBold(true);
+  b.row('Grand Total', grandTotal.toFixed(2));
+  b.row('System Total', totalComp.toFixed(2));
+
+  const shortageExcess = grandTotal - totalComp;
+  b.row('Shortage / Excess', shortageExcess.toFixed(2));
+  b.setBold(false);
+  b.divider();
+
+  // 6. Signature Lines matching clsPrint.vb
+  b.feed(1);
+  b.textLine('Cashier Signature: _______________________');
+  b.feed(2);
+  b.textLine('Teller Signature:  _______________________');
+  b.feed(3);
+
+  // 7. Cash Drawer Kick and Cut Paper
+  b.kickCashDrawer();
+  b.cutPaper();
+
+  return b.getBuffer();
+}
+
+// ==============================================================================
+// DAY END Z-REPORT RECEIPT (Exact Legacy Parity with rptDayendReport_ERP)
+// ==============================================================================
+function buildDayEndReceipt(params) {
+  const b = new ReceiptBuilder(42);
+
+  const companyName = String(params.companyName || configService.get('CompanyName') || '').trim();
+  const locationName = String(params.locationName || params.locationCode || '').trim();
+  const cashierId = String(params.cashierId || params.user || '').trim();
+  const reportDate = String(params.date || new Date().toISOString().split('T')[0]).trim();
+  const printTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const totals = params.totals || {};
+  const netTotal = Number(totals.NetTotal || 0);
+  const grossTotal = Number(totals.GrossTotal || 0);
+  const totalDiscount = Number(totals.TotalDiscount || 0);
+  const gst = Number(totals.Gst || 0);
+  const roundOff = Number(totals.Roundoff || 0);
+  const billCount = Number(totals.BillCount || 0);
+
+  // 1. Header
+  b.alignCenter();
+  b.setBold(true);
+  b.textLine(companyName);
+  b.textLine('DAY END Z-REPORT');
+  b.setBold(false);
+  b.divider();
+
+  // 2. Metadata Block
+  b.alignLeft();
+  b.row('Location', locationName);
+  b.row('Audited By', cashierId);
+  b.row('Business Date', reportDate);
+  b.row('Print Time', printTime);
+  b.row('Total Bills', String(billCount));
+  b.divider();
+
+  // 3. Sales Financial Summary
+  b.setBold(true);
+  b.textLine('SALES TOTALS');
+  b.setBold(false);
+  b.divider();
+  b.row('Gross Sales', grossTotal.toFixed(2));
+  if (totalDiscount > 0) b.row('Total Discount', `-${totalDiscount.toFixed(2)}`);
+  if (gst > 0) b.row('GST (Tax)', gst.toFixed(2));
+  if (roundOff !== 0) b.row('Round Off', roundOff.toFixed(2));
+
+  b.divider();
+  b.setBold(true);
+  b.row('NET SALES TOTAL', `$${netTotal.toFixed(2)}`);
+  b.setBold(false);
+  b.divider();
+
+  // 4. Paymodes Breakdown
+  b.setBold(true);
+  b.textLine('PAYMENT COLLECTION');
+  b.setBold(false);
+  b.divider();
+
+  const paymodes = Array.isArray(params.paymodes) ? params.paymodes : [];
+  let totalCollection = 0;
+
+  for (const pm of paymodes) {
+    const mode = String(pm.Paymode || pm.payMode || 'OTHER').trim();
+    const amt = Number(pm.TotalAmount || pm.amount || 0);
+    totalCollection += amt;
+    b.row(mode, amt.toFixed(2));
+  }
+
+  b.divider();
+  b.setBold(true);
+  b.row('Total Collected', `$${totalCollection.toFixed(2)}`);
+  b.setBold(false);
+  b.divider();
+
+  // 5. Audit Signature
+  b.feed(1);
+  b.textLine('Supervisor Sign:  _______________________');
+  b.feed(2);
+  b.textLine('Store Manager:    _______________________');
+  b.feed(3);
+  b.cutPaper();
+
+  return b.getBuffer();
+}
+
 module.exports = {
   ReceiptBuilder,
   buildSaleReceipt,
+  buildSettlementReceipt,
+  buildDayEndReceipt,
   buildTemplate1Receipt,
   buildTemplate2Receipt,
   buildTemplate3Receipt,

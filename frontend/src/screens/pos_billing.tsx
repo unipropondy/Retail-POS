@@ -52,6 +52,8 @@ import { PaymodeModificationModal } from "../components/PaymodeModificationModal
 import { ExpenseModal } from "../components/ExpenseModal";
 import { DiscountModal } from "../components/DiscountModal";
 import DenominationModal from "../components/DenominationModal";
+import { PosPaymentModal, SplitPaymentLine } from "../components/PosPaymentModal";
+import { DayEndModal, DayEndReportData } from "../components/DayEndModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -471,6 +473,7 @@ export default function PosBillingScreen({
     useState<number>(100);
 
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [showPosPaymentModal, setShowPosPaymentModal] = useState(false);
   const [receiptSummary, setReceiptSummary] = useState<{
     total: number;
     tender: number;
@@ -574,6 +577,8 @@ export default function PosBillingScreen({
   const [showExpenseModal, setShowExpenseModal] = useState<boolean>(false);
   const [showDiscountModal, setShowDiscountModal] = useState<boolean>(false);
   const [showDenominationModal, setShowDenominationModal] = useState<boolean>(false);
+  const [showDayEndModal, setShowDayEndModal] = useState<boolean>(false);
+  const [dayEndReportData, setDayEndReportData] = useState<DayEndReportData | null>(null);
   const [billDiscountAmount, setBillDiscountAmount] = useState<number>(0);
   const [billDiscountPerc, setBillDiscountPerc] = useState<number>(0);
   const [billDiscountRemarks, setBillDiscountRemarks] = useState<string>("");
@@ -2839,18 +2844,99 @@ export default function PosBillingScreen({
     }
   };
 
-  // Checkout (Net Total to Pay F4)
+  // Checkout (Net Total to Pay F4) -> Opens Modern POS Payment Modal (frmPayment.vb parity)
   const handleCheckout = () => {
     if (cart.length === 0) return;
-    const finalTender = currentTender > 0 ? currentTender : grandTotal;
-    setReceiptSummary({
-      total: grandTotal,
-      tender: finalTender,
-      balance: Math.max(0, parseFloat((finalTender - grandTotal).toFixed(2))),
-      payMode: selectedPayMode,
-      items: [...cart],
-    });
-    setShowReceiptModal(true);
+    setShowPosPaymentModal(true);
+  };
+
+  const handleCompleteSaleWithSplit = async (
+    payments: SplitPaymentLine[],
+    totalTendered: number,
+    changeDue: number,
+    shouldPrintReceipt: boolean
+  ) => {
+    try {
+      const activeTerm = (terminalCode || "").trim();
+      const activeUser = (cashierName || "").trim();
+      const activeLoc = (locationCode || "").trim();
+      const finalNet = grandTotal;
+      const finalTender = totalTendered > 0 ? totalTendered : finalNet;
+      const primaryPayMode = (payments && payments.length > 0 && payments[0].payMode) ? payments[0].payMode : selectedPayMode || "CASH";
+      const cartSnapshot = [...cart];
+
+      // 1. Transactional persist to SQL Server with split paymodes
+      const res = await fetch(`${API_URL}/api/cart/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terminalCode: activeTerm,
+          cashierId: activeUser,
+          locationCode: activeLoc,
+          items: cartSnapshot,
+          payMode: primaryPayMode,
+          payments: payments,
+          tenderAmount: finalTender,
+          totalValue: subTotal,
+          netTotal: finalNet,
+          detailDiscount: cartSnapshot.reduce((acc, c) => acc + (Number(c.disc) || 0), 0),
+          billDiscount: billDiscountAmount || 0,
+          billDiscPerc: billDiscountPerc || 0,
+          tax: taxAmount || 0,
+          roundOff: roundOff || 0,
+          balance: changeDue,
+          customerCode: "CASH",
+          customerName: "CASH",
+          salesType: primaryPayMode,
+          gstType: "Z",
+        }),
+      });
+
+      const data = await res.json();
+      const generatedInvoiceNo = (data.success && data.invoiceNo) ? data.invoiceNo : "";
+      if (generatedInvoiceNo) {
+        setLastFinishedInvoice(generatedInvoiceNo);
+      }
+
+      // 2. Direct Spooler Print + Cash Drawer Kick
+      if (shouldPrintReceipt || isEnabled("PrintReceipt")) {
+        const printer = (config.ReceiptPrinter || "").trim();
+        try {
+          await fetch(`${API_URL}/api/print/receipt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              billNo: generatedInvoiceNo || "INV-NEW",
+              cashier: activeUser,
+              counter: activeTerm,
+              salesman: salesMan || activeLoc,
+              items: cartSnapshot,
+              subTotal: subTotal,
+              discount: billDiscountAmount,
+              tax: taxAmount,
+              grandTotal: finalNet,
+              payments: payments.map(p => ({
+                mode: p.payMode,
+                amount: p.amount,
+              })),
+              tendered: finalTender,
+              change: changeDue,
+              printerName: printer,
+              terminalCode: activeTerm,
+            }),
+          });
+        } catch (printErr) {
+          console.warn("Direct receipt print warning:", printErr);
+        }
+      }
+
+      // Close POS payment modal & reset cart
+      setShowPosPaymentModal(false);
+      resetPosScreenState();
+    } catch (e: any) {
+      console.warn("Checkout sync warning:", e);
+      showAlert("Checkout Error", e.message || "Failed to complete checkout.", "warning");
+    }
   };
 
   const handleFinishSale = async (shouldPrintReceipt: boolean = false) => {
@@ -5124,6 +5210,29 @@ export default function PosBillingScreen({
       </Modal>
 
       {/* =========================================================================
+          MODAL: Modern Touch POS Payment Window (frmPayment.vb Parity)
+      ========================================================================= */}
+      <PosPaymentModal
+        visible={showPosPaymentModal}
+        onClose={() => setShowPosPaymentModal(false)}
+        grandTotal={grandTotal}
+        availablePayModes={payModes}
+        defaultPayMode={selectedPayMode || "CASH"}
+        onCompleteSale={handleCompleteSaleWithSplit}
+      />
+
+      {/* =========================================================================
+          MODAL: Day End Z-Report Audit (rptDayendReport_ERP Parity)
+      ========================================================================= */}
+      <DayEndModal
+        visible={showDayEndModal}
+        onClose={() => setShowDayEndModal(false)}
+        reportData={dayEndReportData}
+        terminalCode={terminalCode || ""}
+        cashierId={cashierName || ""}
+      />
+
+      {/* =========================================================================
           MODAL: Checkout Receipt Confirmation
       ========================================================================= */}
       <Modal
@@ -6012,13 +6121,57 @@ export default function PosBillingScreen({
                 {/* Day End */}
                 <TouchableOpacity
                   style={styles.menuGridTile}
-                  onPress={() => {
+                  onPress={async () => {
                     setShowMoreMenuModal(false);
-                    showAlert(
-                      "Day End Process",
-                      "Are you sure you want to run Day End closing for today?",
-                      "warning",
-                    );
+
+                    // Check if current cart has items
+                    if (cart.length > 0) {
+                      showAlert("Day End", "Please Clear or Complete current cart before running Day End.", "warning");
+                      return;
+                    }
+
+                    const executeDayEnd = async () => {
+                      try {
+                        const activeCashier = (cashierName || "").trim();
+                        const term = (terminalCode || "").trim();
+                        const res = await fetch(`${API_URL}/api/settlement/day-end`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            cashierId: activeCashier,
+                            terminalCode: term,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                          if (data.report) {
+                            setDayEndReportData(data.report);
+                            setShowDayEndModal(true);
+                          } else {
+                            showAlert("Day End Completed", `Day End successfully closed for date: ${data.date}. Register archived.`, "success");
+                          }
+                        } else {
+                          showAlert("Day End Notice", data.message || "Failed to complete Day End", "error");
+                        }
+                      } catch (e: any) {
+                        showAlert("Day End Error", e.message || "Network error while running Day End", "error");
+                      }
+                    };
+
+                    if (Platform.OS === 'web') {
+                      if (window.confirm("Are you sure you want to run Day End closing? Ensure all terminal settlements are completed.")) {
+                        executeDayEnd();
+                      }
+                    } else {
+                      Alert.alert(
+                        "Confirm Day End",
+                        "Are you sure you want to run Day End closing? Ensure all terminal settlements are completed.",
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Run Day End", onPress: executeDayEnd }
+                        ]
+                      );
+                    }
                   }}
                   activeOpacity={0.8}
                 >

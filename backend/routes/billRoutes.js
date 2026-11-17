@@ -318,8 +318,9 @@ router.get('/last-transaction', async (req, res) => {
 
 // ------------------------------------------------------------------------------
 // GET /api/bills/active-suggestions
-// Returns recent bills from tblPOSSalesHeaderCur on the active terminal / location
-// for fast suggestion / one-tap selection in Void Bill and related modals
+// Returns active un-settled bills from tblPOSSalesHeaderCur on the active terminal / location
+// matching frmBillCancel.vb (ShiftNo is NULL or ShiftNo = 0)
+// Ensures users only see voidable current shift bills, NOT historical settled bills.
 // ------------------------------------------------------------------------------
 router.get('/active-suggestions', async (req, res) => {
   try {
@@ -333,7 +334,8 @@ router.get('/active-suggestions', async (req, res) => {
     const queryReq = pool.request();
     queryReq.input('limit', sql.Int, limit);
 
-    let whereClauses = [];
+    // Only un-settled bills (ShiftNo is null or 0) can be cancelled in frmBillCancel
+    let whereClauses = ['(ShiftNo IS NULL OR ShiftNo = 0)'];
     if (terminalCode) {
       queryReq.input('term', sql.VarChar(50), terminalCode);
       whereClauses.push('UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term)');
@@ -343,7 +345,7 @@ router.get('/active-suggestions', async (req, res) => {
       whereClauses.push('UPPER(RTRIM(LTRIM(LocationCode))) = UPPER(@loc)');
     }
 
-    const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const whereStr = `WHERE ${whereClauses.join(' AND ')}`;
 
     const q = `
       SELECT TOP (@limit)

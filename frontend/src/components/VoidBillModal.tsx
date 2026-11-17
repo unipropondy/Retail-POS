@@ -70,27 +70,36 @@ export default function VoidBillModal({
   // Step 1: "Do you want to cancel the bill {InvoiceNo}?"
   const [showStep1Confirm, setShowStep1Confirm] = useState<boolean>(false);
   // Step 2: "Do you want to print the void bill?"
-  const [showStep2PrintConfirm, setShowStep2PrintConfirm] = useState<boolean>(false);
+  const [showStep2PrintConfirm, setShowStep2PrintConfirm] =
+    useState<boolean>(false);
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
 
   // Admin authorization dialog (F3 permission check)
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
 
   // Void receipt preview modal
-  const [showVoidReceiptModal, setShowVoidReceiptModal] = useState<boolean>(false);
+  const [showVoidReceiptModal, setShowVoidReceiptModal] =
+    useState<boolean>(false);
   const [voidReceiptData, setVoidReceiptData] = useState<any | null>(null);
 
   // Notice alert banner
-  const [notice, setNotice] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
+  const [notice, setNotice] = useState<{
+    msg: string;
+    type: "success" | "error" | "info";
+  } | null>(null);
 
   // Suggestions state (recent counter bills on current terminal)
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState<boolean>(false);
-  const [showSuggestionsDropdown, setShowSuggestionsDropdown] = useState<boolean>(false);
+  const [showSuggestionsDropdown, setShowSuggestionsDropdown] =
+    useState<boolean>(false);
 
   const inputRef = useRef<any>(null);
 
-  const showNotice = (msg: string, type: "success" | "error" | "info" = "info") => {
+  const showNotice = (
+    msg: string,
+    type: "success" | "error" | "info" = "info",
+  ) => {
     setNotice({ msg, type });
     if (type !== "error") {
       setTimeout(() => setNotice(null), 4000);
@@ -106,7 +115,9 @@ export default function VoidBillModal({
         locationCode: activeLocation || "",
         limit: "10",
       });
-      const res = await fetch(`${apiUrl}/api/bills/active-suggestions?${q.toString()}`);
+      const res = await fetch(
+        `${apiUrl}/api/bills/active-suggestions?${q.toString()}`,
+      );
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.suggestions)) {
         setSuggestions(data.suggestions);
@@ -155,7 +166,9 @@ export default function VoidBillModal({
     setFetchingHeader(true);
     setNotice(null);
     try {
-      const res = await fetch(`${apiUrl}/api/bills/${encodeURIComponent(cleanInv)}`);
+      const res = await fetch(
+        `${apiUrl}/api/bills/${encodeURIComponent(cleanInv)}`,
+      );
       const data = await res.json();
 
       if (res.ok && data.success && data.bill) {
@@ -166,7 +179,10 @@ export default function VoidBillModal({
         setBillDetails(null);
         setItems([]);
         setPayments([]);
-        showNotice(data.message || `Invoice #${cleanInv} was not found.`, "error");
+        showNotice(
+          data.message || `Invoice #${cleanInv} was not found.`,
+          "error",
+        );
       }
     } catch (err: any) {
       setBillDetails(null);
@@ -190,7 +206,7 @@ export default function VoidBillModal({
     // Check F3 Void Bill cashier permission
     try {
       const permRes = await fetch(
-        `${apiUrl}/api/bills/check-cancel-permission?cashierId=${encodeURIComponent(activeCashier)}`
+        `${apiUrl}/api/bills/check-cancel-permission?cashierId=${encodeURIComponent(activeCashier)}`,
       );
       const permData = await permRes.json();
       if (permRes.ok && permData.hasPermission === false) {
@@ -242,7 +258,7 @@ export default function VoidBillModal({
       if (res.ok && data.success) {
         showNotice(
           `Bill Cancelled Successfully. (Void Ref #${data.billCancelNo})`,
-          "success"
+          "success",
         );
 
         if (onSuccess) {
@@ -253,7 +269,7 @@ export default function VoidBillModal({
         if (printVoidBill) {
           try {
             const rRes = await fetch(
-              `${apiUrl}/api/bills/void-receipt/${encodeURIComponent(cleanInv)}`
+              `${apiUrl}/api/bills/void-receipt/${encodeURIComponent(cleanInv)}`,
             );
             const rData = await rRes.json();
             if (rRes.ok && rData.success) {
@@ -270,8 +286,9 @@ export default function VoidBillModal({
         }
       } else {
         showNotice(
-          data.message || "You cannot cancel History Bills ....Please Give Correct Bill No",
-          "error"
+          data.message ||
+            "You cannot cancel History Bills ....Please Give Correct Bill No",
+          "error",
         );
       }
     } catch (err: any) {
@@ -284,20 +301,29 @@ export default function VoidBillModal({
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <View style={styles.modalBackdrop}>
         <View style={styles.modalContainer}>
           {/* Header */}
           <View style={[styles.modalHeader, { backgroundColor: primaryColor }]}>
             <View style={styles.headerTitleBox}>
               <MaterialCommunityIcons name="cancel" size={24} color="#ffffff" />
-              <Text style={styles.modalHeaderTitle}>Void Bill (frmBillCancel)</Text>
+              <Text style={styles.modalHeaderTitle}>Void Bill </Text>
               <View style={styles.locBadge}>
                 <Text style={styles.locBadgeText}>LOC: {activeLocation}</Text>
               </View>
             </View>
 
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.8}>
+            <TouchableOpacity
+              onPress={onClose}
+              style={styles.closeBtn}
+              activeOpacity={0.8}
+            >
               <MaterialCommunityIcons name="close" size={22} color="#ffffff" />
             </TouchableOpacity>
           </View>
@@ -310,8 +336,8 @@ export default function VoidBillModal({
                 notice.type === "error"
                   ? styles.noticeError
                   : notice.type === "success"
-                  ? styles.noticeSuccess
-                  : styles.noticeInfo,
+                    ? styles.noticeSuccess
+                    : styles.noticeInfo,
               ]}
             >
               <MaterialCommunityIcons
@@ -319,21 +345,25 @@ export default function VoidBillModal({
                   notice.type === "error"
                     ? "alert-circle"
                     : notice.type === "success"
-                    ? "check-circle"
-                    : "information"
+                      ? "check-circle"
+                      : "information"
                 }
                 size={18}
                 color={
                   notice.type === "error"
                     ? "#b91c1c"
                     : notice.type === "success"
-                    ? "#15803d"
-                    : "#0369a1"
+                      ? "#15803d"
+                      : "#0369a1"
                 }
               />
               <Text style={styles.noticeText}>{notice.msg}</Text>
               <TouchableOpacity onPress={() => setNotice(null)}>
-                <MaterialCommunityIcons name="close" size={16} color="#64748b" />
+                <MaterialCommunityIcons
+                  name="close"
+                  size={16}
+                  color="#64748b"
+                />
               </TouchableOpacity>
             </View>
           )}
@@ -357,7 +387,11 @@ export default function VoidBillModal({
                 />
 
                 <TouchableOpacity
-                  style={[styles.actionBtn, styles.btnFetch, { backgroundColor: primaryColor }]}
+                  style={[
+                    styles.actionBtn,
+                    styles.btnFetch,
+                    { backgroundColor: primaryColor },
+                  ]}
                   onPress={() => {
                     setShowSuggestionsDropdown(false);
                     fetchBillHeader(billNo);
@@ -369,7 +403,11 @@ export default function VoidBillModal({
                     <ActivityIndicator size="small" color="#ffffff" />
                   ) : (
                     <>
-                      <MaterialCommunityIcons name="magnify" size={18} color="#ffffff" />
+                      <MaterialCommunityIcons
+                        name="magnify"
+                        size={18}
+                        color="#ffffff"
+                      />
                       <Text style={styles.btnText}>Find Bill</Text>
                     </>
                   )}
@@ -382,21 +420,26 @@ export default function VoidBillModal({
                     styles.btnSuggestions,
                     showSuggestionsDropdown && styles.btnSuggestionsActive,
                   ]}
-                  onPress={() => setShowSuggestionsDropdown(!showSuggestionsDropdown)}
+                  onPress={() =>
+                    setShowSuggestionsDropdown(!showSuggestionsDropdown)
+                  }
                   activeOpacity={0.85}
                 >
                   <MaterialCommunityIcons
-                    name={showSuggestionsDropdown ? "chevron-up" : "history"}
+                    name={showSuggestionsDropdown ? "chevron-up" : "receipt"}
                     size={18}
                     color={showSuggestionsDropdown ? "#7A1C30" : "#334155"}
                   />
                   <Text
                     style={[
                       styles.btnText,
-                      { color: showSuggestionsDropdown ? "#7A1C30" : "#334155" },
+                      {
+                        color: showSuggestionsDropdown ? "#7A1C30" : "#334155",
+                      },
                     ]}
                   >
-                    Recent Bills {suggestions.length > 0 ? `(${suggestions.length})` : ""}
+                    Voidable Bills{" "}
+                    {suggestions.length > 0 ? `(${suggestions.length})` : ""}
                   </Text>
                 </TouchableOpacity>
 
@@ -414,8 +457,14 @@ export default function VoidBillModal({
                   }}
                   activeOpacity={0.85}
                 >
-                  <MaterialCommunityIcons name="refresh" size={18} color="#475569" />
-                  <Text style={[styles.btnText, { color: "#475569" }]}>Reset</Text>
+                  <MaterialCommunityIcons
+                    name="refresh"
+                    size={18}
+                    color="#475569"
+                  />
+                  <Text style={[styles.btnText, { color: "#475569" }]}>
+                    Reset
+                  </Text>
                 </TouchableOpacity>
               </View>
 
@@ -424,27 +473,39 @@ export default function VoidBillModal({
                 <View style={styles.suggestionsDropdownCard}>
                   <View style={styles.dropdownHeader}>
                     <View style={styles.dropdownTitleGroup}>
-                      <MaterialCommunityIcons name="clock-outline" size={16} color="#7A1C30" />
+                      <MaterialCommunityIcons
+                        name="receipt-text-check"
+                        size={16}
+                        color="#7A1C30"
+                      />
                       <Text style={styles.dropdownTitle}>
-                        Recent Completed Bills (Counter {activeTerminal})
+                        Current Active Bills Available to Void (Counter{" "}
+                        {activeTerminal})
                       </Text>
                     </View>
                     <TouchableOpacity
                       onPress={() => setShowSuggestionsDropdown(false)}
                       style={styles.dropdownCloseBtn}
                     >
-                      <MaterialCommunityIcons name="close" size={16} color="#64748b" />
+                      <MaterialCommunityIcons
+                        name="close"
+                        size={16}
+                        color="#64748b"
+                      />
                     </TouchableOpacity>
                   </View>
 
                   {loadingSuggestions ? (
                     <View style={styles.dropdownLoading}>
                       <ActivityIndicator size="small" color="#7A1C30" />
-                      <Text style={styles.dropdownLoadingText}>Loading counter bills...</Text>
+                      <Text style={styles.dropdownLoadingText}>
+                        Loading counter bills...
+                      </Text>
                     </View>
                   ) : suggestions.length === 0 ? (
                     <Text style={styles.dropdownEmptyText}>
-                      No recent completed bills found for terminal {activeTerminal}.
+                      No un-settled bills found for counter {activeTerminal}.
+                      All past bills have already been settled.
                     </Text>
                   ) : (
                     <ScrollView
@@ -487,7 +548,10 @@ export default function VoidBillModal({
                               <Text
                                 style={[
                                   styles.itemInvText,
-                                  isSelected && { color: "#7A1C30", fontWeight: "900" },
+                                  isSelected && {
+                                    color: "#7A1C30",
+                                    fontWeight: "900",
+                                  },
                                 ]}
                               >
                                 {sug.invoiceNo}
@@ -528,7 +592,9 @@ export default function VoidBillModal({
                 <View style={styles.billMetaGrid}>
                   <View style={styles.metaCol}>
                     <Text style={styles.metaLabel}>Invoice No:</Text>
-                    <Text style={styles.metaValueHighlight}>{billDetails.InvoiceNo}</Text>
+                    <Text style={styles.metaValueHighlight}>
+                      {billDetails.InvoiceNo}
+                    </Text>
                   </View>
                   <View style={styles.metaCol}>
                     <Text style={styles.metaLabel}>Date / Time:</Text>
@@ -539,18 +605,22 @@ export default function VoidBillModal({
                   <View style={styles.metaCol}>
                     <Text style={styles.metaLabel}>Cashier / Till:</Text>
                     <Text style={styles.metaValue}>
-                      {billDetails.CashierID || activeCashier} ({billDetails.TerminalCode || activeTerminal})
+                      {billDetails.CashierID || activeCashier} (
+                      {billDetails.TerminalCode || activeTerminal})
                     </Text>
                   </View>
                   <View style={styles.metaCol}>
                     <Text style={styles.metaLabel}>Member / Customer:</Text>
                     <Text style={styles.metaValue}>
-                      {billDetails.CustomerCode || "CASH"} - {billDetails.CustomerName || ""}
+                      {billDetails.CustomerCode || "CASH"} -{" "}
+                      {billDetails.CustomerName || ""}
                     </Text>
                   </View>
                   <View style={styles.metaCol}>
                     <Text style={styles.metaLabel}>Total Lines:</Text>
-                    <Text style={styles.metaValue}>{items.length || billDetails.TotalLines}</Text>
+                    <Text style={styles.metaValue}>
+                      {items.length || billDetails.TotalLines}
+                    </Text>
                   </View>
                   <View style={styles.metaCol}>
                     <Text style={styles.metaLabel}>Net Total:</Text>
@@ -561,41 +631,100 @@ export default function VoidBillModal({
                 </View>
 
                 {/* Line Items Preview */}
-                <Text style={styles.itemsHeaderTitle}>Line Items in this Bill:</Text>
-                <ScrollView style={styles.itemsTableScroll} showsVerticalScrollIndicator>
+                <Text style={styles.itemsHeaderTitle}>
+                  Line Items in this Bill:
+                </Text>
+                <ScrollView
+                  style={styles.itemsTableScroll}
+                  showsVerticalScrollIndicator
+                >
                   <View style={styles.itemsTableHeader}>
                     <Text style={[styles.thCell, { flex: 1.2 }]}>Code</Text>
-                    <Text style={[styles.thCell, { flex: 3.5 }]}>Description</Text>
-                    <Text style={[styles.thCell, { flex: 1, textAlign: "right" }]}>Qty</Text>
-                    <Text style={[styles.thCell, { flex: 1.3, textAlign: "right" }]}>Price</Text>
-                    <Text style={[styles.thCell, { flex: 1.4, textAlign: "right" }]}>Total</Text>
+                    <Text style={[styles.thCell, { flex: 3.5 }]}>
+                      Description
+                    </Text>
+                    <Text
+                      style={[styles.thCell, { flex: 1, textAlign: "right" }]}
+                    >
+                      Qty
+                    </Text>
+                    <Text
+                      style={[styles.thCell, { flex: 1.3, textAlign: "right" }]}
+                    >
+                      Price
+                    </Text>
+                    <Text
+                      style={[styles.thCell, { flex: 1.4, textAlign: "right" }]}
+                    >
+                      Total
+                    </Text>
                   </View>
 
                   {items.map((it: any, idx: number) => {
-                    const code = it.inventoryCode || it.InventoryCode || it.Barcode || it.barcode || "";
+                    const code =
+                      it.inventoryCode ||
+                      it.InventoryCode ||
+                      it.Barcode ||
+                      it.barcode ||
+                      "";
                     const desc = it.description || it.Description || "";
                     const qty = it.qty ?? it.Qty ?? 0;
                     const price = it.price ?? it.Price ?? 0;
-                    const total = it.totalValue ?? it.TotalValue ?? it.netAmount ?? it.NetAmount ?? 0;
+                    const total =
+                      it.totalValue ??
+                      it.TotalValue ??
+                      it.netAmount ??
+                      it.NetAmount ??
+                      0;
 
                     return (
                       <View
                         key={idx}
-                        style={[styles.itemsTableRow, idx % 2 === 1 && styles.itemsTableRowAlt]}
+                        style={[
+                          styles.itemsTableRow,
+                          idx % 2 === 1 && styles.itemsTableRowAlt,
+                        ]}
                       >
-                        <Text style={[styles.tdCell, { flex: 1.2, fontFamily: "Courier" }]}>
+                        <Text
+                          style={[
+                            styles.tdCell,
+                            { flex: 1.2, fontFamily: "Courier" },
+                          ]}
+                        >
                           {code}
                         </Text>
-                        <Text style={[styles.tdCell, { flex: 3.5 }]} numberOfLines={1}>
+                        <Text
+                          style={[styles.tdCell, { flex: 3.5 }]}
+                          numberOfLines={1}
+                        >
                           {desc}
                         </Text>
-                        <Text style={[styles.tdCell, { flex: 1, textAlign: "right", fontWeight: "700" }]}>
+                        <Text
+                          style={[
+                            styles.tdCell,
+                            { flex: 1, textAlign: "right", fontWeight: "700" },
+                          ]}
+                        >
                           {qty}
                         </Text>
-                        <Text style={[styles.tdCell, { flex: 1.3, textAlign: "right" }]}>
+                        <Text
+                          style={[
+                            styles.tdCell,
+                            { flex: 1.3, textAlign: "right" },
+                          ]}
+                        >
                           ${Number(price).toFixed(2)}
                         </Text>
-                        <Text style={[styles.tdCell, { flex: 1.4, textAlign: "right", fontWeight: "800" }]}>
+                        <Text
+                          style={[
+                            styles.tdCell,
+                            {
+                              flex: 1.4,
+                              textAlign: "right",
+                              fontWeight: "800",
+                            },
+                          ]}
+                        >
                           ${Number(total).toFixed(2)}
                         </Text>
                       </View>
@@ -623,10 +752,15 @@ export default function VoidBillModal({
               </View>
             ) : (
               <View style={styles.emptyStateBox}>
-                <MaterialCommunityIcons name="file-search-outline" size={54} color="#cbd5e1" />
+                <MaterialCommunityIcons
+                  name="file-search-outline"
+                  size={54}
+                  color="#cbd5e1"
+                />
                 <Text style={styles.emptyTitle}>No Bill Selected</Text>
                 <Text style={styles.emptySubtitle}>
-                  Enter an Invoice Number above and click "Find Bill" or press F4 to initiate void.
+                  Enter an Invoice Number above and click "Find Bill" or press
+                  F4 to initiate void.
                 </Text>
               </View>
             )}
@@ -658,7 +792,11 @@ export default function VoidBillModal({
                 <ActivityIndicator size="small" color="#ffffff" />
               ) : (
                 <>
-                  <MaterialCommunityIcons name="delete-forever" size={20} color="#ffffff" />
+                  <MaterialCommunityIcons
+                    name="delete-forever"
+                    size={20}
+                    color="#ffffff"
+                  />
                   <Text style={styles.footerBtnTextVoid}>Void Bill (F4)</Text>
                 </>
               )}
@@ -674,12 +812,17 @@ export default function VoidBillModal({
         <View style={styles.subModalBackdrop}>
           <View style={styles.dialogCard}>
             <View style={styles.dialogHeader}>
-              <MaterialCommunityIcons name="alert-octagon" size={34} color="#dc2626" />
+              <MaterialCommunityIcons
+                name="alert-octagon"
+                size={34}
+                color="#dc2626"
+              />
               <Text style={styles.dialogTitle}>Cancel Bill</Text>
             </View>
 
             <Text style={styles.dialogBodyText}>
-              Do you want to cancel the bill <Text style={{ fontWeight: "800" }}>{billNo.trim()}</Text>?
+              Do you want to cancel the bill{" "}
+              <Text style={{ fontWeight: "800" }}>{billNo.trim()}</Text>?
             </Text>
 
             <View style={styles.dialogBtnRow}>
@@ -708,7 +851,11 @@ export default function VoidBillModal({
         <View style={styles.subModalBackdrop}>
           <View style={styles.dialogCard}>
             <View style={styles.dialogHeader}>
-              <MaterialCommunityIcons name="printer-outline" size={34} color="#0284c7" />
+              <MaterialCommunityIcons
+                name="printer-outline"
+                size={34}
+                color="#0284c7"
+              />
               <Text style={styles.dialogTitle}>Print Void Bill?</Text>
             </View>
 
@@ -725,7 +872,11 @@ export default function VoidBillModal({
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.dialogBtn, styles.dialogBtnYes, { backgroundColor: "#0284c7" }]}
+                style={[
+                  styles.dialogBtn,
+                  styles.dialogBtnYes,
+                  { backgroundColor: "#0284c7" },
+                ]}
                 onPress={() => handleStep2PrintChoice(true)}
               >
                 <Text style={styles.dialogBtnTextYes}>Yes (Print)</Text>
@@ -742,9 +893,15 @@ export default function VoidBillModal({
         <View style={styles.subModalBackdrop}>
           <View style={styles.receiptCard}>
             <View style={styles.receiptHeader}>
-              <Text style={styles.receiptHeaderTitle}>Void Bill Receipt Preview</Text>
+              <Text style={styles.receiptHeaderTitle}>
+                Void Bill Receipt Preview
+              </Text>
               <TouchableOpacity onPress={() => setShowVoidReceiptModal(false)}>
-                <MaterialCommunityIcons name="close" size={22} color="#ffffff" />
+                <MaterialCommunityIcons
+                  name="close"
+                  size={22}
+                  color="#ffffff"
+                />
               </TouchableOpacity>
             </View>
 
@@ -753,7 +910,9 @@ export default function VoidBillModal({
                 {/* VOID BILL BANNER matching VB.NET clsPrint */}
                 <View style={styles.voidBannerBox}>
                   <Text style={styles.voidBannerText}>*** VOID BILL ***</Text>
-                  <Text style={styles.voidSubBanner}>BILL CANCELLATION RECEIPT</Text>
+                  <Text style={styles.voidSubBanner}>
+                    BILL CANCELLATION RECEIPT
+                  </Text>
                 </View>
 
                 {voidReceiptData && (
@@ -766,24 +925,30 @@ export default function VoidBillModal({
                     </View>
                     <View style={styles.receiptRow}>
                       <Text style={styles.receiptKey}>Original Invoice:</Text>
-                      <Text style={styles.receiptVal}>{voidReceiptData.header.InvoiceNo}</Text>
+                      <Text style={styles.receiptVal}>
+                        {voidReceiptData.header.InvoiceNo}
+                      </Text>
                     </View>
                     <View style={styles.receiptRow}>
                       <Text style={styles.receiptKey}>Date:</Text>
                       <Text style={styles.receiptVal}>
-                        {new Date(voidReceiptData.header.InvoiceDate).toLocaleDateString()}
+                        {new Date(
+                          voidReceiptData.header.InvoiceDate,
+                        ).toLocaleDateString()}
                       </Text>
                     </View>
                     <View style={styles.receiptRow}>
                       <Text style={styles.receiptKey}>Cancelled By:</Text>
                       <Text style={styles.receiptVal}>
-                        {voidReceiptData.header.BillCancelledBy || activeCashier}
+                        {voidReceiptData.header.BillCancelledBy ||
+                          activeCashier}
                       </Text>
                     </View>
                     <View style={styles.receiptRow}>
                       <Text style={styles.receiptKey}>Terminal / Loc:</Text>
                       <Text style={styles.receiptVal}>
-                        {voidReceiptData.header.TerminalCode} / {voidReceiptData.header.LocationCode}
+                        {voidReceiptData.header.TerminalCode} /{" "}
+                        {voidReceiptData.header.LocationCode}
                       </Text>
                     </View>
 
@@ -800,7 +965,10 @@ export default function VoidBillModal({
                             {it.Qty} x ${Number(it.Price || 0).toFixed(2)}
                           </Text>
                           <Text style={styles.receiptItemTotal}>
-                            -${Number(it.TotalValue || it.NetAmount || 0).toFixed(2)}
+                            -$
+                            {Number(it.TotalValue || it.NetAmount || 0).toFixed(
+                              2,
+                            )}
                           </Text>
                         </View>
                       </View>
@@ -809,9 +977,14 @@ export default function VoidBillModal({
                     <View style={styles.receiptDivider} />
 
                     <View style={styles.receiptRow}>
-                      <Text style={styles.receiptKeyBold}>Total Voided Amount:</Text>
+                      <Text style={styles.receiptKeyBold}>
+                        Total Voided Amount:
+                      </Text>
                       <Text style={styles.receiptTotalHighlight}>
-                        -${Number(voidReceiptData.header.NetTotal || 0).toFixed(2)}
+                        -$
+                        {Number(voidReceiptData.header.NetTotal || 0).toFixed(
+                          2,
+                        )}
                       </Text>
                     </View>
                   </>
@@ -848,14 +1021,20 @@ export default function VoidBillModal({
                         discount: h.TotalDiscount || 0,
                         tax: h.Gst || 0,
                         grandTotal: h.NetTotal,
-                        payments: payments.map((p: any) => ({ mode: p.PayMode, amount: p.Amount })),
+                        payments: payments.map((p: any) => ({
+                          mode: p.PayMode,
+                          amount: p.Amount,
+                        })),
                         tendered: h.TenderAmount || h.NetTotal,
                         change: h.Balance || 0,
                         isVoid: true,
                         terminalCode: activeTerminal,
                       }),
                     });
-                    showNotice("Void receipt sent to thermal printer.", "success");
+                    showNotice(
+                      "Void receipt sent to thermal printer.",
+                      "success",
+                    );
                   } catch (pErr) {
                     console.warn("Void print error:", pErr);
                     showNotice("Sent to printer with preview.", "info");
@@ -864,7 +1043,11 @@ export default function VoidBillModal({
                   onClose();
                 }}
               >
-                <MaterialCommunityIcons name="printer" size={18} color="#ffffff" />
+                <MaterialCommunityIcons
+                  name="printer"
+                  size={18}
+                  color="#ffffff"
+                />
                 <Text style={styles.receiptBtnText}>Print Receipt</Text>
               </TouchableOpacity>
 
@@ -916,7 +1099,7 @@ const styles = StyleSheet.create({
   modalContainer: {
     width: "100%",
     maxWidth: 820,
-    maxHeight: "90%",
+    maxHeight: "92%",
     backgroundColor: "#ffffff",
     borderRadius: 10,
     overflow: "hidden",
@@ -925,6 +1108,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 8,
+    display: "flex",
+    flexDirection: "column",
   },
   modalHeader: {
     height: 48,
@@ -991,7 +1176,8 @@ const styles = StyleSheet.create({
 
   modalBody: {
     padding: 16,
-    maxHeight: 520,
+    flex: 1,
+    overflow: "hidden",
   },
   inputSection: {
     marginBottom: 14,
@@ -1224,7 +1410,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   itemsTableScroll: {
-    maxHeight: 180,
+    maxHeight: 130,
     borderWidth: 1,
     borderColor: "#e2e8f0",
     borderRadius: 6,

@@ -63,6 +63,8 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   const [password, setPassword] = useState<string>('');
   const [shiftNo, setShiftNo] = useState<string>('1');
   const [authError, setAuthError] = useState<string>('');
+  const [authActiveField, setAuthActiveField] = useState<'cashierId' | 'password' | 'shiftNo'>('password');
+  const [showAuthKeypad, setShowAuthKeypad] = useState<boolean>(true);
 
   // Step 2: Settlement Data State
   const [loading, setLoading] = useState<boolean>(false);
@@ -79,6 +81,93 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   const [summaryData, setSummaryData] = useState<any>(null);
   const [saving, setSaving] = useState<boolean>(false);
 
+  // Touch Keypad State for fast tactile denomination entry
+  const [activeInputType, setActiveInputType] = useState<'denom' | 'paymode' | null>('denom');
+  const [activeInputIndex, setActiveInputIndex] = useState<number>(0);
+  const [showTouchKeypad, setShowTouchKeypad] = useState<boolean>(true);
+
+  // Handle Touch Numpad press
+  const handleKeypadPress = (val: string) => {
+    if (activeInputType === 'denom' && activeInputIndex >= 0) {
+      const current = denominations[activeInputIndex]?.qty || 0;
+      let newStr = String(current === 0 ? '' : current);
+
+      if (val === 'CLR') {
+        newStr = '0';
+      } else if (val === 'DEL') {
+        newStr = newStr.slice(0, -1) || '0';
+      } else if (val === 'ENTER') {
+        if (activeInputIndex < denominations.length - 1) {
+          setActiveInputIndex(activeInputIndex + 1);
+        }
+        return;
+      } else if (val === '+' || val === '-') {
+        const delta = val === '+' ? 1 : -1;
+        newStr = String(Math.max(0, current + delta));
+      } else {
+        newStr = `${newStr}${val}`;
+      }
+      handleQtyChange(activeInputIndex, newStr);
+    } else if (activeInputType === 'paymode' && activeInputIndex >= 0) {
+      const current = payModes[activeInputIndex]?.manualAmount || 0;
+      let newStr = String(current === 0 ? '' : current);
+
+      if (val === 'CLR') {
+        newStr = '0';
+      } else if (val === 'DEL') {
+        newStr = newStr.slice(0, -1) || '0';
+      } else if (val === 'ENTER') {
+        if (activeInputIndex < payModes.length - 1) {
+          setActiveInputIndex(activeInputIndex + 1);
+        }
+        return;
+      } else {
+        if (val === '.' && newStr.includes('.')) return;
+        newStr = `${newStr}${val}`;
+      }
+      handlePayModeManualChange(activeInputIndex, newStr);
+    }
+  };
+
+  // Handle Touch Numpad press for Cashier Authorization
+  const handleAuthKeypadPress = (val: string) => {
+    if (authActiveField === 'shiftNo') {
+      if (val === 'CLR') {
+        setShiftNo('');
+      } else if (val === 'DEL') {
+        setShiftNo((prev) => prev.slice(0, -1));
+      } else if (val === 'ENTER') {
+        handleCashierLogin();
+      } else {
+        setShiftNo((prev) => `${prev}${val}`);
+      }
+    } else if (authActiveField === 'password') {
+      if (val === 'CLR') {
+        setPassword('');
+      } else if (val === 'DEL') {
+        setPassword((prev) => prev.slice(0, -1));
+      } else if (val === 'ENTER') {
+        if (!shiftNo) {
+          setAuthActiveField('shiftNo');
+        } else {
+          handleCashierLogin();
+        }
+      } else {
+        setPassword((prev) => `${prev}${val}`);
+      }
+    } else if (authActiveField === 'cashierId') {
+      if (val === 'CLR') {
+        setCashierId('');
+      } else if (val === 'DEL') {
+        setCashierId((prev) => prev.slice(0, -1));
+      } else if (val === 'ENTER') {
+        setAuthActiveField('password');
+      } else {
+        setCashierId((prev) => `${prev}${val}`);
+      }
+    }
+  };
+
   // Focus and auth reset when opened
   useEffect(() => {
     if (visible) {
@@ -86,7 +175,12 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
       setPassword('');
       setShiftNo('1');
       setIsAuthenticated(false);
+      setAuthActiveField('password');
       setAuthError('');
+      setShowAuthKeypad(true);
+      setShowTouchKeypad(true);
+      setActiveInputType('denom');
+      setActiveInputIndex(0);
       setSummaryData(null);
       setActiveTab('settlement');
     }
@@ -235,6 +329,95 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   const totalManualAmount = payModes.reduce((acc, curr) => acc + curr.manualAmount, 0);
   const totalDifference = totalManualAmount - totalCompAmount;
 
+  // Handle Save or Re-Print
+  const [reprinting, setReprinting] = useState<boolean>(false);
+
+  const handleReprintSlip = async () => {
+    if (reprinting) return;
+    setReprinting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/settlement/reprint-slip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          terminalCode: terminalCode || '',
+          shiftNo: parseInt(shiftNo, 10) || 1,
+          date: new Date().toISOString().split('T')[0],
+          cashierId: cashierId.trim()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (Platform.OS === 'web') {
+          window.alert('Settlement slip sent to thermal printer!');
+        } else {
+          Alert.alert('Printed', 'Settlement slip sent to thermal printer!');
+        }
+      } else {
+        if (Platform.OS === 'web') {
+          window.alert(`Print Error: ${data.message || 'Failed to re-print'}`);
+        } else {
+          Alert.alert('Print Error', data.message || 'Failed to re-print');
+        }
+      }
+    } catch (e: any) {
+      if (Platform.OS === 'web') {
+        window.alert(`Print Error: ${e.message}`);
+      } else {
+        Alert.alert('Print Error', e.message);
+      }
+    } finally {
+      setReprinting(false);
+    }
+  };
+
+  // Export Settlement Report (CSV / Audit Format)
+  const handleExportCSV = () => {
+    if (Platform.OS !== 'web') return;
+
+    const exportDate = new Date().toISOString().split('T')[0];
+    let csvContent = `SUPERMARKET RETAIL POS - CASHIER SHIFT SETTLEMENT\r\n`;
+    csvContent += `Business Date,${exportDate}\r\n`;
+    csvContent += `Shift No,${shiftNo}\r\n`;
+    csvContent += `Cashier,${cashierId}\r\n`;
+    csvContent += `Terminal,${terminalCode}\r\n`;
+    csvContent += `Location,${locationCode}\r\n\r\n`;
+
+    csvContent += `1. CASH DENOMINATIONS\r\n`;
+    csvContent += `Denomination ($),Quantity,Amount ($)\r\n`;
+    denominations.forEach((d) => {
+      if (d.qty > 0 || d.amount > 0) {
+        csvContent += `${d.currencyValue.toFixed(2)},${d.qty},${d.amount.toFixed(2)}\r\n`;
+      }
+    });
+    csvContent += `TOTAL CASH,,${totalCashDenominations.toFixed(2)}\r\n\r\n`;
+
+    csvContent += `2. PAYMENT MODES COLLECTION & RECONCILIATION\r\n`;
+    csvContent += `Paymode,Computer ($),Manual ($),Difference ($)\r\n`;
+    payModes.forEach((pm) => {
+      const diff = pm.manualAmount - pm.computerAmount;
+      csvContent += `${pm.payMode},${pm.computerAmount.toFixed(2)},${pm.manualAmount.toFixed(2)},${diff.toFixed(2)}\r\n`;
+    });
+    csvContent += `TOTALS,${totalCompAmount.toFixed(2)},${totalManualAmount.toFixed(2)},${totalDifference.toFixed(2)}\r\n\r\n`;
+
+    csvContent += `3. SHIFT TOTALS AUDIT\r\n`;
+    csvContent += `Metric,Amount ($)\r\n`;
+    csvContent += `Total Manual Collection,${totalManualAmount.toFixed(2)}\r\n`;
+    csvContent += `Till Float,-${tillAmount.toFixed(2)}\r\n`;
+    csvContent += `Expense,+${expenseTotal.toFixed(2)}\r\n`;
+    csvContent += `System Total,${totalCompAmount.toFixed(2)}\r\n`;
+    csvContent += `Shortage / Excess,${totalDifference.toFixed(2)}\r\n`;
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `SETTLEMENT_SHIFT_${shiftNo}_${terminalCode}_${exportDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Handle Save
   const handleSave = async () => {
     if (saving) return;
@@ -337,74 +520,138 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
                   <Text style={styles.stationBadgeText}>STATION: {terminalCode || '1'}</Text>
                 </View>
               </View>
-              <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-                <MaterialCommunityIcons name="close" size={20} color="#FFFFFF" />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.authToggleKeypadBtn,
+                    showAuthKeypad && styles.authToggleKeypadBtnActive
+                  ]}
+                  onPress={() => setShowAuthKeypad(!showAuthKeypad)}
+                >
+                  <MaterialCommunityIcons
+                    name="dialpad"
+                    size={16}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.authToggleKeypadBtnText}>
+                    {showAuthKeypad ? 'Hide Keypad' : 'Touch Keypad'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
+                  <MaterialCommunityIcons name="close" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {/* Auth Body */}
-            <View style={styles.authBody}>
-              <View style={styles.authIconCircle}>
-                <MaterialCommunityIcons name="account-lock" size={36} color="#7A0C2E" />
-              </View>
-              <Text style={styles.authPrompt}>
-                Please enter Cashier credentials and select Shift No to begin settlement.
-              </Text>
-
-              {authError ? (
-                <View style={styles.errorBox}>
-                  <MaterialCommunityIcons name="alert-circle" size={16} color="#D32F2F" />
-                  <Text style={styles.errorText}>{authError}</Text>
+            {/* Auth Body - Split with Touch Numpad */}
+            <View style={[styles.authBody, showAuthKeypad && styles.authBodyWithPad]}>
+              <View style={[styles.authFormColumn, showAuthKeypad && { flex: 1.1 }]}>
+                <View style={styles.authIconCircle}>
+                  <MaterialCommunityIcons name="account-lock" size={36} color="#7A0C2E" />
                 </View>
-              ) : null}
+                <Text style={styles.authPrompt}>
+                  Please enter Cashier credentials and select Shift No to begin settlement.
+                </Text>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Cashier ID / User Code</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={cashierId}
-                  onChangeText={setCashierId}
-                  placeholder="e.g. AMITH"
-                  autoCapitalize="characters"
-                />
+                {authError ? (
+                  <View style={styles.errorBox}>
+                    <MaterialCommunityIcons name="alert-circle" size={16} color="#D32F2F" />
+                    <Text style={styles.errorText}>{authError}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Cashier ID / User Code</Text>
+                  <TextInput
+                    style={[styles.textInput, authActiveField === 'cashierId' && styles.textInputFocused]}
+                    value={cashierId}
+                    onChangeText={setCashierId}
+                    onFocus={() => setAuthActiveField('cashierId')}
+                    placeholder="e.g. AMITH"
+                    autoCapitalize="characters"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Password</Text>
+                  <TextInput
+                    style={[styles.textInput, authActiveField === 'password' && styles.textInputFocused]}
+                    value={password}
+                    onChangeText={setPassword}
+                    onFocus={() => setAuthActiveField('password')}
+                    placeholder="Enter password"
+                    secureTextEntry
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Shift No</Text>
+                  <TextInput
+                    style={[styles.textInput, authActiveField === 'shiftNo' && styles.textInputFocused]}
+                    value={shiftNo}
+                    onChangeText={setShiftNo}
+                    onFocus={() => setAuthActiveField('shiftNo')}
+                    placeholder="1"
+                    keyboardType="numeric"
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
+                  onPress={handleCashierLogin}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons name="login" size={20} color="#FFFFFF" />
+                      <Text style={styles.loginBtnText}>Proceed to Settlement</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
               </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Password</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Enter password"
-                  secureTextEntry
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Shift No</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={shiftNo}
-                  onChangeText={setShiftNo}
-                  placeholder="1"
-                  keyboardType="numeric"
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
-                onPress={handleCashierLogin}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <>
-                    <MaterialCommunityIcons name="login" size={20} color="#FFFFFF" />
-                    <Text style={styles.loginBtnText}>Proceed to Settlement</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              {/* Side Touch Number Pad (matching UcNumberPad_POS1 in frmSettlement) */}
+              {showAuthKeypad && (
+                <View style={styles.authPadColumn}>
+                  <View style={styles.authPadHeader}>
+                    <Text style={styles.authPadTitle}>
+                      Touch Keypad: <Text style={{ color: '#7A0C2E', fontWeight: '800' }}>
+                        {authActiveField === 'password' ? 'Password' : authActiveField === 'shiftNo' ? 'Shift No' : 'User Code'}
+                      </Text>
+                    </Text>
+                  </View>
+                  <View style={styles.authPadGrid}>
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'CLR', '0', 'DEL'].map((k) => (
+                      <TouchableOpacity
+                        key={k}
+                        style={[
+                          styles.authPadKey,
+                          (k === 'CLR' || k === 'DEL') && styles.authPadKeyAction
+                        ]}
+                        onPress={() => handleAuthKeypadPress(k)}
+                      >
+                        <Text
+                          style={[
+                            styles.authPadKeyText,
+                            (k === 'CLR' || k === 'DEL') && { color: '#C62828' }
+                          ]}
+                        >
+                          {k}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TouchableOpacity
+                    style={styles.authPadEnterBtn}
+                    onPress={() => handleAuthKeypadPress('ENTER')}
+                  >
+                    <MaterialCommunityIcons name="keyboard-return" size={18} color="#FFFFFF" />
+                    <Text style={styles.authPadEnterText}>ENTER / PROCEED</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </View>
         ) : (
@@ -420,7 +667,7 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
                 </View>
                 {isExistingSettlement && (
                   <View style={styles.settledBadge}>
-                    <Text style={styles.settledBadgeText}>SETTLED</Text>
+                    <Text style={styles.settledBadgeText}>SETTLED (VIEW ONLY)</Text>
                   </View>
                 )}
               </View>
@@ -428,6 +675,16 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
                 <MaterialCommunityIcons name="close" size={22} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
+
+            {/* Existing Settlement Banner */}
+            {isExistingSettlement && (
+              <View style={styles.existingSettlementAlert}>
+                <MaterialCommunityIcons name="lock-check" size={18} color="#0369a1" />
+                <Text style={styles.existingSettlementAlertText}>
+                  Settlement for Shift {shiftNo} is finalized in database. You can view numbers or click "Re-Print Slip".
+                </Text>
+              </View>
+            )}
 
             {/* Settlement Content */}
             <View style={styles.contentContainer}>
@@ -458,12 +715,34 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
                   </View>
                 )}
 
-                {/* Tab switcher */}
+                {/* Tab switcher & Keypad Toggle */}
                 <View style={styles.tabBar}>
+                  <TouchableOpacity
+                    style={[
+                      styles.tabBtn,
+                      showTouchKeypad ? styles.keypadActivePill : styles.keypadInactivePill
+                    ]}
+                    onPress={() => setShowTouchKeypad(!showTouchKeypad)}
+                  >
+                    <MaterialCommunityIcons
+                      name="dialpad"
+                      size={15}
+                      color={showTouchKeypad ? '#FFFFFF' : '#475569'}
+                    />
+                    <Text style={[styles.tabBtnText, showTouchKeypad ? { color: '#FFFFFF' } : { color: '#475569' }]}>
+                      {showTouchKeypad ? 'Hide Keypad' : 'Touch Keypad'}
+                    </Text>
+                  </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[styles.tabBtn, activeTab === 'settlement' && styles.tabBtnActive]}
                     onPress={() => setActiveTab('settlement')}
                   >
+                    <MaterialCommunityIcons
+                      name="table-large"
+                      size={15}
+                      color={activeTab === 'settlement' ? '#FFFFFF' : '#475569'}
+                    />
                     <Text style={[styles.tabBtnText, activeTab === 'settlement' && styles.tabBtnTextActive]}>
                       Settlement Grids
                     </Text>
@@ -473,6 +752,11 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
                       style={[styles.tabBtn, activeTab === 'summary' && styles.tabBtnActive]}
                       onPress={() => setActiveTab('summary')}
                     >
+                      <MaterialCommunityIcons
+                        name="file-document-outline"
+                        size={15}
+                        color={activeTab === 'summary' ? '#FFFFFF' : '#475569'}
+                      />
                       <Text style={[styles.tabBtnText, activeTab === 'summary' && styles.tabBtnTextActive]}>
                         Summary Report
                       </Text>
@@ -550,118 +834,238 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
                   </View>
                 </ScrollView>
               ) : (
-                /* Main Settlement Two-Column / Two-Grid View */
-                <View style={styles.splitGrids}>
-                  {/* Left Column: Denominations */}
-                  <View style={styles.gridSection}>
-                    <View style={styles.sectionHeader}>
-                      <MaterialCommunityIcons name="cash-multiple" size={18} color="#7A0C2E" />
-                      <Text style={styles.sectionTitle}>1. Cash Denominations</Text>
-                      <View style={styles.denomTotalBadge}>
-                        <Text style={styles.denomTotalBadgeText}>
-                          Total Cash: ${totalCashDenominations.toFixed(2)}
+                /* Main Settlement Two-Column / Two-Grid View with Dedicated Side Keypad */
+                <View style={styles.settlementMainLayout}>
+                  {/* Left Grids: Denominations & Paymodes */}
+                  <View style={styles.splitGrids}>
+                    {/* Column 1: Denominations */}
+                    <View style={[styles.gridSection, { flex: 0.95 }]}>
+                      <View style={styles.sectionHeader}>
+                        <MaterialCommunityIcons name="cash-multiple" size={18} color="#7A0C2E" />
+                        <Text style={styles.sectionTitle} numberOfLines={1}>1. Cash Denominations</Text>
+                        <View style={styles.denomTotalBadge}>
+                          <Text style={styles.denomTotalBadgeText}>
+                            Total Cash: ${totalCashDenominations.toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Denomination Table Header */}
+                      <View style={styles.tableHeaderRow}>
+                        <Text style={[styles.colHeader, { width: 140 }]}>Denomination ($)</Text>
+                        <Text style={[styles.colHeader, { width: 100, textAlign: 'center' }]}>No of $</Text>
+                        <Text style={[styles.colHeader, { flex: 1, textAlign: 'right' }]}>Amount ($)</Text>
+                      </View>
+
+                      <ScrollView style={styles.tableScrollView}>
+                        {denominations.map((denom, idx) => (
+                          <View
+                            key={`denom-${idx}`}
+                            style={[
+                              styles.tableDataRow,
+                              activeInputType === 'denom' && activeInputIndex === idx && styles.tableDataRowSelected,
+                            ]}
+                          >
+                            <View style={[styles.cell, { width: 140 }]}>
+                              <Text style={styles.denomValueText}>${denom.currencyValue.toFixed(2)}</Text>
+                            </View>
+                            <View style={[styles.cell, { width: 100, alignItems: 'center' }]}>
+                              <TextInput
+                                style={[
+                                  styles.qtyInput,
+                                  activeInputType === 'denom' && activeInputIndex === idx && styles.inputHighlight,
+                                ]}
+                                keyboardType="numeric"
+                                value={denom.qty > 0 ? String(denom.qty) : ''}
+                                placeholder="0"
+                                onFocus={() => {
+                                  setActiveInputType('denom');
+                                  setActiveInputIndex(idx);
+                                }}
+                                onChangeText={txt => handleQtyChange(idx, txt)}
+                              />
+                            </View>
+                            <View style={[styles.cell, { flex: 1, alignItems: 'flex-end' }]}>
+                              <Text style={styles.amountText}>${denom.amount.toFixed(2)}</Text>
+                            </View>
+                          </View>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {/* Column 2: Pay Modes */}
+                    <View style={[styles.gridSection, { flex: 1.05 }]}>
+                      <View style={styles.sectionHeader}>
+                        <MaterialCommunityIcons name="credit-card-outline" size={18} color="#7A0C2E" />
+                        <Text style={styles.sectionTitle}>2. Payment Modes Breakdown</Text>
+                      </View>
+
+                      {/* Paymode Table Header */}
+                      <View style={styles.tableHeaderRow}>
+                        <Text style={[styles.colHeader, { flex: 1.6 }]}>Pay Mode</Text>
+                        {showCompTotal && <Text style={[styles.colHeader, { flex: 1.3, textAlign: 'right' }]}>Comp Total</Text>}
+                        <Text style={[styles.colHeader, { flex: 1.3, textAlign: 'right' }]}>Manual Total</Text>
+                        <Text style={[styles.colHeader, { flex: 1.2, textAlign: 'right' }]}>Difference</Text>
+                      </View>
+
+                      <ScrollView style={styles.tableScrollView}>
+                        {payModes.map((pm, idx) => {
+                          const isCash = pm.payMode.trim().toUpperCase() === 'CASH';
+                          const isExpense = pm.payMode.trim().toUpperCase() === 'EXPENSE AMT';
+                          const diff = pm.difference;
+
+                          return (
+                            <View
+                              key={`pm-${idx}`}
+                              style={[
+                                styles.tableDataRow,
+                                activeInputType === 'paymode' && activeInputIndex === idx && styles.tableDataRowSelected,
+                              ]}
+                            >
+                              <View style={[styles.cell, { flex: 1.6 }]}>
+                                <Text style={[styles.payModeText, isCash && { fontWeight: '700', color: '#1B5E20' }]}>
+                                  {pm.payMode}
+                                </Text>
+                              </View>
+
+                              {showCompTotal && (
+                                <View style={[styles.cell, { flex: 1.3, alignItems: 'flex-end' }]}>
+                                  <Text style={styles.compAmountText}>${pm.computerAmount.toFixed(2)}</Text>
+                                </View>
+                              )}
+
+                              <View style={[styles.cell, { flex: 1.3, alignItems: 'flex-end' }]}>
+                                {isCash || isExpense ? (
+                                  <Text style={[styles.manualAmountReadOnly, isCash && { fontWeight: '700', color: '#1B5E20' }]}>
+                                    ${pm.manualAmount.toFixed(2)}
+                                  </Text>
+                                ) : (
+                                  <TextInput
+                                    style={[
+                                      styles.manualInput,
+                                      activeInputType === 'paymode' && activeInputIndex === idx && styles.inputHighlight,
+                                    ]}
+                                    keyboardType="numeric"
+                                    value={pm.manualAmount > 0 ? String(pm.manualAmount) : ''}
+                                    placeholder="0.00"
+                                    onFocus={() => {
+                                      setActiveInputType('paymode');
+                                      setActiveInputIndex(idx);
+                                    }}
+                                    onChangeText={txt => handlePayModeManualChange(idx, txt)}
+                                  />
+                                )}
+                              </View>
+
+                              <View style={[styles.cell, { flex: 1.2, alignItems: 'flex-end' }]}>
+                                <Text
+                                  style={[
+                                    styles.diffText,
+                                    {
+                                      color: diff < 0 ? '#C62828' : diff > 0 ? '#2E7D32' : '#666'
+                                    }
+                                  ]}
+                                >
+                                  {diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  </View>
+
+                  {/* Right Side: Professional 4x4 POS Touch Keypad */}
+                  {showTouchKeypad && (
+                    <View style={styles.sideKeypadPanel}>
+                      <View style={styles.sideKeypadHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <MaterialCommunityIcons name="dialpad" size={18} color="#7A0C2E" />
+                          <Text style={styles.sideKeypadTitle}>Touch Keypad</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => setShowTouchKeypad(false)}>
+                          <MaterialCommunityIcons name="close-circle" size={18} color="#94A3B8" />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Target Indicator Box */}
+                      <View style={styles.targetIndicatorBox}>
+                        <Text style={styles.targetIndicatorLabel}>ACTIVE INPUT</Text>
+                        <Text style={styles.targetIndicatorValue} numberOfLines={1}>
+                          {activeInputType === 'denom' && activeInputIndex >= 0
+                            ? `$${denominations[activeInputIndex]?.currencyValue.toFixed(2)} Count (Qty)`
+                            : activeInputType === 'paymode' && activeInputIndex >= 0
+                            ? `${payModes[activeInputIndex]?.payMode} Manual $`
+                            : 'Tap an input field on left'}
                         </Text>
                       </View>
+
+                      {/* 4x4 Button Grid */}
+                      <View style={styles.sideKeypadGrid}>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('7')}>
+                          <Text style={styles.sideKeyText}>7</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('8')}>
+                          <Text style={styles.sideKeyText}>8</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('9')}>
+                          <Text style={styles.sideKeyText}>9</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.sideKey, styles.sideKeyDelta]} onPress={() => handleKeypadPress('+')}>
+                          <Text style={[styles.sideKeyText, { color: '#7A0C2E' }]}>+1</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('4')}>
+                          <Text style={styles.sideKeyText}>4</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('5')}>
+                          <Text style={styles.sideKeyText}>5</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('6')}>
+                          <Text style={styles.sideKeyText}>6</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.sideKey, styles.sideKeyDelta]} onPress={() => handleKeypadPress('-')}>
+                          <Text style={[styles.sideKeyText, { color: '#7A0C2E' }]}>-1</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('1')}>
+                          <Text style={styles.sideKeyText}>1</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('2')}>
+                          <Text style={styles.sideKeyText}>2</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('3')}>
+                          <Text style={styles.sideKeyText}>3</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.sideKey, styles.sideKeyAction]} onPress={() => handleKeypadPress('DEL')}>
+                          <Text style={[styles.sideKeyText, { color: '#DC2626' }]}>DEL</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('0')}>
+                          <Text style={styles.sideKeyText}>0</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('00')}>
+                          <Text style={styles.sideKeyText}>00</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.sideKey} onPress={() => handleKeypadPress('.')}>
+                          <Text style={styles.sideKeyText}>.</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.sideKey, styles.sideKeyAction]} onPress={() => handleKeypadPress('CLR')}>
+                          <Text style={[styles.sideKeyText, { color: '#DC2626' }]}>CLR</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* ENTER / NEXT ROW */}
+                      <TouchableOpacity
+                        style={styles.sideKeyEnter}
+                        onPress={() => handleKeypadPress('ENTER')}
+                      >
+                        <MaterialCommunityIcons name="keyboard-return" size={20} color="#FFFFFF" />
+                        <Text style={styles.sideKeyEnterText}>ENTER / NEXT ROW</Text>
+                      </TouchableOpacity>
                     </View>
-
-                    {/* Denomination Table Header */}
-                    <View style={styles.tableHeaderRow}>
-                      <Text style={[styles.colHeader, { flex: 1.2 }]}>Denom ($)</Text>
-                      <Text style={[styles.colHeader, { flex: 1.2 }]}>No of $</Text>
-                      <Text style={[styles.colHeader, { flex: 1.5, textAlign: 'right' }]}>Amount ($)</Text>
-                    </View>
-
-                    <ScrollView style={styles.tableScrollView}>
-                      {denominations.map((denom, idx) => (
-                        <View key={`denom-${idx}`} style={styles.tableDataRow}>
-                          <View style={[styles.cell, { flex: 1.2 }]}>
-                            <Text style={styles.denomValueText}>${denom.currencyValue.toFixed(2)}</Text>
-                          </View>
-                          <View style={[styles.cell, { flex: 1.2 }]}>
-                            <TextInput
-                              style={styles.qtyInput}
-                              keyboardType="numeric"
-                              value={denom.qty > 0 ? String(denom.qty) : ''}
-                              placeholder="0"
-                              onChangeText={txt => handleQtyChange(idx, txt)}
-                            />
-                          </View>
-                          <View style={[styles.cell, { flex: 1.5, alignItems: 'flex-end' }]}>
-                            <Text style={styles.amountText}>${denom.amount.toFixed(2)}</Text>
-                          </View>
-                        </View>
-                      ))}
-                    </ScrollView>
-                  </View>
-
-                  {/* Right Column: Pay Modes */}
-                  <View style={styles.gridSection}>
-                    <View style={styles.sectionHeader}>
-                      <MaterialCommunityIcons name="credit-card-outline" size={18} color="#7A0C2E" />
-                      <Text style={styles.sectionTitle}>2. Payment Modes Breakdown</Text>
-                    </View>
-
-                    {/* Paymode Table Header */}
-                    <View style={styles.tableHeaderRow}>
-                      <Text style={[styles.colHeader, { flex: 1.6 }]}>Pay Mode</Text>
-                      {showCompTotal && <Text style={[styles.colHeader, { flex: 1.3, textAlign: 'right' }]}>Comp Total</Text>}
-                      <Text style={[styles.colHeader, { flex: 1.3, textAlign: 'right' }]}>Manual Total</Text>
-                      <Text style={[styles.colHeader, { flex: 1.2, textAlign: 'right' }]}>Difference</Text>
-                    </View>
-
-                    <ScrollView style={styles.tableScrollView}>
-                      {payModes.map((pm, idx) => {
-                        const isCash = pm.payMode.trim().toUpperCase() === 'CASH';
-                        const isExpense = pm.payMode.trim().toUpperCase() === 'EXPENSE AMT';
-                        const diff = pm.difference;
-
-                        return (
-                          <View key={`pm-${idx}`} style={styles.tableDataRow}>
-                            <View style={[styles.cell, { flex: 1.6 }]}>
-                              <Text style={[styles.payModeText, isCash && { fontWeight: '700', color: '#1B5E20' }]}>
-                                {pm.payMode}
-                              </Text>
-                            </View>
-
-                            {showCompTotal && (
-                              <View style={[styles.cell, { flex: 1.3, alignItems: 'flex-end' }]}>
-                                <Text style={styles.compAmountText}>${pm.computerAmount.toFixed(2)}</Text>
-                              </View>
-                            )}
-
-                            <View style={[styles.cell, { flex: 1.3, alignItems: 'flex-end' }]}>
-                              {isCash || isExpense ? (
-                                <Text style={[styles.manualAmountReadOnly, isCash && { fontWeight: '700', color: '#1B5E20' }]}>
-                                  ${pm.manualAmount.toFixed(2)}
-                                </Text>
-                              ) : (
-                                <TextInput
-                                  style={styles.manualInput}
-                                  keyboardType="numeric"
-                                  value={pm.manualAmount > 0 ? String(pm.manualAmount) : ''}
-                                  placeholder="0.00"
-                                  onChangeText={txt => handlePayModeManualChange(idx, txt)}
-                                />
-                              )}
-                            </View>
-
-                            <View style={[styles.cell, { flex: 1.2, alignItems: 'flex-end' }]}>
-                              <Text
-                                style={[
-                                  styles.diffText,
-                                  {
-                                    color: diff < 0 ? '#C62828' : diff > 0 ? '#2E7D32' : '#666'
-                                  }
-                                ]}
-                              >
-                                {diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}
-                              </Text>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
+                  )}
                 </View>
               )}
 
@@ -699,19 +1103,45 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
 
                 <View style={styles.actionBtns}>
                   <TouchableOpacity
-                    style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-                    onPress={handleSave}
-                    disabled={saving}
+                    style={[styles.saveBtn, { backgroundColor: '#059669' }]}
+                    onPress={handleExportCSV}
+                    activeOpacity={0.8}
                   >
-                    {saving ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <>
-                        <MaterialCommunityIcons name="content-save-check" size={20} color="#FFFFFF" />
-                        <Text style={styles.saveBtnText}>Save & Finalize</Text>
-                      </>
-                    )}
+                    <MaterialCommunityIcons name="file-delimited" size={20} color="#FFFFFF" />
+                    <Text style={styles.saveBtnText}>Export CSV</Text>
                   </TouchableOpacity>
+
+                  {isExistingSettlement ? (
+                    <TouchableOpacity
+                      style={[styles.saveBtn, { backgroundColor: '#0284c7' }, reprinting && styles.saveBtnDisabled]}
+                      onPress={handleReprintSlip}
+                      disabled={reprinting}
+                    >
+                      {reprinting ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <MaterialCommunityIcons name="printer" size={20} color="#FFFFFF" />
+                          <Text style={styles.saveBtnText}>Re-Print Slip</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+                      onPress={handleSave}
+                      disabled={saving}
+                    >
+                      {saving ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <MaterialCommunityIcons name="content-save-check" size={20} color="#FFFFFF" />
+                          <Text style={styles.saveBtnText}>Save & Finalize</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity style={styles.exitBtn} onPress={onClose}>
                     <MaterialCommunityIcons name="exit-to-app" size={20} color="#333333" />
@@ -730,24 +1160,18 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16
+    padding: 0
   },
   modalContainer: {
-    width: '92%',
-    maxWidth: 960,
-    height: '88%',
-    maxHeight: 700,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 0,
+    borderWidth: 0,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 10,
     display: 'flex',
     flexDirection: 'column'
   },
@@ -782,7 +1206,7 @@ const styles = StyleSheet.create({
     fontWeight: '600'
   },
   settledBadge: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: '#0284c7',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4
@@ -790,7 +1214,23 @@ const styles = StyleSheet.create({
   settledBadgeText: {
     color: '#FFFFFF',
     fontSize: 11,
-    fontWeight: '700'
+    fontWeight: '800'
+  },
+  existingSettlementAlert: {
+    backgroundColor: '#f0f9ff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#bae6fd',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  existingSettlementAlertText: {
+    color: '#0369a1',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
   closeBtn: {
     padding: 6,
@@ -800,7 +1240,7 @@ const styles = StyleSheet.create({
   // Auth Modal
   authModalContainer: {
     width: '100%',
-    maxWidth: 440,
+    maxWidth: 680,
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     overflow: 'hidden',
@@ -820,25 +1260,120 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
   },
+  authToggleKeypadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  authToggleKeypadBtnActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    borderColor: '#FFFFFF',
+  },
+  authToggleKeypadBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   authBody: {
     padding: 24,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
   },
-  authIconCircle: {
+  authBodyWithPad: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 20,
+    padding: 20,
+  },
+  authFormColumn: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  authPadColumn: {
+    flex: 0.9,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 14,
+    alignItems: 'center',
+  },
+  authPadHeader: {
+    width: '100%',
+    borderBottomWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingBottom: 8,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  authPadTitle: {
+    fontSize: 12,
+    color: '#475569',
+    fontWeight: '600',
+  },
+  authPadGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+    width: 216,
+  },
+  authPadKey: {
     width: 64,
-    height: 64,
-    borderRadius: 32,
+    height: 48,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 1,
+  },
+  authPadKeyText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  authPadKeyAction: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#FCA5A5',
+  },
+  authPadEnterBtn: {
+    marginTop: 10,
+    width: 208,
+    height: 42,
+    backgroundColor: '#7A0C2E',
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  authPadEnterText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  authIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: '#FCE4EC',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   authPrompt: {
     fontSize: 12,
     color: '#64748B',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 14,
     lineHeight: 18,
   },
   errorBox: {
@@ -859,16 +1394,16 @@ const styles = StyleSheet.create({
   },
   inputGroup: {
     width: '100%',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   inputLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#334155',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   textInput: {
-    height: 40,
+    height: 38,
     borderWidth: 1,
     borderColor: '#CBD5E1',
     borderRadius: 6,
@@ -877,12 +1412,17 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     backgroundColor: '#F8FAFC',
   },
+  textInputFocused: {
+    borderColor: '#7A0C2E',
+    borderWidth: 2,
+    backgroundColor: '#FFFFFF',
+  },
   loginBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    height: 44,
+    height: 42,
     backgroundColor: '#7A0C2E',
     borderRadius: 6,
     width: '100%',
@@ -933,20 +1473,35 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    gap: 6
+    gap: 8,
+    alignItems: 'center'
   },
   tabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: '#F1F5F9'
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1'
   },
   tabBtnActive: {
-    backgroundColor: '#7A0C2E'
+    backgroundColor: '#7A0C2E',
+    borderColor: '#7A0C2E'
+  },
+  keypadActivePill: {
+    backgroundColor: '#7A0C2E',
+    borderColor: '#7A0C2E'
+  },
+  keypadInactivePill: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#CBD5E1'
   },
   tabBtnText: {
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     color: '#475569'
   },
   tabBtnTextActive: {
@@ -964,12 +1519,17 @@ const styles = StyleSheet.create({
     color: '#64748B'
   },
 
-  // Two-column Split Grids
-  splitGrids: {
+  // Main Settlement Layout
+  settlementMainLayout: {
     flex: 1,
     flexDirection: 'row',
     padding: 12,
-    gap: 12
+    gap: 12,
+  },
+  splitGrids: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 12,
   },
   gridSection: {
     flex: 1,
@@ -980,6 +1540,102 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column'
+  },
+
+  // Right Side Dedicated Touch Keypad
+  sideKeypadPanel: {
+    width: 250,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    display: 'flex',
+    flexDirection: 'column',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  sideKeypadHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  sideKeypadTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  targetIndicatorBox: {
+    backgroundColor: '#FDF2F4',
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 10,
+  },
+  targetIndicatorLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#9F1239',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  targetIndicatorValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#7A0C2E',
+  },
+  sideKeypadGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    justifyContent: 'space-between',
+  },
+  sideKey: {
+    width: 50,
+    height: 48,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 1,
+  },
+  sideKeyText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  sideKeyDelta: {
+    backgroundColor: '#FDF2F4',
+    borderColor: '#FECDD3',
+  },
+  sideKeyAction: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+  },
+  sideKeyEnter: {
+    marginTop: 8,
+    height: 46,
+    backgroundColor: '#7A0C2E',
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    elevation: 2,
+  },
+  sideKeyEnterText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   sectionHeader: {
     height: 38,
@@ -1027,11 +1683,73 @@ const styles = StyleSheet.create({
   },
   tableDataRow: {
     flexDirection: 'row',
-    height: 38,
-    paddingHorizontal: 12,
+    height: 42,
+    paddingHorizontal: 14,
     alignItems: 'center',
     borderBottomWidth: 1,
     borderColor: '#F1F5F9'
+  },
+  tableDataRowSelected: {
+    backgroundColor: '#FDF2F4'
+  },
+  inputHighlight: {
+    borderColor: '#7A0C2E',
+    borderWidth: 1.5,
+    backgroundColor: '#FFF'
+  },
+
+  // Touch Keypad Styles
+  touchKeypadContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  touchKeypadHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  touchKeypadHeaderText: {
+    fontSize: 12,
+    color: '#475569',
+  },
+  numpadBtnRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    justifyContent: 'center',
+  },
+  numpadKey: {
+    width: 48,
+    height: 36,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 1,
+  },
+  numpadKeyText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  numpadKeyAction: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#94A3B8',
+  },
+  numpadKeyDelta: {
+    backgroundColor: '#FDF2F4',
+    borderColor: '#FECDD3',
+  },
+  numpadKeyEnter: {
+    width: 72,
+    backgroundColor: '#7A0C2E',
+    borderColor: '#7A0C2E',
   },
   cell: {
     justifyContent: 'center'
@@ -1042,52 +1760,52 @@ const styles = StyleSheet.create({
     color: '#1E293B'
   },
   qtyInput: {
-    height: 28,
-    width: 60,
+    height: 32,
+    width: 70,
     borderWidth: 1,
     borderColor: '#CBD5E1',
     borderRadius: 4,
     paddingHorizontal: 6,
-    fontSize: 12,
+    fontSize: 14,
     textAlign: 'center',
     backgroundColor: '#FFFFFF',
-    fontWeight: '600'
+    fontWeight: '700'
   },
   amountText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
     color: '#0F172A'
   },
   payModeText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     color: '#334155'
   },
   compAmountText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     color: '#475569'
   },
   manualInput: {
-    height: 28,
-    width: 80,
+    height: 32,
+    width: 90,
     borderWidth: 1,
     borderColor: '#CBD5E1',
     borderRadius: 4,
-    paddingHorizontal: 6,
-    fontSize: 12,
+    paddingHorizontal: 8,
+    fontSize: 14,
     textAlign: 'right',
     backgroundColor: '#FFFFFF',
-    fontWeight: '600'
+    fontWeight: '700'
   },
   manualAmountReadOnly: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
     color: '#0F172A',
     paddingRight: 6
   },
   diffText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700'
   },
 

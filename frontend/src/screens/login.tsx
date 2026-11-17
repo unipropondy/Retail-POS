@@ -363,8 +363,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <View style={styles.statusPill}>
               <View style={styles.statusDot} />
               <Text style={styles.statusText}>
-                {terminal?.terminalCode || "HQPC1"} •{" "}
-                {terminal?.locationCode || "HQ"} • READY
+                {terminal?.terminalCode || "TERMINAL"} •{" "}
+                {terminal?.locationCode || "LOCATION"} • READY
               </Text>
             </View>
             <TouchableOpacity
@@ -401,7 +401,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <Text style={styles.boldText}>{activeUser.userCode}</Text> •
               Terminal:{" "}
               <Text style={styles.boldText}>
-                {terminal?.terminalCode || "HQPC1"}
+                {terminal?.terminalCode || "—"}
               </Text>{" "}
               ({terminal?.computerName || "PC"})
             </Text>
@@ -410,14 +410,14 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Terminal Code</Text>
                 <Text style={styles.metricValue}>
-                  {terminal?.terminalCode || "HQPC1"}
+                  {terminal?.terminalCode || "—"}
                 </Text>
               </View>
               <View style={styles.metricDivider} />
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Location Branch</Text>
                 <Text style={styles.metricValue}>
-                  {terminal?.locationCode || "HQ"}
+                  {terminal?.locationCode || "—"}
                 </Text>
               </View>
               <View style={styles.metricDivider} />
