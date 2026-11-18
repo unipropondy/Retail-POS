@@ -55,6 +55,7 @@ import DenominationModal from "../components/DenominationModal";
 import { PosPaymentModal, SplitPaymentLine } from "../components/PosPaymentModal";
 import { DayEndModal, DayEndReportData } from "../components/DayEndModal";
 import CustomerReceiptsModal from "../components/CustomerReceiptsModal";
+import { CustomerSelectModal, CustomerItem } from "../components/CustomerSelectModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -209,7 +210,13 @@ export default function PosBillingScreen({
   // Paymodes state from tblInvPaymode
   const [payModes, setPayModes] = useState<PayModeItem[]>([]);
   const [selectedPayMode, setSelectedPayMode] = useState<string>("CASH");
+  const [payMode3Name, setPayMode3Name] = useState<string>("CREDIT");
+  const [payMode4Name, setPayMode4Name] = useState<string>("PAYWAY");
   const [showMorePayModes, setShowMorePayModes] = useState<boolean>(false);
+
+  // Customer / Credit Sale state (tblInvCustomer)
+  const [currentCustomer, setCurrentCustomer] = useState<CustomerItem | null>(null);
+  const [showCustomerSelectModal, setShowCustomerSelectModal] = useState<boolean>(false);
 
   // Cart State (Initialized empty)
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -709,6 +716,12 @@ export default function PosBillingScreen({
       const data = await res.json();
       if (res.ok && data.success && data.paymodes && data.paymodes.length > 0) {
         setPayModes(data.paymodes);
+      }
+      if (data?.paymode3?.payMode) {
+        setPayMode3Name(data.paymode3.payMode);
+      }
+      if (data?.paymode4?.payMode) {
+        setPayMode4Name(data.paymode4.payMode);
       }
     } catch {
       setPayModes([]);
@@ -1667,6 +1680,16 @@ export default function PosBillingScreen({
     }, 80);
   };
 
+  // Repeat Last Item / Duplicate Item (Exact VB.NET Ctrl + X / subRepeatItem workflow)
+  const handleRepeatLastItem = () => {
+    if (cart.length === 0) {
+      showAlert("Cart Empty", "No item available to repeat. Please scan an item first.", "info");
+      return;
+    }
+    // Increment the last scanned / selected line item by 1
+    handleQtyChange(1);
+  };
+
   // Delete selected item from cart - Exact VB.NET subVoidItem() workflow
   const handleDeleteItem = () => {
     if (cart.length === 0) {
@@ -1790,6 +1813,7 @@ export default function PosBillingScreen({
     setPendingZeroPriceItem(null);
     setPendingItemAdd(null);
     setBPriceChange(false);
+    setCurrentCustomer(null);
     setFastQty("1");
     setFastPrice("0.00");
     setFastDisc("0.00");
@@ -2963,15 +2987,19 @@ export default function PosBillingScreen({
           tax: taxAmount || 0,
           roundOff: roundOff || 0,
           balance: changeDue,
-          customerCode: "CASH",
-          customerName: "CASH",
+          customerCode: currentCustomer ? currentCustomer.CustomerCode : "CASH",
+          customerName: currentCustomer ? currentCustomer.CustomerName : "CASH",
           salesType: primaryPayMode,
           gstType: "Z",
         }),
       });
 
       const data = await res.json();
-      const generatedInvoiceNo = (data.success && data.invoiceNo) ? data.invoiceNo : "";
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Failed to save sale in database.");
+      }
+
+      const generatedInvoiceNo = data.invoiceNo || "";
       if (generatedInvoiceNo) {
         setLastFinishedInvoice(generatedInvoiceNo);
       }
@@ -3045,8 +3073,8 @@ export default function PosBillingScreen({
           tax: taxAmount || 0,
           roundOff: roundOff || 0,
           balance: finalBal,
-          customerCode: "CASH",
-          customerName: "CASH",
+          customerCode: currentCustomer ? currentCustomer.CustomerCode : "CASH",
+          customerName: currentCustomer ? currentCustomer.CustomerName : "CASH",
           salesType: finalPayMode,
           gstType: "Z",
         }),
@@ -3363,6 +3391,7 @@ export default function PosBillingScreen({
     openPaymodeModificationModal: () => setShowPaymodeModificationModal(true),
     openExpenseModal: () => setShowExpenseModal(true),
     openDiscountModal: () => setShowDiscountModal(true),
+    handleRepeatLastItem,
     handleAutoModeClick,
     handleCashDrawerClick,
     handleF1Reprint,
@@ -3385,6 +3414,7 @@ export default function PosBillingScreen({
       openPaymodeModificationModal: () => setShowPaymodeModificationModal(true),
       openExpenseModal: () => setShowExpenseModal(true),
       openDiscountModal: () => setShowDiscountModal(true),
+      handleRepeatLastItem,
       handleAutoModeClick,
       handleCashDrawerClick,
       handleF1Reprint,
@@ -3492,6 +3522,11 @@ export default function PosBillingScreen({
         e.preventDefault();
         e.stopPropagation();
         keyboardActionsRef.current.openExpenseModal();
+      } else if (e.ctrlKey && (key === "X" || code === "KEYX")) {
+        // VB.NET Ctrl + X: Repeat Last Item (subRepeatItem)
+        e.preventDefault();
+        e.stopPropagation();
+        keyboardActionsRef.current.handleRepeatLastItem();
       } else if (key === "F11" || code === "F11") {
         e.preventDefault();
         e.stopPropagation();
@@ -4536,24 +4571,30 @@ export default function PosBillingScreen({
                 style={[
                   styles.posBtn,
                   styles.btnPayMode,
-                  selectedPayMode === "PAYNOW" && styles.btnPayModeActive,
+                  selectedPayMode === payMode3Name && styles.btnPayModeActive,
                 ]}
-                onPress={() => setSelectedPayMode("PAYNOW")}
+                onPress={() => {
+                  setSelectedPayMode(payMode3Name);
+                  if (payMode3Name === "CREDIT" && (!currentCustomer || currentCustomer.CustomerCode === "CASH")) {
+                    setShowCustomerSelectModal(true);
+                  }
+                }}
                 activeOpacity={0.8}
               >
                 <MaterialCommunityIcons
-                  name="qrcode-scan"
+                  name="credit-card-plus-outline"
                   size={16}
-                  color={selectedPayMode === "PAYNOW" ? "#ffffff" : "#38bdf8"}
+                  color={selectedPayMode === payMode3Name ? "#ffffff" : "#38bdf8"}
                   style={styles.posBtnIcon}
                 />
                 <Text
                   style={[
                     styles.posBtnTitle,
-                    selectedPayMode === "PAYNOW" && styles.posBtnTitleActive,
+                    selectedPayMode === payMode3Name && styles.posBtnTitleActive,
                   ]}
+                  numberOfLines={1}
                 >
-                  PAYNOW
+                  {payMode3Name}
                 </Text>
               </TouchableOpacity>
 
@@ -4606,26 +4647,27 @@ export default function PosBillingScreen({
                 style={[
                   styles.posBtn,
                   styles.btnPayMode,
-                  selectedPayMode === "FLASH PAY" && styles.btnPayModeActive,
+                  selectedPayMode === payMode4Name && styles.btnPayModeActive,
                 ]}
-                onPress={() => setShowMorePayModes(true)}
+                onPress={() => setSelectedPayMode(payMode4Name)}
                 activeOpacity={0.8}
               >
                 <MaterialCommunityIcons
                   name="contactless-payment"
                   size={16}
                   color={
-                    selectedPayMode === "FLASH PAY" ? "#ffffff" : "#38bdf8"
+                    selectedPayMode === payMode4Name ? "#ffffff" : "#38bdf8"
                   }
                   style={styles.posBtnIcon}
                 />
                 <Text
                   style={[
                     styles.posBtnTitle,
-                    selectedPayMode === "FLASH PAY" && styles.posBtnTitleActive,
+                    selectedPayMode === payMode4Name && styles.posBtnTitleActive,
                   ]}
+                  numberOfLines={1}
                 >
-                  FLASH
+                  {payMode4Name}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -5338,7 +5380,29 @@ export default function PosBillingScreen({
         grandTotal={grandTotal}
         availablePayModes={payModes}
         defaultPayMode={selectedPayMode || "CASH"}
+        customerCode={currentCustomer ? currentCustomer.CustomerCode : "CASH"}
+        onRequestCustomerSelect={() => setShowCustomerSelectModal(true)}
         onCompleteSale={handleCompleteSaleWithSplit}
+      />
+
+      {/* =========================================================================
+          MODAL: Customer Selection & Credit Limit Validation (frmAddCustomerDetails.vb)
+      ========================================================================= */}
+      <CustomerSelectModal
+        visible={showCustomerSelectModal}
+        backendUrl={API_URL}
+        primaryColor={currentTheme.primary}
+        currentCustomerCode={currentCustomer?.CustomerCode}
+        requiredAmount={grandTotal}
+        onSelectCustomer={(cust) => {
+          setCurrentCustomer(cust);
+          showAlert(
+            "Customer Attached",
+            `Attached ${cust.CustomerName} (${cust.CustomerCode}) | Available Credit: $${Number(cust.availableCredit ?? cust.CreditLimit ?? 0).toFixed(2)}`,
+            "success"
+          );
+        }}
+        onClose={() => setShowCustomerSelectModal(false)}
       />
 
       {/* =========================================================================
@@ -6393,6 +6457,20 @@ export default function PosBillingScreen({
                   <Text style={styles.menuGridTileLabel}>Check</Text>
                 </TouchableOpacity>
 
+                {/* Repeat Item (Ctrl + X / subRepeatItem) */}
+                <TouchableOpacity
+                  style={styles.menuGridTile}
+                  onPress={() => {
+                    setShowMoreMenuModal(false);
+                    handleRepeatLastItem();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.menuGridTileKey}>Ctrl+X</Text>
+                  <Text style={styles.menuGridTileLabel}>Repeat</Text>
+                  <Text style={styles.menuGridTileLabel}>Item</Text>
+                </TouchableOpacity>
+
                 {/* Close (Red/Rose Button) */}
                 <TouchableOpacity
                   style={styles.menuGridTileClose}
@@ -6402,8 +6480,7 @@ export default function PosBillingScreen({
                   <Text style={styles.menuGridTileCloseText}>Close</Text>
                 </TouchableOpacity>
 
-                {/* Empty placeholders to maintain 5-column grid alignment */}
-                <View style={styles.menuGridTilePlaceholder} />
+                {/* Empty placeholder to maintain 5-column grid alignment */}
                 <View style={styles.menuGridTilePlaceholder} />
               </View>
             </View>

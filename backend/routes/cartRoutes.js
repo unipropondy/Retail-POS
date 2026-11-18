@@ -1239,7 +1239,13 @@ router.post('/checkout', async (req, res) => {
         payList.push({ payMode: payMode || 'CASH', amount: finalNetTotal, slipNo: '' });
       }
 
+      let hasCreditPaymode = false;
       for (const p of payList) {
+        const pMode = String(p.payMode || 'CASH').trim().toUpperCase();
+        if (pMode === 'CREDIT') {
+          hasCreditPaymode = true;
+        }
+
         const payReq = new sql.Request(transaction);
         payReq.input('InvoiceNo', sql.VarChar(10), officialInvoiceNo.slice(0, 10));
         payReq.input('sDate', sql.DateTime, new Date());
@@ -1250,6 +1256,23 @@ router.post('/checkout', async (req, res) => {
         payReq.input('UserID', sql.VarChar(10), String(cashierId || 'UPS').slice(0, 10));
 
         await payReq.execute('sp_POS_PayModeDetail');
+      }
+
+      // If sale has CREDIT tender, post to Accounts Receivable ledger (exact parity with frmPos1.vb:2610-2628)
+      if (hasCreditPaymode) {
+        try {
+          const postReq = new sql.Request(transaction);
+          postReq.input('inv', sql.VarChar(50), officialInvoiceNo);
+          postReq.input('uid', sql.VarChar(50), String(cashierId || 'UPS'));
+          await postReq.query(`
+            IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'sp_PostSalesInvoice')
+              EXEC sp_PostSalesInvoice @inv, @uid;
+            IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'sp_insert_AccountsReceivable')
+              EXEC sp_insert_AccountsReceivable @inv, @uid;
+          `);
+        } catch (arErr) {
+          console.warn('⚠️ [A/R POSTING WARN]:', arErr.message);
+        }
       }
 
       // 5. Clean temporary sales table for this terminal

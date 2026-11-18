@@ -57,6 +57,10 @@ export const DayEndModal: React.FC<DayEndModalProps> = ({
   cashierId = '',
 }) => {
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
+  const [printStatus, setPrintStatus] = useState<{
+    type: 'success' | 'warning' | 'error';
+    message: string;
+  } | null>(null);
 
   if (!visible || !reportData) return null;
 
@@ -75,6 +79,7 @@ export const DayEndModal: React.FC<DayEndModalProps> = ({
   // 1. Thermal Z-Report Print
   const handlePrintSlip = async () => {
     if (isPrinting) return;
+    setPrintStatus(null);
     try {
       setIsPrinting(true);
       const res = await fetch(`${API_URL}/api/settlement/day-end/print`, {
@@ -88,18 +93,21 @@ export const DayEndModal: React.FC<DayEndModalProps> = ({
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        if (Platform.OS === 'web') {
-          window.alert('Day End Z-Report printed successfully!');
-        }
+        setPrintStatus({
+          type: 'success',
+          message: 'Day End Z-Report thermal slip sent to printer successfully!',
+        });
       } else {
-        if (Platform.OS === 'web') {
-          window.alert(`Print Warning: ${data.message || 'Printer response failed.'}`);
-        }
+        setPrintStatus({
+          type: 'warning',
+          message: `Print Notice: ${data.message || 'Printer response failed.'}`,
+        });
       }
     } catch (e: any) {
-      if (Platform.OS === 'web') {
-        window.alert(`Print Error: ${e.message}`);
-      }
+      setPrintStatus({
+        type: 'error',
+        message: `Print Error: ${e.message || 'Network communication failed.'}`,
+      });
     } finally {
       setIsPrinting(false);
     }
@@ -157,6 +165,46 @@ export const DayEndModal: React.FC<DayEndModalProps> = ({
 
           {/* Body */}
           <ScrollView style={styles.scrollBody} contentContainerStyle={{ padding: 18, gap: 16 }}>
+            {/* Real-time In-App Print Feedback Banner */}
+            {printStatus ? (
+              <View
+                style={[
+                  styles.printFeedbackBanner,
+                  printStatus.type === 'success' && styles.printFeedbackSuccess,
+                  printStatus.type === 'warning' && styles.printFeedbackWarning,
+                  printStatus.type === 'error' && styles.printFeedbackError,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={
+                    printStatus.type === 'success'
+                      ? 'check-circle'
+                      : printStatus.type === 'warning'
+                      ? 'alert'
+                      : 'close-circle'
+                  }
+                  size={20}
+                  color={
+                    printStatus.type === 'success'
+                      ? '#15803D'
+                      : printStatus.type === 'warning'
+                      ? '#B45309'
+                      : '#DC2626'
+                  }
+                />
+                <Text
+                  style={[
+                    styles.printFeedbackText,
+                    printStatus.type === 'success' && { color: '#166534' },
+                    printStatus.type === 'warning' && { color: '#92400E' },
+                    printStatus.type === 'error' && { color: '#991B1B' },
+                  ]}
+                >
+                  {printStatus.message}
+                </Text>
+              </View>
+            ) : null}
+
             {/* Success Banner */}
             <View style={styles.successBanner}>
               <MaterialCommunityIcons name="check-circle" size={28} color="#15803D" />
@@ -323,6 +371,35 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8FAFC',
   },
+
+  // Print Feedback Banner Styles
+  printFeedbackBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  printFeedbackSuccess: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#86EFAC',
+  },
+  printFeedbackWarning: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  printFeedbackError: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+  },
+  printFeedbackText: {
+    fontSize: 13,
+    fontWeight: '700',
+    flex: 1,
+  },
+
   successBanner: {
     flexDirection: 'row',
     alignItems: 'center',

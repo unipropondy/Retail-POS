@@ -37,6 +37,8 @@ interface PosPaymentModalProps {
   grandTotal: number;
   availablePayModes: Array<{ PayMode: string; Description?: string }>;
   defaultPayMode?: string;
+  customerCode?: string;
+  onRequestCustomerSelect?: () => void;
   onCompleteSale: (
     payments: SplitPaymentLine[],
     totalTendered: number,
@@ -51,16 +53,20 @@ export const PosPaymentModal: React.FC<PosPaymentModalProps> = ({
   grandTotal,
   availablePayModes,
   defaultPayMode = 'CASH',
+  customerCode = 'CASH',
+  onRequestCustomerSelect,
   onCompleteSale,
 }) => {
   const [payLines, setPayLines] = useState<SplitPaymentLine[]>([]);
   const [selectedPayModeIdx, setSelectedPayModeIdx] = useState<number>(0);
   const [activeInputString, setActiveInputString] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // Initialize paymodes strictly from live database state (tblInvPaymode)
   useEffect(() => {
     if (visible) {
+      setValidationError(null);
       const modes = availablePayModes || [];
       const initialLines: SplitPaymentLine[] = modes.map((pm, idx) => {
         const modeName = (pm.PayMode || '').trim();
@@ -103,9 +109,17 @@ export const PosPaymentModal: React.FC<PosPaymentModalProps> = ({
 
   // When cashier taps on a paymode row
   const handleSelectPaymodeRow = (idx: number) => {
+    setValidationError(null);
     setSelectedPayModeIdx(idx);
     const targetMode = payLines[idx]?.payMode?.toUpperCase() || '';
     const isTargetCash = targetMode === 'CASH';
+
+    // Credit Sale check: If CREDIT mode is selected and customer is CASH or unselected, prompt customer selection
+    if (targetMode === 'CREDIT' && (!customerCode || customerCode.toUpperCase() === 'CASH')) {
+      if (onRequestCustomerSelect) {
+        onRequestCustomerSelect();
+      }
+    }
 
     // If target is NOT cash and current line amount is 0, auto-fill remaining balance (exact VB.NET behavior)
     if (!isTargetCash && (!payLines[idx]?.amount || payLines[idx]?.amount === 0)) {
@@ -126,6 +140,7 @@ export const PosPaymentModal: React.FC<PosPaymentModalProps> = ({
 
   // Handle Numeric Keypad
   const handleKeypadPress = (val: string) => {
+    setValidationError(null);
     let nextStr = activeInputString;
 
     if (val === 'CLR') {
@@ -201,9 +216,7 @@ export const PosPaymentModal: React.FC<PosPaymentModalProps> = ({
     if (isSubmitting) return;
 
     if (totalPaid < grandTotal) {
-      if (Platform.OS === 'web') {
-        window.alert(`Payment Incomplete: $${balanceRemaining.toFixed(2)} remaining.`);
-      }
+      setValidationError(`Payment Incomplete: $${balanceRemaining.toFixed(2)} remaining to complete bill.`);
       return;
     }
 
@@ -213,18 +226,29 @@ export const PosPaymentModal: React.FC<PosPaymentModalProps> = ({
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
     if (nonCashPaid > grandTotal) {
-      if (Platform.OS === 'web') {
-        window.alert(`Invalid Payment: Non-cash tender ($${nonCashPaid.toFixed(2)}) cannot exceed Net Total ($${grandTotal.toFixed(2)}). Change can only be given for Cash.`);
+      setValidationError(`Invalid Tender: Non-cash tender ($${nonCashPaid.toFixed(2)}) cannot exceed Net Total ($${grandTotal.toFixed(2)}). Change can only be given for Cash.`);
+      return;
+    }
+
+    // Credit Sale check: If CREDIT mode has an amount > 0, customer cannot be CASH
+    const hasCredit = payLines.some(p => p.payMode.toUpperCase() === 'CREDIT' && Number(p.amount) > 0);
+    if (hasCredit && (!customerCode || customerCode.toUpperCase() === 'CASH')) {
+      setValidationError('Customer should be selected for Credit sale! Please attach a customer.');
+      if (onRequestCustomerSelect) {
+        onRequestCustomerSelect();
       }
       return;
     }
+
+    setValidationError(null);
 
     try {
       setIsSubmitting(true);
       const activePayments = payLines.filter(p => Number(p.amount) > 0);
       await onCompleteSale(activePayments, totalPaid, changeDue, shouldPrint);
-    } catch (err) {
+    } catch (err: any) {
       console.error('POS Payment completion error:', err);
+      setValidationError(err.message || 'Failed to complete sale. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -387,19 +411,27 @@ export const PosPaymentModal: React.FC<PosPaymentModalProps> = ({
                 </View>
               </View>
 
-              {/* Mode indicator banner */}
-              <View style={[styles.modeIndicatorBar, !isCashSelected && styles.modeIndicatorBarNonCash]}>
-                <MaterialCommunityIcons
-                  name={isCashSelected ? "cash" : "information-outline"}
-                  size={16}
-                  color={isCashSelected ? "#15803D" : "#7A0C2E"}
-                />
-                <Text style={[styles.modeIndicatorText, !isCashSelected && { color: "#7A0C2E" }]}>
-                  {isCashSelected
-                    ? "Tendering in CASH: Change due allowed, quick cash presets enabled."
-                    : `Tendering in ${currentSelectedMode}: Exact amount capped to $${maxAllowedForSelected.toFixed(2)} (No change due on electronic cards).`}
-                </Text>
-              </View>
+              {/* Validation Warning Alert Banner (High-visibility, non-blocking) */}
+              {validationError ? (
+                <View style={styles.validationErrorBanner}>
+                  <MaterialCommunityIcons name="alert-circle" size={18} color="#DC2626" />
+                  <Text style={styles.validationErrorText}>{validationError}</Text>
+                </View>
+              ) : (
+                /* Mode indicator banner */
+                <View style={[styles.modeIndicatorBar, !isCashSelected && styles.modeIndicatorBarNonCash]}>
+                  <MaterialCommunityIcons
+                    name={isCashSelected ? "cash" : "information-outline"}
+                    size={16}
+                    color={isCashSelected ? "#15803D" : "#7A0C2E"}
+                  />
+                  <Text style={[styles.modeIndicatorText, !isCashSelected && { color: "#7A0C2E" }]}>
+                    {isCashSelected
+                      ? "Tendering in CASH: Change due allowed, quick cash presets enabled."
+                      : `Tendering in ${currentSelectedMode}: Exact amount capped to $${maxAllowedForSelected.toFixed(2)} (No change due on electronic cards).`}
+                  </Text>
+                </View>
+              )}
 
               {/* Controls Row: Quick Cash Presets and Modern POS Keypad */}
               <View style={styles.controlsRow}>
@@ -778,8 +810,28 @@ const styles = StyleSheet.create({
   },
   modeIndicatorText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#15803D',
+    flex: 1,
+  },
+
+  // High-Visibility Inline Validation Warning Banner
+  validationErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1.5,
+    borderColor: '#EF4444',
+  },
+  validationErrorText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#B91C1C',
+    flex: 1,
   },
 
   // Controls Row: Quick Cash Presets + Modern 4x4 Keypad
