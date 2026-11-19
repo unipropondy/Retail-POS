@@ -15,20 +15,20 @@
 //              - cmdInvoice_Click / subReceiptReportPrint: Receipt reprint data & status
 // ==============================================================================
 
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const dns = require('dns');
-const http = require('http');
-const https = require('https');
-const { getPool, sql } = require('../config/db');
-const configService = require('../config/configService');
+const dns = require("dns");
+const http = require("http");
+const https = require("https");
+const { getPool, sql } = require("../config/db");
+const configService = require("../config/configService");
 
 // Helper to format date as YYYY-MM-DD
 function formatDate(d) {
-  if (!d) return '';
+  if (!d) return "";
   const date = new Date(d);
-  if (isNaN(date.getTime())) return '';
-  return date.toISOString().split('T')[0];
+  if (isNaN(date.getTime())) return "";
+  return date.toISOString().split("T")[0];
 }
 
 // ------------------------------------------------------------------------------
@@ -36,10 +36,10 @@ function formatDate(d) {
 // ------------------------------------------------------------------------------
 async function checkNetworkAvailability() {
   return new Promise((resolve) => {
-    dns.lookup('google.com', (err) => {
+    dns.lookup("google.com", (err) => {
       if (!err) return resolve(true);
       // Fallback ping check to standard DNS
-      dns.lookup('8.8.8.8', (err2) => {
+      dns.lookup("8.8.8.8", (err2) => {
         resolve(!err2);
       });
     });
@@ -52,21 +52,27 @@ async function checkNetworkAvailability() {
 // ------------------------------------------------------------------------------
 async function runBillCancelDataSync(pool) {
   try {
-    const isApiEnabled = configService.getBoolean('APIEnable', false);
+    const isApiEnabled = configService.getBoolean("APIEnable", false);
     if (!isApiEnabled) {
-      console.log('ℹ️ [DATA SYNC] API DataSync disabled (APIEnable = 0/false).');
+      console.log(
+        "ℹ️ [DATA SYNC] API DataSync disabled (APIEnable = 0/false).",
+      );
       return;
     }
 
     const isConnected = await checkNetworkAvailability();
     if (!isConnected) {
-      console.warn('⚠️ [DATA SYNC] Network unavailable. Skipping BillCancel sync.');
+      console.warn(
+        "⚠️ [DATA SYNC] Network unavailable. Skipping BillCancel sync.",
+      );
       return;
     }
 
-    const syncUrl = configService.getString('DataSyncURL', '') || configService.getString('WebURL', '');
+    const syncUrl =
+      configService.getString("DataSyncURL", "") ||
+      configService.getString("WebURL", "");
     if (!syncUrl) {
-      console.warn('⚠️ [DATA SYNC] DataSyncURL not configured.');
+      console.warn("⚠️ [DATA SYNC] DataSyncURL not configured.");
       return;
     }
 
@@ -111,9 +117,9 @@ async function runBillCancelDataSync(pool) {
 
     const billCancelHeaders = [];
     for (const h of hdrRes.recordset) {
-      const detRes = await pool.request()
-        .input('cNo', sql.VarChar(50), h.BillCancelNo)
-        .query(`
+      const detRes = await pool
+        .request()
+        .input("cNo", sql.VarChar(50), h.BillCancelNo).query(`
           SELECT 
             RTRIM(LTRIM(BillCancelNo)) AS ReturnNo,
             RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -174,16 +180,20 @@ async function runBillCancelDataSync(pool) {
         Fax: h.Fax,
         MemberDiscount: h.MemberDiscount,
         GstType: h.GstType,
-        PaidStatus: '',
-        ChequeNo: '',
+        PaidStatus: "",
+        ChequeNo: "",
         CreateUser: h.CreateUser,
         CreateDate: new Date(h.CreateDate).toISOString(),
         ModifyUser: h.ModifyUser,
         ModifyDate: new Date(h.ModifyDate).toISOString(),
-        billCancelDetails: detRes.recordset.map(d => ({
+        billCancelDetails: detRes.recordset.map((d) => ({
           ...d,
-          CreateDate: d.CreateDate ? new Date(d.CreateDate).toISOString() : null,
-          ModifyDate: d.ModifyDate ? new Date(d.ModifyDate).toISOString() : null,
+          CreateDate: d.CreateDate
+            ? new Date(d.CreateDate).toISOString()
+            : null,
+          ModifyDate: d.ModifyDate
+            ? new Date(d.ModifyDate).toISOString()
+            : null,
         })),
       });
     }
@@ -207,7 +217,7 @@ async function runBillCancelDataSync(pool) {
       ORDER BY ModifyDate DESC
     `);
 
-    const salesHistorys = hisRes.recordset.map(sh => ({
+    const salesHistorys = hisRes.recordset.map((sh) => ({
       ...sh,
       Date: sh.Date ? new Date(sh.Date).toISOString() : null,
       ModifyDate: sh.ModifyDate ? new Date(sh.ModifyDate).toISOString() : null,
@@ -218,51 +228,62 @@ async function runBillCancelDataSync(pool) {
       salesHistorys,
     };
 
-    const targetUrl = syncUrl.endsWith('/') ? `${syncUrl}BillCancel` : `${syncUrl}/BillCancel`;
+    const targetUrl = syncUrl.endsWith("/")
+      ? `${syncUrl}BillCancel`
+      : `${syncUrl}/BillCancel`;
     const postData = JSON.stringify(payload);
     const parsedUrl = new URL(targetUrl);
-    const client = parsedUrl.protocol === 'https:' ? https : http;
+    const client = parsedUrl.protocol === "https:" ? https : http;
 
-    const syncReq = client.request(parsedUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
+    const syncReq = client.request(
+      parsedUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(postData),
+        },
+        timeout: 10000,
       },
-      timeout: 10000,
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', async () => {
-        try {
-          const jsonRes = JSON.parse(data);
-          const firstResult = jsonRes?.Table?.result?.[0] || jsonRes?.result?.[0];
-          if (firstResult && firstResult.status === 'Success') {
-            const lastDate = firstResult.lastUpdateDate || new Date();
-            await pool.request()
-              .input('lastDate', sql.DateTime, new Date(lastDate))
-              .query(`
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", async () => {
+          try {
+            const jsonRes = JSON.parse(data);
+            const firstResult =
+              jsonRes?.Table?.result?.[0] || jsonRes?.result?.[0];
+            if (firstResult && firstResult.status === "Success") {
+              const lastDate = firstResult.lastUpdateDate || new Date();
+              await pool
+                .request()
+                .input("lastDate", sql.DateTime, new Date(lastDate)).query(`
                 IF EXISTS (SELECT 1 FROM tblLastSyncDateTime WHERE [Function] = 'BillCancel')
                   UPDATE tblLastSyncDateTime SET LastRunDateTime = @lastDate, NextSyncDateTime = DATEADD(hour, 4, @lastDate) WHERE [Function] = 'BillCancel'
                 ELSE
                   INSERT INTO tblLastSyncDateTime ([Function], LastRunDateTime, NextSyncDateTime) VALUES ('BillCancel', @lastDate, DATEADD(hour, 4, @lastDate))
               `);
-            console.log('✅ [DATA SYNC] BillCancel sync completed successfully.');
+              console.log(
+                "✅ [DATA SYNC] BillCancel sync completed successfully.",
+              );
+            }
+          } catch (e) {
+            console.warn("⚠️ [DATA SYNC - RESPONSE PARSE]:", e.message);
           }
-        } catch (e) {
-          console.warn('⚠️ [DATA SYNC - RESPONSE PARSE]:', e.message);
-        }
-      });
-    });
+        });
+      },
+    );
 
-    syncReq.on('error', (err) => {
-      console.warn('⚠️ [DATA SYNC - REQUEST ERROR]:', err.message);
+    syncReq.on("error", (err) => {
+      console.warn("⚠️ [DATA SYNC - REQUEST ERROR]:", err.message);
     });
 
     syncReq.write(postData);
     syncReq.end();
   } catch (syncErr) {
-    console.warn('⚠️ [DATA SYNC - BILL CANCEL ERROR]:', syncErr.message);
+    console.warn("⚠️ [DATA SYNC - BILL CANCEL ERROR]:", syncErr.message);
   }
 }
 
@@ -271,47 +292,55 @@ async function runBillCancelDataSync(pool) {
 // Exact equivalent of VB.NET clsSales.vb fncGetLastInvoiceDetails(TerminalCode)
 // Returns the most recent invoice header from tblPOSSalesHeaderCur for reprint
 // ------------------------------------------------------------------------------
-router.get('/last-transaction', async (req, res) => {
+router.get("/last-transaction", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const terminalCode = String(req.query.terminalCode || '').trim();
+    const terminalCode = String(req.query.terminalCode || "").trim();
     const queryReq = pool.request();
-    let queryStr = 'SELECT TOP 1 * FROM tblPOSSalesHeaderCur';
+    let queryStr = "SELECT TOP 1 * FROM tblPOSSalesHeaderCur";
     if (terminalCode) {
-      queryReq.input('term', sql.VarChar(50), terminalCode);
-      queryStr += ' WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term)';
+      queryReq.input("term", sql.VarChar(50), terminalCode);
+      queryStr += " WHERE UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term)";
     }
-    queryStr += ' ORDER BY CreateDate DESC';
+    queryStr += " ORDER BY CreateDate DESC";
 
     const result = await queryReq.query(queryStr);
     if (!result.recordset || result.recordset.length === 0) {
-      return res.status(404).json({ success: false, message: 'No transactions found on this terminal' });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: "No transactions found on this terminal",
+        });
     }
 
     const row = result.recordset[0];
     return res.status(200).json({
       success: true,
       transaction: {
-        invoiceNo: String(row.InvoiceNo || '').trim(),
+        invoiceNo: String(row.InvoiceNo || "").trim(),
         invoiceDate: row.InvoiceDate,
         totalValue: Number(row.TotalValue) || 0,
         netTotal: Number(row.NetTotal) || 0,
         gst: Number(row.Gst) || 0,
-        cashierId: String(row.CashierID || '').trim(),
-        locationCode: String(row.LocationCode || '').trim(),
-        terminalCode: String(row.TerminalCode || '').trim(),
+        cashierId: String(row.CashierID || "").trim(),
+        locationCode: String(row.LocationCode || "").trim(),
+        terminalCode: String(row.TerminalCode || "").trim(),
         tenderAmount: Number(row.TenderAmount) || 0,
         balance: Number(row.Balance) || 0,
-        salesType: String(row.SalesType || '').trim(),
-        customerCode: String(row.CustomerCode || '').trim(),
-        customerName: String(row.CustomerName || '').trim(),
+        salesType: String(row.SalesType || "").trim(),
+        customerCode: String(row.CustomerCode || "").trim(),
+        customerName: String(row.CustomerName || "").trim(),
         roundOff: Number(row.RoundOff) || 0,
       },
     });
   } catch (err) {
-    console.error('❌ [LAST TRANSACTION ERROR]:', err.message);
+    console.error("❌ [LAST TRANSACTION ERROR]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -322,30 +351,33 @@ router.get('/last-transaction', async (req, res) => {
 // matching frmBillCancel.vb (ShiftNo is NULL or ShiftNo = 0)
 // Ensures users only see voidable current shift bills, NOT historical settled bills.
 // ------------------------------------------------------------------------------
-router.get('/active-suggestions', async (req, res) => {
+router.get("/active-suggestions", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const terminalCode = String(req.query.terminalCode || '').trim();
-    const locationCode = String(req.query.locationCode || '').trim();
+    const terminalCode = String(req.query.terminalCode || "").trim();
+    const locationCode = String(req.query.locationCode || "").trim();
     const limit = parseInt(req.query.limit, 10) || 12;
 
     const queryReq = pool.request();
-    queryReq.input('limit', sql.Int, limit);
+    queryReq.input("limit", sql.Int, limit);
 
     // Only un-settled bills (ShiftNo is null or 0) can be cancelled in frmBillCancel
-    let whereClauses = ['(ShiftNo IS NULL OR ShiftNo = 0)'];
+    let whereClauses = ["(ShiftNo IS NULL OR ShiftNo = 0)"];
     if (terminalCode) {
-      queryReq.input('term', sql.VarChar(50), terminalCode);
-      whereClauses.push('UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term)');
+      queryReq.input("term", sql.VarChar(50), terminalCode);
+      whereClauses.push("UPPER(RTRIM(LTRIM(TerminalCode))) = UPPER(@term)");
     }
     if (locationCode) {
-      queryReq.input('loc', sql.VarChar(50), locationCode);
-      whereClauses.push('UPPER(RTRIM(LTRIM(LocationCode))) = UPPER(@loc)');
+      queryReq.input("loc", sql.VarChar(50), locationCode);
+      whereClauses.push("UPPER(RTRIM(LTRIM(LocationCode))) = UPPER(@loc)");
     }
 
-    const whereStr = `WHERE ${whereClauses.join(' AND ')}`;
+    const whereStr = `WHERE ${whereClauses.join(" AND ")}`;
 
     const q = `
       SELECT TOP (@limit)
@@ -368,7 +400,7 @@ router.get('/active-suggestions', async (req, res) => {
       suggestions: result.recordset || [],
     });
   } catch (err) {
-    console.error('❌ [ACTIVE SUGGESTIONS ERROR]:', err.message);
+    console.error("❌ [ACTIVE SUGGESTIONS ERROR]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -377,10 +409,13 @@ router.get('/active-suggestions', async (req, res) => {
 // 1. GET /api/bills/transactions
 // Retrieves transaction list matching subGetHeaderData & subGetHeaderData_CREDIT
 // ------------------------------------------------------------------------------
-router.get('/transactions', async (req, res) => {
+router.get("/transactions", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
     const {
       fromDate,
@@ -398,51 +433,61 @@ router.get('/transactions', async (req, res) => {
     const whereConditions = [];
 
     // Filter by InvoiceNo if provided
-    const cleanInv = String(invoiceNo || '').trim();
+    const cleanInv = String(invoiceNo || "").trim();
     if (cleanInv) {
-      request.input('invSearch', sql.VarChar(50), `%${cleanInv}%`);
-      whereConditions.push('A.InvoiceNo LIKE @invSearch');
+      request.input("invSearch", sql.VarChar(50), `%${cleanInv}%`);
+      whereConditions.push("A.InvoiceNo LIKE @invSearch");
     }
 
     // Filter by MemberCode if provided
-    const cleanMem = String(memberCode || '').trim();
+    const cleanMem = String(memberCode || "").trim();
     if (cleanMem) {
-      request.input('memSearch', sql.VarChar(50), `%${cleanMem}%`);
-      whereConditions.push('(A.MemberCode LIKE @memSearch OR A.Customercode LIKE @memSearch)');
+      request.input("memSearch", sql.VarChar(50), `%${cleanMem}%`);
+      whereConditions.push(
+        "(A.MemberCode LIKE @memSearch OR A.Customercode LIKE @memSearch)",
+      );
     }
 
     // Filter by Credit Mode (matching subGetHeaderData_CREDIT)
-    const creditMode = String(isCredit) === 'true';
+    const creditMode = String(isCredit) === "true";
     if (creditMode) {
       whereConditions.push("UPPER(RTRIM(LTRIM(A.PayMode))) = 'CREDITS'");
     }
 
     // Filter by Date Range if dateFilter enabled (matching chkDate in frmLastTransaction)
-    const useDateFilter = String(dateFilter) === 'true';
+    const useDateFilter = String(dateFilter) === "true";
     if (useDateFilter && fromDate && toDate) {
-      request.input('fromDate', sql.DateTime, new Date(`${fromDate} 00:00:00`));
-      request.input('toDate', sql.DateTime, new Date(`${toDate} 23:59:59`));
-      whereConditions.push('A.ModifyDate BETWEEN @fromDate AND @toDate');
+      request.input("fromDate", sql.DateTime, new Date(`${fromDate} 00:00:00`));
+      request.input("toDate", sql.DateTime, new Date(`${toDate} 23:59:59`));
+      whereConditions.push("A.ModifyDate BETWEEN @fromDate AND @toDate");
     }
 
     // Filter by Terminal unless "All Counters" is checked
     // Normalize spaces and hyphens so 'HQPC1' and 'HQ-PC1' both match accurately
-    const isAll = String(allSales) === 'true';
-    const cleanTerm = String(terminalCode || '').trim();
+    const isAll = String(allSales) === "true";
+    const cleanTerm = String(terminalCode || "").trim();
     if (!isAll && cleanTerm) {
-      request.input('terminal', sql.VarChar(50), cleanTerm.replace(/[\s-]/g, ''));
-      whereConditions.push("REPLACE(REPLACE(UPPER(RTRIM(LTRIM(A.TerminalCode))), ' ', ''), '-', '') = UPPER(@terminal)");
+      request.input(
+        "terminal",
+        sql.VarChar(50),
+        cleanTerm.replace(/[\s-]/g, ""),
+      );
+      whereConditions.push(
+        "REPLACE(REPLACE(UPPER(RTRIM(LTRIM(A.TerminalCode))), ' ', ''), '-', '') = UPPER(@terminal)",
+      );
     }
 
-    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+    const whereSql =
+      whereConditions.length > 0
+        ? `WHERE ${whereConditions.join(" AND ")}`
+        : "";
 
-    // Calculate limit (default 20, up to 200 for ALL)
-    // When "All Counters" is checked, respect user's selected limit (10, 20, 50, etc.) unless 'ALL' was explicitly clicked
+    // Calculate limit (10, 20, 50, 100, ALL -> 500, matching clsInventory.vb fncGetLastTransaction)
     let limitNum = 20;
     if (transactionLimit && !isNaN(parseInt(transactionLimit, 10))) {
       limitNum = parseInt(transactionLimit, 10);
-    } else if (String(transactionLimit).toUpperCase() === 'ALL') {
-      limitNum = 200;
+    } else if (String(transactionLimit).toUpperCase() === "ALL") {
+      limitNum = 500;
     }
 
     // Query vw_POS_LastTransaction
@@ -485,7 +530,7 @@ router.get('/transactions', async (req, res) => {
         const existing = headerMap.get(inv);
         if (r.PayMode && !existing.payModes.includes(r.PayMode)) {
           existing.payModes.push(r.PayMode);
-          existing.payModeText = existing.payModes.join(' , ');
+          existing.payModeText = existing.payModes.join(" , ");
         }
       }
     }
@@ -498,7 +543,7 @@ router.get('/transactions', async (req, res) => {
       transactions: uniqueHeaders,
     });
   } catch (err) {
-    console.error('❌ [BILL ERROR - TRANSACTIONS]:', err.message);
+    console.error("❌ [BILL ERROR - TRANSACTIONS]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -508,19 +553,24 @@ router.get('/transactions', async (req, res) => {
 // Checks cashier permission for Bill Cancel (FunctionCode 'F3')
 // Mirrors fncGetCashierPermission(gsConn, gsCashierGroup, "F3")
 // ------------------------------------------------------------------------------
-router.get('/check-cancel-permission', async (req, res) => {
+router.get("/check-cancel-permission", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const cashierId = (req.query.cashierId || '').trim();
+    const cashierId = (req.query.cashierId || "").trim();
     if (!cashierId) {
-      return res.status(400).json({ success: false, message: 'cashierId is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "cashierId is required" });
     }
 
     // 1. Fetch user master
     const userReq = pool.request();
-    userReq.input('user', sql.VarChar(50), cashierId);
+    userReq.input("user", sql.VarChar(50), cashierId);
     const userRes = await userReq.query(`
       SELECT UserName, UserGroupCode, CashierGroupCode, IsAdmin
       FROM tblMausermaster
@@ -536,7 +586,9 @@ router.get('/check-cancel-permission', async (req, res) => {
     }
 
     const user = userRes.recordset[0];
-    const isAdmin = Boolean(user.IsAdmin) || (user.UserGroupCode || '').toUpperCase().includes('ADMIN');
+    const isAdmin =
+      Boolean(user.IsAdmin) ||
+      (user.UserGroupCode || "").toUpperCase().includes("ADMIN");
 
     if (isAdmin) {
       return res.status(200).json({
@@ -547,11 +599,15 @@ router.get('/check-cancel-permission', async (req, res) => {
       });
     }
 
-    // 2. Check tblPOSPermission for F3
-    const cashierGroup = (user.CashierGroupCode || user.UserGroupCode || '').trim();
+    // 2. Check tbl for F3
+    const cashierGroup = (
+      user.CashierGroupCode ||
+      user.UserGroupCode ||
+      ""
+    ).trim();
     const permReq = pool.request();
-    permReq.input('cgroup', sql.VarChar(50), cashierGroup);
-    permReq.input('fcode', sql.VarChar(10), 'F3');
+    permReq.input("cgroup", sql.VarChar(50), cashierGroup);
+    permReq.input("fcode", sql.VarChar(10), "F3");
     const permRes = await permReq.query(`
       SELECT Status
       FROM tblPOSPermission
@@ -559,7 +615,8 @@ router.get('/check-cancel-permission', async (req, res) => {
         AND UPPER(RTRIM(LTRIM(FunctionCode))) = UPPER(@fcode)
     `);
 
-    const hasPermission = permRes.recordset.length > 0 && Boolean(permRes.recordset[0].Status);
+    const hasPermission =
+      permRes.recordset.length > 0 && Boolean(permRes.recordset[0].Status);
 
     return res.status(200).json({
       success: true,
@@ -567,7 +624,7 @@ router.get('/check-cancel-permission', async (req, res) => {
       requiresAdminAuth: !hasPermission,
     });
   } catch (err) {
-    console.error('❌ [BILL ERROR - CHECK PERM]:', err.message);
+    console.error("❌ [BILL ERROR - CHECK PERM]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -576,14 +633,17 @@ router.get('/check-cancel-permission', async (req, res) => {
 // 3. GET /api/bills/search-members
 // Search members/customers for Convert Delivery modal
 // ------------------------------------------------------------------------------
-router.get('/search-members', async (req, res) => {
+router.get("/search-members", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const search = String(req.query.search || '').trim();
+    const search = String(req.query.search || "").trim();
     const reqQuery = pool.request();
-    reqQuery.input('search', sql.VarChar(50), `%${search}%`);
+    reqQuery.input("search", sql.VarChar(50), `%${search}%`);
 
     const result = await reqQuery.query(`
       SELECT TOP 20
@@ -601,7 +661,7 @@ router.get('/search-members', async (req, res) => {
       members: result.recordset,
     });
   } catch (err) {
-    console.error('❌ [BILL ERROR - SEARCH MEMBERS]:', err.message);
+    console.error("❌ [BILL ERROR - SEARCH MEMBERS]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -611,18 +671,23 @@ router.get('/search-members', async (req, res) => {
 // Retrieves voided/cancelled bill receipt data matching subPrintVoidBill &
 // rptPOSBillCancelReceipt_ERP from tblPOSBillCancelSalesHeader/Detail/PayMode
 // ------------------------------------------------------------------------------
-router.get('/void-receipt/:invoiceNo', async (req, res) => {
+router.get("/void-receipt/:invoiceNo", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const rawInv = String(req.params.invoiceNo || '').trim();
+    const rawInv = String(req.params.invoiceNo || "").trim();
     if (!rawInv) {
-      return res.status(400).json({ success: false, message: 'Invoice number is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invoice number is required" });
     }
 
     const hdrReq = pool.request();
-    hdrReq.input('inv', sql.VarChar(50), rawInv);
+    hdrReq.input("inv", sql.VarChar(50), rawInv);
     const hdrRes = await hdrReq.query(`
       SELECT TOP 1
         RTRIM(LTRIM(BillCancelNo)) AS BillCancelNo,
@@ -665,8 +730,8 @@ router.get('/void-receipt/:invoiceNo', async (req, res) => {
     const cancelNo = header.BillCancelNo;
 
     const detReq = pool.request();
-    detReq.input('inv', sql.VarChar(50), rawInv);
-    detReq.input('cNo', sql.VarChar(50), cancelNo);
+    detReq.input("inv", sql.VarChar(50), rawInv);
+    detReq.input("cNo", sql.VarChar(50), cancelNo);
     const detRes = await detReq.query(`
       SELECT 
         RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
@@ -692,8 +757,8 @@ router.get('/void-receipt/:invoiceNo', async (req, res) => {
     `);
 
     const payReq = pool.request();
-    payReq.input('inv', sql.VarChar(50), rawInv);
-    payReq.input('cNo', sql.VarChar(50), cancelNo);
+    payReq.input("inv", sql.VarChar(50), rawInv);
+    payReq.input("cNo", sql.VarChar(50), cancelNo);
     const payRes = await payReq.query(`
       SELECT 
         RTRIM(LTRIM(PayMode)) AS PayMode,
@@ -711,7 +776,7 @@ router.get('/void-receipt/:invoiceNo', async (req, res) => {
       payments: payRes.recordset,
     });
   } catch (err) {
-    console.error('❌ [BILL ERROR - VOID RECEIPT]:', err.message);
+    console.error("❌ [BILL ERROR - VOID RECEIPT]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -724,19 +789,24 @@ router.get('/void-receipt/:invoiceNo', async (req, res) => {
 //   - Line items from tblPOSSalesDetailCur or vwSalesDetail
 //   - Payments from tblPOSPayModeDetailCur or vw_POS_PayModeDetail
 // ------------------------------------------------------------------------------
-router.get('/:invoiceNo', async (req, res) => {
+router.get("/:invoiceNo", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const rawInv = String(req.params.invoiceNo || '').trim();
+    const rawInv = String(req.params.invoiceNo || "").trim();
     if (!rawInv) {
-      return res.status(400).json({ success: false, message: 'Invoice number is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invoice number is required" });
     }
 
     // 1. Fetch Header - First check current ERP active table tblPOSSalesHeaderCur
     const curHdrReq = pool.request();
-    curHdrReq.input('inv', sql.VarChar(50), rawInv);
+    curHdrReq.input("inv", sql.VarChar(50), rawInv);
     const curHdrRes = await curHdrReq.query(`
       SELECT TOP 1
         RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -779,7 +849,7 @@ router.get('/:invoiceNo', async (req, res) => {
     } else {
       // Fallback: check vw_POS_SalesHeader for completed/history sales
       const hdrReq = pool.request();
-      hdrReq.input('inv', sql.VarChar(50), rawInv);
+      hdrReq.input("inv", sql.VarChar(50), rawInv);
       const hdrRes = await hdrReq.query(`
         SELECT TOP 1
           RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -823,7 +893,7 @@ router.get('/:invoiceNo', async (req, res) => {
     let items = [];
     if (isCur) {
       const curDetReq = pool.request();
-      curDetReq.input('inv', sql.VarChar(50), rawInv);
+      curDetReq.input("inv", sql.VarChar(50), rawInv);
       const curDetRes = await curDetReq.query(`
         SELECT 
           RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
@@ -869,7 +939,7 @@ router.get('/:invoiceNo', async (req, res) => {
       }));
     } else {
       const detReq = pool.request();
-      detReq.input('inv', sql.VarChar(50), rawInv);
+      detReq.input("inv", sql.VarChar(50), rawInv);
       const detRes = await detReq.query(`
         SELECT 
           RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
@@ -919,7 +989,7 @@ router.get('/:invoiceNo', async (req, res) => {
     let payModesList = [];
     if (isCur) {
       const curPayReq = pool.request();
-      curPayReq.input('inv', sql.VarChar(50), rawInv);
+      curPayReq.input("inv", sql.VarChar(50), rawInv);
       const curPayRes = await curPayReq.query(`
         SELECT 
           RTRIM(LTRIM(PayMode)) AS PayMode,
@@ -937,7 +1007,7 @@ router.get('/:invoiceNo', async (req, res) => {
       }));
     } else {
       const payReq = pool.request();
-      payReq.input('inv', sql.VarChar(50), rawInv);
+      payReq.input("inv", sql.VarChar(50), rawInv);
       const payRes = await payReq.query(`
         SELECT 
           RTRIM(LTRIM(PayMode)) AS PayMode,
@@ -958,7 +1028,7 @@ router.get('/:invoiceNo', async (req, res) => {
     if (!header && items.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Bill not found in transaction history.',
+        message: "Bill not found in transaction history.",
       });
     }
 
@@ -968,24 +1038,28 @@ router.get('/:invoiceNo', async (req, res) => {
         InvoiceDate: new Date(),
         TotalValue: items.reduce((s, r) => s + Number(r.totalValue || 0), 0),
         NetTotal: items.reduce((s, r) => s + Number(r.netAmount || 0), 0),
-        TenderAmount: payModesList.reduce((s, r) => s + Number(r.amount || 0), 0),
+        TenderAmount: payModesList.reduce(
+          (s, r) => s + Number(r.amount || 0),
+          0,
+        ),
         Balance: 0,
         Gst: items.reduce((s, r) => s + Number(r.gst || 0), 0),
         TotalDiscount: items.reduce((s, r) => s + Number(r.discount || 0), 0),
-        CashierID: 'UPS',
-        CustomerCode: 'CASH',
-        CustomerName: 'CASH',
-        TerminalCode: '',
-        LocationCode: '',
+        CashierID: "UPS",
+        CustomerCode: "CASH",
+        CustomerName: "CASH",
+        TerminalCode: "",
+        LocationCode: "",
         TotalLines: items.length,
-        Delivered: '',
-        AccFlag: '',
+        Delivered: "",
+        AccFlag: "",
         ShiftNo: null,
         IsCur: false,
       };
     }
 
-    const payModeSummaryText = payModesList.map((p) => p.payMode).join(' , ') || 'CASH';
+    const payModeSummaryText =
+      payModesList.map((p) => p.payMode).join(" , ") || "CASH";
 
     return res.status(200).json({
       success: true,
@@ -1005,9 +1079,9 @@ router.get('/:invoiceNo', async (req, res) => {
         locationCode: header.LocationCode,
         totalLines: Number(header.TotalLines || items.length),
         roundOff: Number(header.RoundOff || 0),
-        remarks: header.Remarks || '',
-        delivered: header.Delivered || '',
-        accFlag: header.AccFlag || '',
+        remarks: header.Remarks || "",
+        delivered: header.Delivered || "",
+        accFlag: header.AccFlag || "",
         shiftNo: header.ShiftNo,
         isCur: Boolean(header.IsCur),
         payModeSummary: payModeSummaryText,
@@ -1034,7 +1108,7 @@ router.get('/:invoiceNo', async (req, res) => {
       payments: payModesList,
     });
   } catch (err) {
-    console.error('❌ [BILL ERROR - DETAILS]:', err.message);
+    console.error("❌ [BILL ERROR - DETAILS]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1049,21 +1123,29 @@ router.get('/:invoiceNo', async (req, res) => {
 //   - Member points synchronization (fncUpdateMemberPointsToHQ)
 //   - Background DataSync API trigger (SubBillCancelDataSyncPOSSales) strictly post-commit
 // ------------------------------------------------------------------------------
-router.post('/cancel', async (req, res) => {
+router.post("/cancel", async (req, res) => {
   let pool = null;
   let tx = null;
   try {
     pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
     const { invoiceNo, cashierId, locationCode, printVoidBill } = req.body;
-    const cleanInv = String(invoiceNo || '').trim();
+    const cleanInv = String(invoiceNo || "").trim();
     if (!cleanInv) {
-      return res.status(400).json({ success: false, message: 'Invoice number is required for bill cancellation' });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Invoice number is required for bill cancellation",
+        });
     }
 
-    const loc = String(locationCode || 'HQ').trim();
-    const user = String(cashierId || 'UPS').trim();
+    const loc = String(locationCode || "HQ").trim();
+    const user = String(cashierId || "UPS").trim();
 
     // 1. Fetch sales header using entered Invoice Number from tblPOSSalesHeaderCur ONLY
     // Requirement:
@@ -1073,7 +1155,7 @@ router.post('/cancel', async (req, res) => {
     // - Search using the entered Invoice Number
     // - Do not apply ShiftNo filter directly in the initial lookup query
     const chkReq = pool.request();
-    chkReq.input('inv', sql.VarChar(50), cleanInv);
+    chkReq.input("inv", sql.VarChar(50), cleanInv);
     const chkRes = await chkReq.query(`
       SELECT TOP 1 
         RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo, 
@@ -1090,7 +1172,7 @@ router.post('/cancel', async (req, res) => {
     if (chkRes.recordset.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Bill not found in transaction history.',
+        message: "Bill not found in transaction history.",
       });
     }
 
@@ -1100,19 +1182,27 @@ router.post('/cancel', async (req, res) => {
     // - If the invoice exists and ShiftNo is NULL or 0, allow bill cancellation.
     // - If the invoice exists but ShiftNo is not 0, display the historical bill restriction message.
     const rawShiftNo = header.ShiftNo;
-    const shiftVal = rawShiftNo !== null && rawShiftNo !== undefined && rawShiftNo !== '' ? Number(rawShiftNo) : 0;
+    const shiftVal =
+      rawShiftNo !== null && rawShiftNo !== undefined && rawShiftNo !== ""
+        ? Number(rawShiftNo)
+        : 0;
 
     if (shiftVal !== 0) {
       return res.status(400).json({
         success: false,
-        message: 'You cannot cancel History Bills ....Please Give Correct Bill No',
+        message:
+          "You cannot cancel History Bills ....Please Give Correct Bill No",
       });
     }
 
     // 3. Retrieve NextBillCancelNo from tblmaCompany
     const cancelNoReq = pool.request();
-    const cancelNoRes = await cancelNoReq.query('SELECT ISNULL(NextBillCancelNo, 1) AS NextBillCancelNo FROM tblmaCompany');
-    const billCancelNo = String(cancelNoRes.recordset[0]?.NextBillCancelNo || 1);
+    const cancelNoRes = await cancelNoReq.query(
+      "SELECT ISNULL(NextBillCancelNo, 1) AS NextBillCancelNo FROM tblmaCompany",
+    );
+    const billCancelNo = String(
+      cancelNoRes.recordset[0]?.NextBillCancelNo || 1,
+    );
 
     // 4. Start Database Transaction
     tx = new sql.Transaction(pool);
@@ -1121,10 +1211,10 @@ router.post('/cancel', async (req, res) => {
     try {
       // Execute cancellation process (fncBillCancelSave / sp_SalesBillCancel)
       const execReq = new sql.Request(tx);
-      execReq.input('InvoiceNo', sql.Char(15), cleanInv);
-      execReq.input('LocationCode', sql.Char(10), loc);
-      execReq.input('UserID', sql.Char(10), user);
-      await execReq.execute('sp_SalesBillCancel');
+      execReq.input("InvoiceNo", sql.Char(15), cleanInv);
+      execReq.input("LocationCode", sql.Char(10), loc);
+      execReq.input("UserID", sql.Char(10), user);
+      await execReq.execute("sp_SalesBillCancel");
 
       // Commit the database transaction
       await tx.commit();
@@ -1140,26 +1230,26 @@ router.post('/cancel', async (req, res) => {
     // 5. Member Points Synchronization (ERP database fncUpdateMemberPointsToHQ)
     // Executed after local transaction commit
     try {
-      const memCode = (header.CustomerCode || '').trim();
-      if (memCode && memCode.toUpperCase() !== 'CASH') {
+      const memCode = (header.CustomerCode || "").trim();
+      if (memCode && memCode.toUpperCase() !== "CASH") {
         // Step A: Update local log_MemberPointsByInvoice via sp_SaveMemberPointsByInvoice
         const logReq = pool.request();
-        logReq.input('InvoiceNo', sql.VarChar(30), cleanInv);
-        logReq.input('BillCancelNo', sql.VarChar(10), billCancelNo);
-        logReq.input('MemberCode', sql.VarChar(30), memCode);
-        logReq.input('UserID', sql.VarChar(20), user);
-        await logReq.execute('sp_SaveMemberPointsByInvoice');
+        logReq.input("InvoiceNo", sql.VarChar(30), cleanInv);
+        logReq.input("BillCancelNo", sql.VarChar(10), billCancelNo);
+        logReq.input("MemberCode", sql.VarChar(30), memCode);
+        logReq.input("UserID", sql.VarChar(20), user);
+        await logReq.execute("sp_SaveMemberPointsByInvoice");
 
         // Step B: If HQ connection is available, synchronize member points and transactions to HQ
-        const hqConnStr = configService.getString('DBHQConn', '');
-        if (hqConnStr && !hqConnStr.includes('SCK-TG')) {
+        const hqConnStr = configService.getString("DBHQConn", "");
+        if (hqConnStr && !hqConnStr.includes("SCK-TG")) {
           try {
             const hqPool = await new sql.ConnectionPool(hqConnStr).connect();
             try {
               // 0. Update member points at HQ
-              const memPointsRes = await pool.request()
-                .input('inv', sql.VarChar(50), cleanInv)
-                .query(`
+              const memPointsRes = await pool
+                .request()
+                .input("inv", sql.VarChar(50), cleanInv).query(`
                   SELECT TOP 1 A.TotalSales, A.TotalSavings, A.TotalRewardPoint, A.TotalUsagePoint, A.MemberCode
                   FROM tblMember A 
                   INNER JOIN log_MemberPointsByInvoice B ON A.MemberCode = B.MemberCode
@@ -1168,12 +1258,13 @@ router.post('/cancel', async (req, res) => {
 
               if (memPointsRes.recordset.length > 0) {
                 const mp = memPointsRes.recordset[0];
-                await hqPool.request()
-                  .input('mCode', sql.VarChar(50), mp.MemberCode)
-                  .input('sales', sql.Decimal(18, 2), mp.TotalSales || 0)
-                  .input('savings', sql.Decimal(18, 2), mp.TotalSavings || 0)
-                  .input('reward', sql.Decimal(18, 2), mp.TotalRewardPoint || 0)
-                  .input('usage', sql.Decimal(18, 2), mp.TotalUsagePoint || 0)
+                await hqPool
+                  .request()
+                  .input("mCode", sql.VarChar(50), mp.MemberCode)
+                  .input("sales", sql.Decimal(18, 2), mp.TotalSales || 0)
+                  .input("savings", sql.Decimal(18, 2), mp.TotalSavings || 0)
+                  .input("reward", sql.Decimal(18, 2), mp.TotalRewardPoint || 0)
+                  .input("usage", sql.Decimal(18, 2), mp.TotalUsagePoint || 0)
                   .query(`
                     UPDATE tblMember 
                     SET TotalSales = @sales, TotalSavings = @savings, TotalRewardPoint = @reward, TotalUsagePoint = @usage
@@ -1181,60 +1272,82 @@ router.post('/cancel', async (req, res) => {
                   `);
 
                 // 1. Upload Log Details to HQ
-                await hqPool.request()
-                  .input('InvoiceNo', sql.VarChar(30), cleanInv)
-                  .input('BillCancelNo', sql.VarChar(10), billCancelNo)
-                  .input('MemberCode', sql.VarChar(30), mp.MemberCode)
-                  .input('UserID', sql.VarChar(20), user)
-                  .execute('sp_SaveMemberPointsByInvoice');
+                await hqPool
+                  .request()
+                  .input("InvoiceNo", sql.VarChar(30), cleanInv)
+                  .input("BillCancelNo", sql.VarChar(10), billCancelNo)
+                  .input("MemberCode", sql.VarChar(30), mp.MemberCode)
+                  .input("UserID", sql.VarChar(20), user)
+                  .execute("sp_SaveMemberPointsByInvoice");
 
                 // 2. Upload Member Transaction to HQ if SP exists
-                const transRes = await pool.request()
-                  .input('cNo', sql.VarChar(50), billCancelNo)
-                  .query(`SELECT TOP 1 * FROM tblMemberTransaction WHERE InvoiceNo = @cNo`);
+                const transRes = await pool
+                  .request()
+                  .input("cNo", sql.VarChar(50), billCancelNo)
+                  .query(
+                    `SELECT TOP 1 * FROM tblMemberTransaction WHERE InvoiceNo = @cNo`,
+                  );
                 if (transRes.recordset.length > 0) {
                   const tr = transRes.recordset[0];
                   try {
-                    await hqPool.request()
-                      .input('LocationCode', sql.VarChar(50), tr.LocationCode)
-                      .input('MemberCode', sql.VarChar(50), tr.MemberCode)
-                      .input('InvoiceNo', sql.VarChar(50), tr.InvoiceNo)
-                      .input('InvoiceDate', sql.DateTime, tr.InvoiceDate)
-                      .input('InvoiceAmount', sql.Decimal(18, 2), tr.InvoiceAmount)
-                      .input('MemberDiscount', sql.Decimal(18, 2), tr.MemberDiscount)
-                      .input('RewardPoint', sql.Decimal(18, 2), tr.RewardPoint)
-                      .input('CreateUser', sql.VarChar(50), tr.CreateUser)
-                      .input('CreateDate', sql.DateTime, tr.CreateDate)
-                      .input('ModifyUser', sql.VarChar(50), tr.ModifyUser)
-                      .input('ModifyDate', sql.DateTime, tr.ModifyDate)
-                      .execute('sp_UploadMemberTransactionToHQ');
+                    await hqPool
+                      .request()
+                      .input("LocationCode", sql.VarChar(50), tr.LocationCode)
+                      .input("MemberCode", sql.VarChar(50), tr.MemberCode)
+                      .input("InvoiceNo", sql.VarChar(50), tr.InvoiceNo)
+                      .input("InvoiceDate", sql.DateTime, tr.InvoiceDate)
+                      .input(
+                        "InvoiceAmount",
+                        sql.Decimal(18, 2),
+                        tr.InvoiceAmount,
+                      )
+                      .input(
+                        "MemberDiscount",
+                        sql.Decimal(18, 2),
+                        tr.MemberDiscount,
+                      )
+                      .input("RewardPoint", sql.Decimal(18, 2), tr.RewardPoint)
+                      .input("CreateUser", sql.VarChar(50), tr.CreateUser)
+                      .input("CreateDate", sql.DateTime, tr.CreateDate)
+                      .input("ModifyUser", sql.VarChar(50), tr.ModifyUser)
+                      .input("ModifyDate", sql.DateTime, tr.ModifyDate)
+                      .execute("sp_UploadMemberTransactionToHQ");
                   } catch (spErr) {
-                    console.warn('ℹ️ [HQ - sp_UploadMemberTransactionToHQ skipped/not found]:', spErr.message);
+                    console.warn(
+                      "ℹ️ [HQ - sp_UploadMemberTransactionToHQ skipped/not found]:",
+                      spErr.message,
+                    );
                   }
                 }
 
                 // 3. Delete Member savings detail at HQ
-                await hqPool.request()
-                  .input('inv', sql.VarChar(50), cleanInv)
-                  .query(`DELETE FROM tblMemberSavingsDetails WHERE InvoiceNo = @inv`);
+                await hqPool
+                  .request()
+                  .input("inv", sql.VarChar(50), cleanInv)
+                  .query(
+                    `DELETE FROM tblMemberSavingsDetails WHERE InvoiceNo = @inv`,
+                  );
               }
             } finally {
               await hqPool.close();
             }
           } catch (hqErr) {
-            console.warn('ℹ️ [HQ CONNECTION SKIPPED]:', hqErr.message);
+            console.warn("ℹ️ [HQ CONNECTION SKIPPED]:", hqErr.message);
           }
         }
       }
     } catch (memSyncErr) {
-      console.warn('⚠️ [BILL CANCEL - MEMBER POINTS SYNC]:', memSyncErr.message);
+      console.warn(
+        "⚠️ [BILL CANCEL - MEMBER POINTS SYNC]:",
+        memSyncErr.message,
+      );
     }
 
     // 6. Background API Data Synchronization (SubBillCancelDataSyncPOSSales in VB.NET)
     // Non-blocking asynchronous task executed after transaction commit
     setImmediate(() => {
       runBillCancelDataSync(pool).catch((err) => {
-        console.warn('⚠️ [BACKGROUND DATA SYNC ERROR]:', err.message);
+        console.warn("⚠️ [BACKGROUND DATA SYNC ERROR]:", err.message);
       });
     });
 
@@ -1243,13 +1356,15 @@ router.post('/cancel', async (req, res) => {
       invoiceNo: cleanInv,
       billCancelNo,
       printVoidBill: Boolean(printVoidBill),
-      message: 'Bill Cancelled Successfully.',
+      message: "Bill Cancelled Successfully.",
     });
   } catch (err) {
     if (tx) {
-      try { await tx.rollback(); } catch {}
+      try {
+        await tx.rollback();
+      } catch {}
     }
-    console.error('❌ [BILL ERROR - CANCEL]:', err.message);
+    console.error("❌ [BILL ERROR - CANCEL]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1263,19 +1378,24 @@ router.post('/cancel', async (req, res) => {
 //   - If not found in Cur, checks tblPOSSalesHeader (history sales)
 //   - Returns AccFlag1 / AccFlag and CustomerCode
 // ------------------------------------------------------------------------------
-router.post('/check-delivery', async (req, res) => {
+router.post("/check-delivery", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const cleanInv = String(req.body.invoiceNo || '').trim();
+    const cleanInv = String(req.body.invoiceNo || "").trim();
     if (!cleanInv) {
-      return res.status(400).json({ success: false, message: 'invoiceNo is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "invoiceNo is required" });
     }
 
     // First check tblPOSSalesHeaderCur
     const qCur = pool.request();
-    qCur.input('inv', sql.VarChar(50), cleanInv);
+    qCur.input("inv", sql.VarChar(50), cleanInv);
     const resultCur = await qCur.query(`
       SELECT TOP 1
         RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -1297,7 +1417,7 @@ router.post('/check-delivery', async (req, res) => {
     } else {
       // Check tblPOSSalesHeader (local history bills)
       const qHist = pool.request();
-      qHist.input('inv', sql.VarChar(50), cleanInv);
+      qHist.input("inv", sql.VarChar(50), cleanInv);
       const resultHist = await qHist.query(`
         SELECT TOP 1
           RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -1316,7 +1436,7 @@ router.post('/check-delivery', async (req, res) => {
       } else {
         // Fallback: Check unified view vw_POS_SalesHeader (which includes archived database RetailposHisERP)
         const qView = pool.request();
-        qView.input('inv', sql.VarChar(50), cleanInv);
+        qView.input("inv", sql.VarChar(50), cleanInv);
         const resultView = await qView.query(`
           SELECT TOP 1
             RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -1338,13 +1458,13 @@ router.post('/check-delivery', async (req, res) => {
       if (row) {
         // Check if already in tblPaidDeliveryOrder
         const qPaidDO = pool.request();
-        qPaidDO.input('inv', sql.VarChar(50), cleanInv);
+        qPaidDO.input("inv", sql.VarChar(50), cleanInv);
         const paidRes = await qPaidDO.query(`
           SELECT TOP 1 InvoiceNo FROM tblPaidDeliveryOrder WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
         `);
         if (paidRes.recordset.length > 0) {
-          row.AccFlag1 = '1';
-          row.Delivered = '1';
+          row.AccFlag1 = "1";
+          row.Delivered = "1";
         }
       }
     }
@@ -1352,11 +1472,11 @@ router.post('/check-delivery', async (req, res) => {
     if (!row) {
       return res.status(404).json({
         success: false,
-        message: 'This invoice was not found in sales records.',
+        message: "This invoice was not found in sales records.",
       });
     }
 
-    const isDelivered = row.AccFlag1 === '1' || row.Delivered === '1';
+    const isDelivered = row.AccFlag1 === "1" || row.Delivered === "1";
 
     return res.status(200).json({
       success: true,
@@ -1368,7 +1488,7 @@ router.post('/check-delivery', async (req, res) => {
       isCur,
     });
   } catch (err) {
-    console.error('❌ [BILL ERROR - CHECK DELIVERY]:', err.message);
+    console.error("❌ [BILL ERROR - CHECK DELIVERY]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1380,26 +1500,33 @@ router.post('/check-delivery', async (req, res) => {
 // Triggered when CustomerCode is CASH in Butcondelivery_Click.
 // Updates tblPOSSalesHeaderCur (or tblPOSSalesHeader / RetailposHisERP) with selected Member Code.
 // ------------------------------------------------------------------------------
-router.post('/update-delivery-member', async (req, res) => {
+router.post("/update-delivery-member", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const cleanInv = String(req.body.invoiceNo || '').trim();
-    const cleanMem = String(req.body.memberCode || '').trim();
+    const cleanInv = String(req.body.invoiceNo || "").trim();
+    const cleanMem = String(req.body.memberCode || "").trim();
 
     if (!cleanInv) {
-      return res.status(400).json({ success: false, message: 'invoiceNo is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "invoiceNo is required" });
     }
     if (!cleanMem) {
-      return res.status(400).json({ success: false, message: 'memberCode is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "memberCode is required" });
     }
 
     // Lookup Member Name from tblMember
-    let memberName = '';
+    let memberName = "";
     try {
       const qMem = pool.request();
-      qMem.input('mem', sql.VarChar(50), cleanMem);
+      qMem.input("mem", sql.VarChar(50), cleanMem);
       const memRes = await qMem.query(`
         SELECT TOP 1 RTRIM(LTRIM(MemberName)) AS MemberName
         FROM tblMember
@@ -1407,10 +1534,10 @@ router.post('/update-delivery-member', async (req, res) => {
            OR UPPER(RTRIM(LTRIM(NRICNo))) = UPPER(@mem)
       `);
       if (memRes.recordset.length > 0) {
-        memberName = memRes.recordset[0].MemberName || '';
+        memberName = memRes.recordset[0].MemberName || "";
       }
     } catch (e) {
-      console.warn('Member name lookup warning:', e.message);
+      console.warn("Member name lookup warning:", e.message);
     }
 
     const tx = new sql.Transaction(pool);
@@ -1419,9 +1546,9 @@ router.post('/update-delivery-member', async (req, res) => {
     try {
       // 1. Try updating tblPOSSalesHeaderCur first
       const updCur = new sql.Request(tx);
-      updCur.input('inv', sql.VarChar(50), cleanInv);
-      updCur.input('mem', sql.VarChar(50), cleanMem);
-      updCur.input('name', sql.VarChar(100), memberName);
+      updCur.input("inv", sql.VarChar(50), cleanInv);
+      updCur.input("mem", sql.VarChar(50), cleanMem);
+      updCur.input("name", sql.VarChar(100), memberName);
 
       const resCur = await updCur.query(`
         UPDATE tblPOSSalesHeaderCur
@@ -1438,16 +1565,16 @@ router.post('/update-delivery-member', async (req, res) => {
           invoiceNo: cleanInv,
           customerCode: cleanMem,
           customerName: memberName,
-          targetTable: 'tblPOSSalesHeaderCur',
+          targetTable: "tblPOSSalesHeaderCur",
           message: `Member ${cleanMem} assigned to Invoice ${cleanInv} successfully.`,
         });
       }
 
       // 2. If not in Cur, try updating local history table tblPOSSalesHeader
       const updHist = new sql.Request(tx);
-      updHist.input('inv', sql.VarChar(50), cleanInv);
-      updHist.input('mem', sql.VarChar(50), cleanMem);
-      updHist.input('name', sql.VarChar(100), memberName);
+      updHist.input("inv", sql.VarChar(50), cleanInv);
+      updHist.input("mem", sql.VarChar(50), cleanMem);
+      updHist.input("name", sql.VarChar(100), memberName);
 
       const resHist = await updHist.query(`
         UPDATE tblPOSSalesHeader
@@ -1464,16 +1591,16 @@ router.post('/update-delivery-member', async (req, res) => {
           invoiceNo: cleanInv,
           customerCode: cleanMem,
           customerName: memberName,
-          targetTable: 'tblPOSSalesHeader',
+          targetTable: "tblPOSSalesHeader",
           message: `Member ${cleanMem} assigned to History Invoice ${cleanInv} successfully.`,
         });
       }
 
       // 3. If not in local tables, update archived database RetailposHisERP.dbo.TBLPOSSALESHEADER
       const updHisERP = new sql.Request(tx);
-      updHisERP.input('inv', sql.VarChar(50), cleanInv);
-      updHisERP.input('mem', sql.VarChar(50), cleanMem);
-      updHisERP.input('name', sql.VarChar(100), memberName);
+      updHisERP.input("inv", sql.VarChar(50), cleanInv);
+      updHisERP.input("mem", sql.VarChar(50), cleanMem);
+      updHisERP.input("name", sql.VarChar(100), memberName);
 
       const resHisERP = await updHisERP.query(`
         UPDATE RetailposHisERP.dbo.TBLPOSSALESHEADER
@@ -1490,7 +1617,7 @@ router.post('/update-delivery-member', async (req, res) => {
           invoiceNo: cleanInv,
           customerCode: cleanMem,
           customerName: memberName,
-          targetTable: 'RetailposHisERP.dbo.TBLPOSSALESHEADER',
+          targetTable: "RetailposHisERP.dbo.TBLPOSSALESHEADER",
           message: `Member ${cleanMem} assigned to Archived Invoice ${cleanInv} successfully.`,
         });
       }
@@ -1505,7 +1632,7 @@ router.post('/update-delivery-member', async (req, res) => {
       throw txErr;
     }
   } catch (err) {
-    console.error('❌ [BILL ERROR - UPDATE MEMBER]:', err.message);
+    console.error("❌ [BILL ERROR - UPDATE MEMBER]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1516,14 +1643,19 @@ router.post('/update-delivery-member', async (req, res) => {
 // Triggered when CustomerCode is NOT CASH.
 // Creates/marks delivery in database with safe transaction handling (COMMIT/ROLLBACK).
 // ------------------------------------------------------------------------------
-router.post('/execute-delivery', async (req, res) => {
+router.post("/execute-delivery", async (req, res) => {
   try {
     const pool = await getPool();
-    if (!pool) return res.status(503).json({ success: false, message: 'Database unreachable' });
+    if (!pool)
+      return res
+        .status(503)
+        .json({ success: false, message: "Database unreachable" });
 
-    const cleanInv = String(req.body.invoiceNo || '').trim();
+    const cleanInv = String(req.body.invoiceNo || "").trim();
     if (!cleanInv) {
-      return res.status(400).json({ success: false, message: 'invoiceNo is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "invoiceNo is required" });
     }
 
     const tx = new sql.Transaction(pool);
@@ -1532,7 +1664,7 @@ router.post('/execute-delivery', async (req, res) => {
     try {
       // 1. Check in tblPOSSalesHeaderCur first
       const chkCur = new sql.Request(tx);
-      chkCur.input('inv', sql.VarChar(50), cleanInv);
+      chkCur.input("inv", sql.VarChar(50), cleanInv);
       const chkResCur = await chkCur.query(`
         SELECT TOP 1
           RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -1556,7 +1688,7 @@ router.post('/execute-delivery', async (req, res) => {
       } else {
         // Check in tblPOSSalesHeader (history table)
         const chkHist = new sql.Request(tx);
-        chkHist.input('inv', sql.VarChar(50), cleanInv);
+        chkHist.input("inv", sql.VarChar(50), cleanInv);
         const chkResHist = await chkHist.query(`
           SELECT TOP 1
             RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -1577,17 +1709,17 @@ router.post('/execute-delivery', async (req, res) => {
 
           // Check if already in tblPaidDeliveryOrder
           const paidReq = new sql.Request(tx);
-          paidReq.input('inv', sql.VarChar(50), cleanInv);
+          paidReq.input("inv", sql.VarChar(50), cleanInv);
           const paidCheck = await paidReq.query(`
             SELECT TOP 1 InvoiceNo FROM tblPaidDeliveryOrder WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
           `);
           if (paidCheck.recordset.length > 0) {
-            invRow.AccFlag1 = '1';
+            invRow.AccFlag1 = "1";
           }
         } else {
           // Check in RetailposHisERP.dbo.TBLPOSSALESHEADER (archived table)
           const chkHisERP = new sql.Request(tx);
-          chkHisERP.input('inv', sql.VarChar(50), cleanInv);
+          chkHisERP.input("inv", sql.VarChar(50), cleanInv);
           const chkResHisERP = await chkHisERP.query(`
             SELECT TOP 1
               RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
@@ -1607,12 +1739,12 @@ router.post('/execute-delivery', async (req, res) => {
             isCur = false;
 
             const paidReq = new sql.Request(tx);
-            paidReq.input('inv', sql.VarChar(50), cleanInv);
+            paidReq.input("inv", sql.VarChar(50), cleanInv);
             const paidCheck = await paidReq.query(`
               SELECT TOP 1 InvoiceNo FROM tblPaidDeliveryOrder WHERE RTRIM(LTRIM(InvoiceNo)) = @inv
             `);
             if (paidCheck.recordset.length > 0) {
-              invRow.AccFlag1 = '1';
+              invRow.AccFlag1 = "1";
             }
           }
         }
@@ -1622,35 +1754,38 @@ router.post('/execute-delivery', async (req, res) => {
         await tx.rollback();
         return res.status(404).json({
           success: false,
-          message: 'Invoice not found in sales records.',
+          message: "Invoice not found in sales records.",
         });
       }
 
       // Re-verify AccFlag1 to prevent duplicate delivery creation
-      if (invRow.AccFlag1 === '1') {
+      if (invRow.AccFlag1 === "1") {
         await tx.rollback();
         return res.status(400).json({
           success: false,
           alreadyDelivered: true,
-          message: 'This Sales already delivered!!',
+          message: "This Sales already delivered!!",
         });
       }
 
       // Re-verify CustomerCode is not CASH
-      if (!invRow.CustomerCode || invRow.CustomerCode.toUpperCase() === 'CASH') {
+      if (
+        !invRow.CustomerCode ||
+        invRow.CustomerCode.toUpperCase() === "CASH"
+      ) {
         await tx.rollback();
         return res.status(400).json({
           success: false,
           requireMemberScan: true,
-          message: 'Please Scan the Member',
+          message: "Please Scan the Member",
         });
       }
 
       // 2. Execute fncupdatedeleivery updates:
       if (isCur) {
         const upd = new sql.Request(tx);
-        upd.input('inv', sql.VarChar(50), cleanInv);
-        upd.input('user', sql.VarChar(50), invRow.CashierID || 'UPS');
+        upd.input("inv", sql.VarChar(50), cleanInv);
+        upd.input("user", sql.VarChar(50), invRow.CashierID || "UPS");
 
         await upd.query(`
           UPDATE tblPOSSalesHeaderCur
@@ -1667,10 +1802,10 @@ router.post('/execute-delivery', async (req, res) => {
       // 3. Insert into tblPaidDeliveryOrder if customer record exists
       try {
         const doReq = new sql.Request(tx);
-        doReq.input('loc', sql.VarChar(20), invRow.LocationCode || 'HQ');
-        doReq.input('cust', sql.VarChar(50), invRow.CustomerCode);
-        doReq.input('inv', sql.VarChar(50), cleanInv);
-        doReq.input('user', sql.VarChar(50), invRow.CashierID || 'UPS');
+        doReq.input("loc", sql.VarChar(20), invRow.LocationCode || "HQ");
+        doReq.input("cust", sql.VarChar(50), invRow.CustomerCode);
+        doReq.input("inv", sql.VarChar(50), cleanInv);
+        doReq.input("user", sql.VarChar(50), invRow.CashierID || "UPS");
 
         await doReq.query(`
           IF NOT EXISTS (SELECT 1 FROM tblPaidDeliveryOrder WHERE RTRIM(LTRIM(InvoiceNo)) = @inv)
@@ -1689,7 +1824,10 @@ router.post('/execute-delivery', async (req, res) => {
           END
         `);
       } catch (doErr) {
-        console.warn('⚠️ [OPTIONAL PAID DELIVERY ORDER RECORD]:', doErr.message);
+        console.warn(
+          "⚠️ [OPTIONAL PAID DELIVERY ORDER RECORD]:",
+          doErr.message,
+        );
       }
 
       // Commit transaction
@@ -1698,39 +1836,41 @@ router.post('/execute-delivery', async (req, res) => {
       return res.status(200).json({
         success: true,
         invoiceNo: cleanInv,
-        message: 'Delivered Created Successfully',
+        message: "Delivered Created Successfully",
       });
     } catch (txErr) {
       await tx.rollback();
       throw txErr;
     }
   } catch (err) {
-    console.error('❌ [BILL ERROR - EXECUTE DELIVERY]:', err.message);
+    console.error("❌ [BILL ERROR - EXECUTE DELIVERY]:", err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
 
 // Backward-compatible alias for single-call convert-delivery
-router.post('/convert-delivery', async (req, res) => {
+router.post("/convert-delivery", async (req, res) => {
   const { invoiceNo, memberCode } = req.body;
-  const cleanInv = String(invoiceNo || '').trim();
-  const cleanMem = String(memberCode || '').trim();
+  const cleanInv = String(invoiceNo || "").trim();
+  const cleanMem = String(memberCode || "").trim();
 
   // If memberCode is provided, update member first
   if (cleanMem) {
     try {
       const pool = await getPool();
       const upd = pool.request();
-      upd.input('inv', sql.VarChar(50), cleanInv);
-      upd.input('mem', sql.VarChar(50), cleanMem);
-      await upd.query('UPDATE tblPOSSalesHeaderCur SET CustomerCode = @mem WHERE RTRIM(LTRIM(InvoiceNo)) = @inv');
+      upd.input("inv", sql.VarChar(50), cleanInv);
+      upd.input("mem", sql.VarChar(50), cleanMem);
+      await upd.query(
+        "UPDATE tblPOSSalesHeaderCur SET CustomerCode = @mem WHERE RTRIM(LTRIM(InvoiceNo)) = @inv",
+      );
     } catch (e) {
-      console.warn('Member update failed:', e.message);
+      console.warn("Member update failed:", e.message);
     }
   }
 
   // Then delegate to execute-delivery
-  req.url = '/execute-delivery';
+  req.url = "/execute-delivery";
   return router.handle(req, res);
 });
 

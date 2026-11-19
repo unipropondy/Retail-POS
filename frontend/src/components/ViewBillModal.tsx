@@ -123,6 +123,10 @@ export default function ViewBillModal({
   const [fromDate, setFromDate] = useState<string>(todayStr);
   const [toDate, setToDate] = useState<string>(todayStr);
 
+  // Modern Touch Calendar Picker State
+  const [calendarTarget, setCalendarTarget] = useState<"FROM" | "TO" | null>(null);
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+
   // Data States
   const [transactions, setTransactions] = useState<TransactionHeaderItem[]>([]);
   const [selectedInvoiceNo, setSelectedInvoiceNo] = useState<string>("");
@@ -183,7 +187,7 @@ export default function ViewBillModal({
       setViewMode("GRID");
       setStatusMessage(null);
     }
-  }, [visible, transactionLimit, isCreditMode, isAllSales]);
+  }, [visible, transactionLimit, isCreditMode, isAllSales, useDateFilter]);
 
   // Fetch header list from /api/bills/transactions
   const fetchTransactions = async (preserveSelectedInvoice?: string) => {
@@ -690,7 +694,7 @@ export default function ViewBillModal({
 
           {/* Top Filter Toolbar (Matching frmLastTransaction.vb) */}
           <View style={styles.filterToolbar}>
-            {/* Record Limit Selector: 10, 20, 50, ALL */}
+            {/* Record Limit Selector: 10, 20, 50, ALL (Exact cboTransaction in frmLastTransaction.vb) */}
             <View style={styles.filterGroup}>
               <Text style={styles.filterLabel}>Show:</Text>
               {["10", "20", "50", "ALL"].map((val) => (
@@ -715,6 +719,89 @@ export default function ViewBillModal({
                   </Text>
                 </TouchableOpacity>
               ))}
+            </View>
+
+            {/* Date Range Filter with Touch Calendar Picker & Presets */}
+            <View style={[styles.filterGroup, { paddingHorizontal: 6, gap: 6 }]}>
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
+                onPress={() => setUseDateFilter(!useDateFilter)}
+              >
+                <MaterialCommunityIcons
+                  name={useDateFilter ? "checkbox-marked" : "checkbox-blank-outline"}
+                  size={16}
+                  color={useDateFilter ? primaryColor : "#64748b"}
+                />
+                <Text style={styles.filterLabel}>Date Filter</Text>
+              </TouchableOpacity>
+
+              {useDateFilter && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  {/* From Date Pill */}
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                      backgroundColor: "#f1f5f9",
+                      paddingHorizontal: 7,
+                      paddingVertical: 3,
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      borderColor: "#cbd5e1",
+                    }}
+                    onPress={() => {
+                      const d = new Date(fromDate);
+                      setCalendarMonth(!isNaN(d.getTime()) ? d : new Date());
+                      setCalendarTarget("FROM");
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: "#64748b", fontWeight: "700" }}>From:</Text>
+                    <Text style={{ fontSize: 11.5, color: "#0f172a", fontWeight: "700" }}>{fromDate}</Text>
+                    <MaterialCommunityIcons name="calendar-month-outline" size={14} color={primaryColor} />
+                  </TouchableOpacity>
+
+                  {/* To Date Pill */}
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                      backgroundColor: "#f1f5f9",
+                      paddingHorizontal: 7,
+                      paddingVertical: 3,
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      borderColor: "#cbd5e1",
+                    }}
+                    onPress={() => {
+                      const d = new Date(toDate);
+                      setCalendarMonth(!isNaN(d.getTime()) ? d : new Date());
+                      setCalendarTarget("TO");
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: "#64748b", fontWeight: "700" }}>To:</Text>
+                    <Text style={{ fontSize: 11.5, color: "#0f172a", fontWeight: "700" }}>{toDate}</Text>
+                    <MaterialCommunityIcons name="calendar-month-outline" size={14} color={primaryColor} />
+                  </TouchableOpacity>
+
+                  {/* Quick Preset: Today */}
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: "#e2e8f0",
+                      paddingHorizontal: 6,
+                      paddingVertical: 3,
+                      borderRadius: 4,
+                    }}
+                    onPress={() => {
+                      setFromDate(todayStr);
+                      setToDate(todayStr);
+                    }}
+                  >
+                    <Text style={{ fontSize: 10.5, fontWeight: "700", color: "#334155" }}>Today</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
             {/* Invoice Filter */}
@@ -1361,6 +1448,193 @@ export default function ViewBillModal({
           handleSelectMemberForDelivery(member.MemberCode);
         }}
       />
+
+      {/* =========================================================================
+          SUB-MODAL: Modern Touch Calendar Picker
+      ========================================================================= */}
+      <Modal
+        visible={calendarTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCalendarTarget(null)}
+      >
+        <TouchableOpacity
+          style={styles.calendarModalOverlay}
+          activeOpacity={1}
+          onPress={() => setCalendarTarget(null)}
+        >
+          <TouchableOpacity
+            style={styles.calendarCard}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {/* Calendar Header with Month/Year Navigation */}
+            <View style={[styles.calendarHeader, { backgroundColor: primaryColor }]}>
+              <TouchableOpacity
+                style={styles.calendarNavBtn}
+                onPress={() => {
+                  const prev = new Date(calendarMonth);
+                  prev.setMonth(prev.getMonth() - 1);
+                  setCalendarMonth(prev);
+                }}
+              >
+                <MaterialCommunityIcons name="chevron-left" size={24} color="#ffffff" />
+              </TouchableOpacity>
+
+              <Text style={styles.calendarMonthText}>
+                {calendarMonth.toLocaleString("default", { month: "long" })}{" "}
+                {calendarMonth.getFullYear()}
+              </Text>
+
+              <TouchableOpacity
+                style={styles.calendarNavBtn}
+                onPress={() => {
+                  const next = new Date(calendarMonth);
+                  next.setMonth(next.getMonth() + 1);
+                  setCalendarMonth(next);
+                }}
+              >
+                <MaterialCommunityIcons name="chevron-right" size={24} color="#ffffff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Quick Presets Row */}
+            <View style={styles.calendarPresetsRow}>
+              {[
+                {
+                  label: "Today",
+                  action: () => {
+                    if (calendarTarget === "FROM") setFromDate(todayStr);
+                    if (calendarTarget === "TO") setToDate(todayStr);
+                    setCalendarTarget(null);
+                  },
+                },
+                {
+                  label: "Yesterday",
+                  action: () => {
+                    const y = new Date();
+                    y.setDate(y.getDate() - 1);
+                    const yStr = y.toISOString().split("T")[0];
+                    if (calendarTarget === "FROM") setFromDate(yStr);
+                    if (calendarTarget === "TO") setToDate(yStr);
+                    setCalendarTarget(null);
+                  },
+                },
+                {
+                  label: "This Month",
+                  action: () => {
+                    const now = new Date();
+                    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+                      .toISOString()
+                      .split("T")[0];
+                    setFromDate(firstDay);
+                    setToDate(todayStr);
+                    setCalendarTarget(null);
+                  },
+                },
+              ].map((p, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={styles.calendarPresetChip}
+                  onPress={p.action}
+                >
+                  <Text style={styles.calendarPresetChipText}>{p.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Day of Week Headers */}
+            <View style={styles.calendarDayHeaderRow}>
+              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d, idx) => (
+                <Text key={idx} style={styles.calendarDayHeaderCell}>
+                  {d}
+                </Text>
+              ))}
+            </View>
+
+            {/* Days Grid */}
+            <View style={styles.calendarGrid}>
+              {(() => {
+                const year = calendarMonth.getFullYear();
+                const month = calendarMonth.getMonth();
+                const firstDayIdx = new Date(year, month, 1).getDay();
+                const totalDays = new Date(year, month + 1, 0).getDate();
+                const cells = [];
+
+                // Blank cells before first day
+                for (let i = 0; i < firstDayIdx; i++) {
+                  cells.push(
+                    <View key={`b-${i}`} style={styles.calendarDayCellEmpty} />
+                  );
+                }
+
+                // Days cells
+                for (let day = 1; day <= totalDays; day++) {
+                  const mStr = String(month + 1).padStart(2, "0");
+                  const dStr = String(day).padStart(2, "0");
+                  const dateVal = `${year}-${mStr}-${dStr}`;
+
+                  const isSelected =
+                    calendarTarget === "FROM"
+                      ? fromDate === dateVal
+                      : toDate === dateVal;
+                  const isToday = dateVal === todayStr;
+
+                  cells.push(
+                    <TouchableOpacity
+                      key={`d-${day}`}
+                      style={[
+                        styles.calendarDayCell,
+                        isSelected && {
+                          backgroundColor: primaryColor,
+                          borderRadius: 20,
+                        },
+                        isToday && !isSelected && styles.calendarDayCellToday,
+                      ]}
+                      onPress={() => {
+                        if (calendarTarget === "FROM") {
+                          setFromDate(dateVal);
+                          // Auto advance if toDate is earlier
+                          if (dateVal > toDate) {
+                            setToDate(dateVal);
+                          }
+                        } else {
+                          setToDate(dateVal);
+                          if (dateVal < fromDate) {
+                            setFromDate(dateVal);
+                          }
+                        }
+                        setCalendarTarget(null);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.calendarDayText,
+                          isSelected && styles.calendarDayTextSelected,
+                          isToday && !isSelected && { color: primaryColor, fontWeight: "800" },
+                        ]}
+                      >
+                        {day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                }
+                return cells;
+              })()}
+            </View>
+
+            {/* Bottom Close */}
+            <View style={styles.calendarFooter}>
+              <TouchableOpacity
+                style={styles.calendarCloseBtn}
+                onPress={() => setCalendarTarget(null)}
+              >
+                <Text style={styles.calendarCloseBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* =========================================================================
           SUB-MODAL: Member Master Modal (frmMember.vb cmdMember_Click)
@@ -2058,5 +2332,126 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: "#94a3b8",
+  },
+
+  // Calendar Modal Styles
+  calendarModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  calendarCard: {
+    width: 320,
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  calendarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  calendarNavBtn: {
+    padding: 4,
+    borderRadius: 6,
+  },
+  calendarMonthText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#ffffff",
+  },
+  calendarPresetsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 8,
+    backgroundColor: "#f8fafc",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+  calendarPresetChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+  },
+  calendarPresetChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  calendarDayHeaderRow: {
+    flexDirection: "row",
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  calendarDayHeaderCell: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#94a3b8",
+  },
+  calendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+  },
+  calendarDayCellEmpty: {
+    width: `${100 / 7}%`,
+    height: 36,
+  },
+  calendarDayCell: {
+    width: `${100 / 7}%`,
+    height: 36,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  calendarDayCellToday: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 18,
+  },
+  calendarDayText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#1e293b",
+  },
+  calendarDayTextSelected: {
+    color: "#ffffff",
+    fontWeight: "800",
+  },
+  calendarFooter: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#f1f5f9",
+    backgroundColor: "#fafafa",
+  },
+  calendarCloseBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: "#f1f5f9",
+  },
+  calendarCloseBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748b",
   },
 });
