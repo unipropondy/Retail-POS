@@ -126,6 +126,11 @@ export default function ViewBillModal({
   // Modern Touch Calendar Picker State
   const [calendarTarget, setCalendarTarget] = useState<"FROM" | "TO" | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+  const [calendarViewMode, setCalendarViewMode] = useState<"DAYS" | "MONTHS" | "YEARS">("DAYS");
+  const [calendarYearRangeStart, setCalendarYearRangeStart] = useState<number>(() => {
+    const currentYear = new Date().getFullYear();
+    return Math.floor(currentYear / 12) * 12;
+  });
 
   // Data States
   const [transactions, setTransactions] = useState<TransactionHeaderItem[]>([]);
@@ -752,7 +757,10 @@ export default function ViewBillModal({
                     }}
                     onPress={() => {
                       const d = new Date(fromDate);
-                      setCalendarMonth(!isNaN(d.getTime()) ? d : new Date());
+                      const validDate = !isNaN(d.getTime()) ? d : new Date();
+                      setCalendarMonth(validDate);
+                      setCalendarViewMode("DAYS");
+                      setCalendarYearRangeStart(Math.floor(validDate.getFullYear() / 12) * 12);
                       setCalendarTarget("FROM");
                     }}
                   >
@@ -776,7 +784,10 @@ export default function ViewBillModal({
                     }}
                     onPress={() => {
                       const d = new Date(toDate);
-                      setCalendarMonth(!isNaN(d.getTime()) ? d : new Date());
+                      const validDate = !isNaN(d.getTime()) ? d : new Date();
+                      setCalendarMonth(validDate);
+                      setCalendarViewMode("DAYS");
+                      setCalendarYearRangeStart(Math.floor(validDate.getFullYear() / 12) * 12);
                       setCalendarTarget("TO");
                     }}
                   >
@@ -1468,160 +1479,329 @@ export default function ViewBillModal({
             activeOpacity={1}
             onPress={(e) => e.stopPropagation()}
           >
-            {/* Calendar Header with Month/Year Navigation */}
+            {/* Calendar Header with Mode Indicator & Year/Month Navigation */}
             <View style={[styles.calendarHeader, { backgroundColor: primaryColor }]}>
               <TouchableOpacity
                 style={styles.calendarNavBtn}
                 onPress={() => {
-                  const prev = new Date(calendarMonth);
-                  prev.setMonth(prev.getMonth() - 1);
-                  setCalendarMonth(prev);
+                  if (calendarViewMode === "YEARS") {
+                    setCalendarYearRangeStart((prev) => prev - 12);
+                  } else if (calendarViewMode === "MONTHS") {
+                    const prev = new Date(calendarMonth);
+                    prev.setFullYear(prev.getFullYear() - 1);
+                    setCalendarMonth(prev);
+                  } else {
+                    const prev = new Date(calendarMonth);
+                    prev.setMonth(prev.getMonth() - 1);
+                    setCalendarMonth(prev);
+                  }
                 }}
               >
                 <MaterialCommunityIcons name="chevron-left" size={24} color="#ffffff" />
               </TouchableOpacity>
 
-              <Text style={styles.calendarMonthText}>
-                {calendarMonth.toLocaleString("default", { month: "long" })}{" "}
-                {calendarMonth.getFullYear()}
-              </Text>
+              {/* Tappable Month & Year Header to toggle Views */}
+              <View style={styles.calendarHeaderTitles}>
+                <TouchableOpacity
+                  style={[
+                    styles.calendarHeaderBadge,
+                    calendarViewMode === "MONTHS" && styles.calendarHeaderBadgeActive,
+                  ]}
+                  onPress={() =>
+                    setCalendarViewMode(calendarViewMode === "MONTHS" ? "DAYS" : "MONTHS")
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.calendarMonthText,
+                      calendarViewMode === "MONTHS" && { color: primaryColor },
+                    ]}
+                  >
+                    {calendarMonth.toLocaleString("default", { month: "short" })}
+                  </Text>
+                  <MaterialCommunityIcons
+                    name={calendarViewMode === "MONTHS" ? "menu-up" : "menu-down"}
+                    size={16}
+                    color={calendarViewMode === "MONTHS" ? primaryColor : "#ffffff"}
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.calendarHeaderBadge,
+                    calendarViewMode === "YEARS" && styles.calendarHeaderBadgeActive,
+                  ]}
+                  onPress={() => {
+                    if (calendarViewMode === "YEARS") {
+                      setCalendarViewMode("DAYS");
+                    } else {
+                      setCalendarYearRangeStart(
+                        Math.floor(calendarMonth.getFullYear() / 12) * 12
+                      );
+                      setCalendarViewMode("YEARS");
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.calendarYearText,
+                      calendarViewMode === "YEARS" && { color: primaryColor },
+                    ]}
+                  >
+                    {calendarViewMode === "YEARS"
+                      ? `${calendarYearRangeStart} - ${calendarYearRangeStart + 11}`
+                      : `${calendarMonth.getFullYear()}`}
+                  </Text>
+                  <MaterialCommunityIcons
+                    name={calendarViewMode === "YEARS" ? "menu-up" : "menu-down"}
+                    size={16}
+                    color={calendarViewMode === "YEARS" ? primaryColor : "#ffffff"}
+                  />
+                </TouchableOpacity>
+              </View>
 
               <TouchableOpacity
                 style={styles.calendarNavBtn}
                 onPress={() => {
-                  const next = new Date(calendarMonth);
-                  next.setMonth(next.getMonth() + 1);
-                  setCalendarMonth(next);
+                  if (calendarViewMode === "YEARS") {
+                    setCalendarYearRangeStart((prev) => prev + 12);
+                  } else if (calendarViewMode === "MONTHS") {
+                    const next = new Date(calendarMonth);
+                    next.setFullYear(next.getFullYear() + 1);
+                    setCalendarMonth(next);
+                  } else {
+                    const next = new Date(calendarMonth);
+                    next.setMonth(next.getMonth() + 1);
+                    setCalendarMonth(next);
+                  }
                 }}
               >
                 <MaterialCommunityIcons name="chevron-right" size={24} color="#ffffff" />
               </TouchableOpacity>
             </View>
 
-            {/* Quick Presets Row */}
-            <View style={styles.calendarPresetsRow}>
-              {[
-                {
-                  label: "Today",
-                  action: () => {
-                    if (calendarTarget === "FROM") setFromDate(todayStr);
-                    if (calendarTarget === "TO") setToDate(todayStr);
-                    setCalendarTarget(null);
+            {/* Quick Presets Row (Only in DAYS view) */}
+            {calendarViewMode === "DAYS" && (
+              <View style={styles.calendarPresetsRow}>
+                {[
+                  {
+                    label: "Today",
+                    action: () => {
+                      if (calendarTarget === "FROM") setFromDate(todayStr);
+                      if (calendarTarget === "TO") setToDate(todayStr);
+                      setCalendarTarget(null);
+                    },
                   },
-                },
-                {
-                  label: "Yesterday",
-                  action: () => {
-                    const y = new Date();
-                    y.setDate(y.getDate() - 1);
-                    const yStr = y.toISOString().split("T")[0];
-                    if (calendarTarget === "FROM") setFromDate(yStr);
-                    if (calendarTarget === "TO") setToDate(yStr);
-                    setCalendarTarget(null);
+                  {
+                    label: "Yesterday",
+                    action: () => {
+                      const y = new Date();
+                      y.setDate(y.getDate() - 1);
+                      const yStr = y.toISOString().split("T")[0];
+                      if (calendarTarget === "FROM") setFromDate(yStr);
+                      if (calendarTarget === "TO") setToDate(yStr);
+                      setCalendarTarget(null);
+                    },
                   },
-                },
-                {
-                  label: "This Month",
-                  action: () => {
-                    const now = new Date();
-                    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-                      .toISOString()
-                      .split("T")[0];
-                    setFromDate(firstDay);
-                    setToDate(todayStr);
-                    setCalendarTarget(null);
+                  {
+                    label: "This Month",
+                    action: () => {
+                      const now = new Date();
+                      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+                        .toISOString()
+                        .split("T")[0];
+                      setFromDate(firstDay);
+                      setToDate(todayStr);
+                      setCalendarTarget(null);
+                    },
                   },
-                },
-              ].map((p, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={styles.calendarPresetChip}
-                  onPress={p.action}
-                >
-                  <Text style={styles.calendarPresetChipText}>{p.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                ].map((p, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={styles.calendarPresetChip}
+                    onPress={p.action}
+                  >
+                    <Text style={styles.calendarPresetChipText}>{p.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
-            {/* Day of Week Headers */}
-            <View style={styles.calendarDayHeaderRow}>
-              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d, idx) => (
-                <Text key={idx} style={styles.calendarDayHeaderCell}>
-                  {d}
-                </Text>
-              ))}
-            </View>
+            {/* VIEW MODE 1: YEARS GRID */}
+            {calendarViewMode === "YEARS" && (
+              <View style={styles.calendarPickerGrid}>
+                {Array.from({ length: 12 }, (_, i) => calendarYearRangeStart + i).map(
+                  (yr) => {
+                    const isSelected = calendarMonth.getFullYear() === yr;
+                    const isCurrentYear = new Date().getFullYear() === yr;
+                    return (
+                      <TouchableOpacity
+                        key={yr}
+                        style={[
+                          styles.calendarPickerGridCell,
+                          isSelected && { backgroundColor: primaryColor },
+                          isCurrentYear && !isSelected && styles.calendarPickerCellCurrent,
+                        ]}
+                        onPress={() => {
+                          const updated = new Date(calendarMonth);
+                          updated.setFullYear(yr);
+                          setCalendarMonth(updated);
+                          setCalendarViewMode("MONTHS");
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.calendarPickerGridText,
+                            isSelected && styles.calendarPickerGridTextSelected,
+                            isCurrentYear &&
+                              !isSelected && { color: primaryColor, fontWeight: "800" },
+                          ]}
+                        >
+                          {yr}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }
+                )}
+              </View>
+            )}
 
-            {/* Days Grid */}
-            <View style={styles.calendarGrid}>
-              {(() => {
-                const year = calendarMonth.getFullYear();
-                const month = calendarMonth.getMonth();
-                const firstDayIdx = new Date(year, month, 1).getDay();
-                const totalDays = new Date(year, month + 1, 0).getDate();
-                const cells = [];
-
-                // Blank cells before first day
-                for (let i = 0; i < firstDayIdx; i++) {
-                  cells.push(
-                    <View key={`b-${i}`} style={styles.calendarDayCellEmpty} />
-                  );
-                }
-
-                // Days cells
-                for (let day = 1; day <= totalDays; day++) {
-                  const mStr = String(month + 1).padStart(2, "0");
-                  const dStr = String(day).padStart(2, "0");
-                  const dateVal = `${year}-${mStr}-${dStr}`;
-
-                  const isSelected =
-                    calendarTarget === "FROM"
-                      ? fromDate === dateVal
-                      : toDate === dateVal;
-                  const isToday = dateVal === todayStr;
-
-                  cells.push(
+            {/* VIEW MODE 2: MONTHS GRID */}
+            {calendarViewMode === "MONTHS" && (
+              <View style={styles.calendarPickerGrid}>
+                {[
+                  "Jan",
+                  "Feb",
+                  "Mar",
+                  "Apr",
+                  "May",
+                  "Jun",
+                  "Jul",
+                  "Aug",
+                  "Sep",
+                  "Oct",
+                  "Nov",
+                  "Dec",
+                ].map((mName, mIdx) => {
+                  const isSelected = calendarMonth.getMonth() === mIdx;
+                  const isCurrentMonth =
+                    new Date().getMonth() === mIdx &&
+                    new Date().getFullYear() === calendarMonth.getFullYear();
+                  return (
                     <TouchableOpacity
-                      key={`d-${day}`}
+                      key={mName}
                       style={[
-                        styles.calendarDayCell,
-                        isSelected && {
-                          backgroundColor: primaryColor,
-                          borderRadius: 20,
-                        },
-                        isToday && !isSelected && styles.calendarDayCellToday,
+                        styles.calendarPickerGridCell,
+                        isSelected && { backgroundColor: primaryColor },
+                        isCurrentMonth && !isSelected && styles.calendarPickerCellCurrent,
                       ]}
                       onPress={() => {
-                        if (calendarTarget === "FROM") {
-                          setFromDate(dateVal);
-                          // Auto advance if toDate is earlier
-                          if (dateVal > toDate) {
-                            setToDate(dateVal);
-                          }
-                        } else {
-                          setToDate(dateVal);
-                          if (dateVal < fromDate) {
-                            setFromDate(dateVal);
-                          }
-                        }
-                        setCalendarTarget(null);
+                        const updated = new Date(calendarMonth);
+                        updated.setMonth(mIdx);
+                        setCalendarMonth(updated);
+                        setCalendarViewMode("DAYS");
                       }}
                     >
                       <Text
                         style={[
-                          styles.calendarDayText,
-                          isSelected && styles.calendarDayTextSelected,
-                          isToday && !isSelected && { color: primaryColor, fontWeight: "800" },
+                          styles.calendarPickerGridText,
+                          isSelected && styles.calendarPickerGridTextSelected,
+                          isCurrentMonth &&
+                            !isSelected && { color: primaryColor, fontWeight: "800" },
                         ]}
                       >
-                        {day}
+                        {mName}
                       </Text>
                     </TouchableOpacity>
                   );
-                }
-                return cells;
-              })()}
-            </View>
+                })}
+              </View>
+            )}
+
+            {/* VIEW MODE 3: DAYS VIEW */}
+            {calendarViewMode === "DAYS" && (
+              <>
+                {/* Day of Week Headers */}
+                <View style={styles.calendarDayHeaderRow}>
+                  {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d, idx) => (
+                    <Text key={idx} style={styles.calendarDayHeaderCell}>
+                      {d}
+                    </Text>
+                  ))}
+                </View>
+
+                {/* Days Grid */}
+                <View style={styles.calendarGrid}>
+                  {(() => {
+                    const year = calendarMonth.getFullYear();
+                    const month = calendarMonth.getMonth();
+                    const firstDayIdx = new Date(year, month, 1).getDay();
+                    const totalDays = new Date(year, month + 1, 0).getDate();
+                    const cells = [];
+
+                    // Blank cells before first day
+                    for (let i = 0; i < firstDayIdx; i++) {
+                      cells.push(
+                        <View key={`b-${i}`} style={styles.calendarDayCellEmpty} />
+                      );
+                    }
+
+                    // Days cells
+                    for (let day = 1; day <= totalDays; day++) {
+                      const mStr = String(month + 1).padStart(2, "0");
+                      const dStr = String(day).padStart(2, "0");
+                      const dateVal = `${year}-${mStr}-${dStr}`;
+
+                      const isSelected =
+                        calendarTarget === "FROM"
+                          ? fromDate === dateVal
+                          : toDate === dateVal;
+                      const isToday = dateVal === todayStr;
+
+                      cells.push(
+                        <TouchableOpacity
+                          key={`d-${day}`}
+                          style={[
+                            styles.calendarDayCell,
+                            isSelected && {
+                              backgroundColor: primaryColor,
+                              borderRadius: 20,
+                            },
+                            isToday && !isSelected && styles.calendarDayCellToday,
+                          ]}
+                          onPress={() => {
+                            if (calendarTarget === "FROM") {
+                              setFromDate(dateVal);
+                              if (dateVal > toDate) {
+                                setToDate(dateVal);
+                              }
+                            } else {
+                              setToDate(dateVal);
+                              if (dateVal < fromDate) {
+                                setFromDate(dateVal);
+                              }
+                            }
+                            setCalendarTarget(null);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.calendarDayText,
+                              isSelected && styles.calendarDayTextSelected,
+                              isToday &&
+                                !isSelected && { color: primaryColor, fontWeight: "800" },
+                            ]}
+                          >
+                            {day}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    }
+                    return cells;
+                  })()}
+                </View>
+              </>
+            )}
 
             {/* Bottom Close */}
             <View style={styles.calendarFooter}>
@@ -2364,10 +2544,62 @@ const styles = StyleSheet.create({
     padding: 4,
     borderRadius: 6,
   },
+  calendarHeaderTitles: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  calendarHeaderBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.18)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  calendarHeaderBadgeActive: {
+    backgroundColor: "#ffffff",
+  },
   calendarMonthText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "800",
     color: "#ffffff",
+  },
+  calendarYearText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#ffffff",
+  },
+  calendarPickerGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    padding: 12,
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  calendarPickerGridCell: {
+    width: "31%",
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  calendarPickerCellCurrent: {
+    borderColor: "#cbd5e1",
+    borderWidth: 2,
+  },
+  calendarPickerGridText: {
+    fontSize: 13.5,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
+  calendarPickerGridTextSelected: {
+    color: "#ffffff",
+    fontWeight: "800",
   },
   calendarPresetsRow: {
     flexDirection: "row",
