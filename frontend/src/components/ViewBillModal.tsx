@@ -112,7 +112,8 @@ export default function ViewBillModal({
   onAdminAuthRequest,
 }: ViewBillModalProps) {
   // Filter States (matching frmLastTransaction.vb)
-  const [transactionLimit, setTransactionLimit] = useState<string>("20");
+  const [transactionLimit, setTransactionLimit] = useState<string>("ALL");
+  const [showLimitDropdown, setShowLimitDropdown] = useState<boolean>(false);
   const [invoiceFilter, setInvoiceFilter] = useState<string>("");
   const [memberFilter, setMemberFilter] = useState<string>("");
   const [isCreditMode, setIsCreditMode] = useState<boolean>(false);
@@ -699,31 +700,57 @@ export default function ViewBillModal({
 
           {/* Top Filter Toolbar (Matching frmLastTransaction.vb) */}
           <View style={styles.filterToolbar}>
-            {/* Record Limit Selector: 10, 20, 50, ALL (Exact cboTransaction in frmLastTransaction.vb) */}
-            <View style={styles.filterGroup}>
-              <Text style={styles.filterLabel}>Show:</Text>
-              {["10", "20", "50", "ALL"].map((val) => (
-                <TouchableOpacity
-                  key={val}
-                  style={[
-                    styles.limitChip,
-                    transactionLimit === val && {
-                      backgroundColor: primaryColor,
-                      borderColor: primaryColor,
-                    },
-                  ]}
-                  onPress={() => setTransactionLimit(val)}
-                >
-                  <Text
-                    style={[
-                      styles.limitChipText,
-                      transactionLimit === val && styles.limitChipTextActive,
-                    ]}
-                  >
-                    {val}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            {/* Record Limit Dropdown: Default ALL, click to open 10, 20, 50, ALL */}
+            <View style={{ position: "relative", zIndex: 9999 }}>
+              <TouchableOpacity
+                style={styles.limitDropdownTrigger}
+                onPress={() => setShowLimitDropdown(!showLimitDropdown)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.filterLabel}>Show:</Text>
+                <View style={[styles.limitCurrentBadge, { backgroundColor: primaryColor }]}>
+                  <Text style={styles.limitCurrentBadgeText}>{transactionLimit}</Text>
+                </View>
+                <MaterialCommunityIcons
+                  name={showLimitDropdown ? "menu-up" : "menu-down"}
+                  size={18}
+                  color="#475569"
+                />
+              </TouchableOpacity>
+
+              {/* Dropdown Menu Popup */}
+              {showLimitDropdown && (
+                <View style={styles.limitDropdownMenu}>
+                  {["10", "20", "50", "ALL"].map((val) => {
+                    const isSelected = transactionLimit === val;
+                    return (
+                      <TouchableOpacity
+                        key={val}
+                        style={[
+                          styles.limitDropdownItem,
+                          isSelected && { backgroundColor: `${primaryColor}15` },
+                        ]}
+                        onPress={() => {
+                          setTransactionLimit(val);
+                          setShowLimitDropdown(false);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.limitDropdownItemText,
+                            isSelected && { color: primaryColor, fontWeight: "800" },
+                          ]}
+                        >
+                          {val === "ALL" ? "ALL (All Records)" : `Show ${val}`}
+                        </Text>
+                        {isSelected && (
+                          <MaterialCommunityIcons name="check" size={16} color={primaryColor} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
             </View>
 
             {/* Date Range Filter with Touch Calendar Picker & Presets */}
@@ -1848,7 +1875,6 @@ const styles = StyleSheet.create({
     maxHeight: 760,
     backgroundColor: "#ffffff",
     borderRadius: 10,
-    overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
@@ -1863,6 +1889,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
   },
   headerLeft: {
     flexDirection: "row",
@@ -1951,6 +1979,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
     borderBottomWidth: 1,
     borderBottomColor: "#e2e8f0",
+    zIndex: 999,
   },
   filterGroup: {
     flexDirection: "row",
@@ -1969,21 +1998,55 @@ const styles = StyleSheet.create({
     color: "#475569",
     marginRight: 4,
   },
-  limitChip: {
-    paddingHorizontal: 6,
+  limitDropdownTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    height: 34,
+  },
+  limitCurrentBadge: {
+    paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 4,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#f1f5f9",
   },
-  limitChipText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#334155",
-  },
-  limitChipTextActive: {
+  limitCurrentBadgeText: {
+    fontSize: 11.5,
+    fontWeight: "800",
     color: "#ffffff",
+  },
+  limitDropdownMenu: {
+    position: "absolute",
+    top: 38,
+    left: 0,
+    minWidth: 160,
+    backgroundColor: "#ffffff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 9999,
+    zIndex: 99999,
+    paddingVertical: 4,
+  },
+  limitDropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  limitDropdownItemText: {
+    fontSize: 12.5,
+    fontWeight: "600",
+    color: "#334155",
   },
   searchTextInput: {
     flex: 1,
