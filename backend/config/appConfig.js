@@ -188,8 +188,8 @@ const SETTING_METADATA = {
   "companyAddressFontname": { category: "Receipt Settings", type: "string", label: "Address Font Family", desc: "Font family for store address lines" },
   "companyAddressFontsize": { category: "Receipt Settings", type: "number", label: "Address Font Size", desc: "Point size for store address lines" },
   "companyAddressFontstyle": { category: "Receipt Settings", type: "number", label: "Address Font Style", desc: "0=Normal, 1=Bold" },
-  "paymode3": { category: "Printer Settings", type: "number", label: "Secondary Paymode Code", desc: "Internal code for auxiliary payment mapping" },
-  "paymode4": { category: "Printer Settings", type: "number", label: "Tertiary Paymode Code", desc: "Internal code for auxiliary payment mapping" },
+  "paymode3": { category: "Payment Settings", type: "number", label: "Paymode Button 3 Position", desc: "Maps Quick Button 3 to tblInvPaymode Position (e.g. 11 for PAYNOW, 12 for CDC, 14 for CREDIT)" },
+  "paymode4": { category: "Payment Settings", type: "number", label: "Paymode Button 4 Position", desc: "Maps Quick Button 4 to tblInvPaymode Position (e.g. 11 for PAYNOW, 12 for CDC, 15 for PAYWAY)" },
 
   // Device Settings
   "WeighingScale": { category: "Device Settings", type: "boolean", label: "Weighing Scale Integration", desc: "Read weight automatically via RS-232 serial scale" },

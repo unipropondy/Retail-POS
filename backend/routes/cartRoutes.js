@@ -1197,14 +1197,14 @@ router.post('/checkout', async (req, res) => {
         spReq.input('NetAmount', sql.Decimal(18, 2), netAmount);
         spReq.input('ActualSales', sql.Decimal(18, 2), actualSales);
         spReq.input('Gst', sql.Decimal(18, 4), gst);
-        spReq.input('SalesmanId', sql.Char(10), String(it.salesman || '').slice(0, 10));
-        spReq.input('DeptCode', sql.Char(10), String(attr.DepartmentCode || '').slice(0, 10));
-        spReq.input('CategoryCode', sql.Char(20), String(attr.CategoryCode || '').slice(0, 20));
-        spReq.input('BrandCode', sql.Char(20), String(attr.BrandCode || '').slice(0, 20));
-        spReq.input('UserID', sql.Char(10), String(cashierId || 'UPS').slice(0, 10));
-        spReq.input('LocationCode', sql.Char(10), String(locationCode || 'HQ').slice(0, 10));
+        spReq.input('SalesmanId', sql.Char(10), String(it.salesman || '').trim().slice(0, 10));
+        spReq.input('DeptCode', sql.Char(10), String(attr.DepartmentCode || '').trim().slice(0, 10));
+        spReq.input('CategoryCode', sql.Char(20), String(attr.CategoryCode || '').trim().slice(0, 10));
+        spReq.input('BrandCode', sql.Char(20), String(attr.BrandCode || '').trim().slice(0, 20));
+        spReq.input('UserID', sql.Char(10), String(cashierId || 'UPS').trim().slice(0, 10));
+        spReq.input('LocationCode', sql.Char(10), String(locationCode || 'HQ').trim().slice(0, 10));
         spReq.input('MemberDiscount', sql.Decimal(18, 2), 0);
-        spReq.input('GSTType', sql.Char(10), String(gstType || 'I').slice(0, 10));
+        spReq.input('GSTType', sql.Char(10), String(gstType || 'I').trim().slice(0, 10));
         spReq.input('PRMFlag', sql.Char(1), prmFlag);
         spReq.input('EventDesc', sql.VarChar(100), promoName);
         spReq.input('FreeItem', sql.Char(10), '');
@@ -1249,11 +1249,11 @@ router.post('/checkout', async (req, res) => {
         const payReq = new sql.Request(transaction);
         payReq.input('InvoiceNo', sql.VarChar(10), officialInvoiceNo.slice(0, 10));
         payReq.input('sDate', sql.DateTime, new Date());
-        payReq.input('PayMode', sql.VarChar(20), String(p.payMode || 'CASH').slice(0, 20));
+        payReq.input('PayMode', sql.VarChar(20), String(p.payMode || 'CASH').trim().slice(0, 10));
         payReq.input('Amount', sql.Money, Number(p.amount) || 0);
         payReq.input('Commision', sql.Money, 0);
-        payReq.input('SlipNo', sql.VarChar(10), String(p.slipNo || '').slice(0, 10));
-        payReq.input('UserID', sql.VarChar(10), String(cashierId || 'UPS').slice(0, 10));
+        payReq.input('SlipNo', sql.VarChar(10), String(p.slipNo || '').trim().slice(0, 10));
+        payReq.input('UserID', sql.VarChar(10), String(cashierId || 'UPS').trim().slice(0, 10));
 
         await payReq.execute('sp_POS_PayModeDetail');
       }

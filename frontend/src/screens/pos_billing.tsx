@@ -52,10 +52,16 @@ import { PaymodeModificationModal } from "../components/PaymodeModificationModal
 import { ExpenseModal } from "../components/ExpenseModal";
 import { DiscountModal } from "../components/DiscountModal";
 import DenominationModal from "../components/DenominationModal";
-import { PosPaymentModal, SplitPaymentLine } from "../components/PosPaymentModal";
+import {
+  PosPaymentModal,
+  SplitPaymentLine,
+} from "../components/PosPaymentModal";
 import { DayEndModal, DayEndReportData } from "../components/DayEndModal";
 import CustomerReceiptsModal from "../components/CustomerReceiptsModal";
-import { CustomerSelectModal, CustomerItem } from "../components/CustomerSelectModal";
+import {
+  CustomerSelectModal,
+  CustomerItem,
+} from "../components/CustomerSelectModal";
 import { useAppConfig } from "../config/ConfigContext";
 import { getBackendBaseUrl } from "../config/appConfig";
 import AppConfigScreen from "./AppConfigScreen";
@@ -211,12 +217,17 @@ export default function PosBillingScreen({
   const [payModes, setPayModes] = useState<PayModeItem[]>([]);
   const [selectedPayMode, setSelectedPayMode] = useState<string>("CASH");
   const [payMode3Name, setPayMode3Name] = useState<string>("CREDIT");
+  const [payMode3Active, setPayMode3Active] = useState<boolean>(true);
   const [payMode4Name, setPayMode4Name] = useState<string>("PAYWAY");
+  const [payMode4Active, setPayMode4Active] = useState<boolean>(true);
   const [showMorePayModes, setShowMorePayModes] = useState<boolean>(false);
 
   // Customer / Credit Sale state (tblInvCustomer)
-  const [currentCustomer, setCurrentCustomer] = useState<CustomerItem | null>(null);
-  const [showCustomerSelectModal, setShowCustomerSelectModal] = useState<boolean>(false);
+  const [currentCustomer, setCurrentCustomer] = useState<CustomerItem | null>(
+    null,
+  );
+  const [showCustomerSelectModal, setShowCustomerSelectModal] =
+    useState<boolean>(false);
 
   // Cart State (Initialized empty)
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -584,14 +595,18 @@ export default function PosBillingScreen({
     useState<boolean>(false);
   const [showExpenseModal, setShowExpenseModal] = useState<boolean>(false);
   const [showDiscountModal, setShowDiscountModal] = useState<boolean>(false);
-  const [showDenominationModal, setShowDenominationModal] = useState<boolean>(false);
+  const [showDenominationModal, setShowDenominationModal] =
+    useState<boolean>(false);
   const [showDayEndModal, setShowDayEndModal] = useState<boolean>(false);
-  const [showCustomerReceiptsModal, setShowCustomerReceiptsModal] = useState<boolean>(false);
-  const [dayEndReportData, setDayEndReportData] = useState<DayEndReportData | null>(null);
+  const [showCustomerReceiptsModal, setShowCustomerReceiptsModal] =
+    useState<boolean>(false);
+  const [dayEndReportData, setDayEndReportData] =
+    useState<DayEndReportData | null>(null);
   const [billDiscountAmount, setBillDiscountAmount] = useState<number>(0);
   const [billDiscountPerc, setBillDiscountPerc] = useState<number>(0);
   const [billDiscountRemarks, setBillDiscountRemarks] = useState<string>("");
-  const [billDiscountReasonCode, setBillDiscountReasonCode] = useState<string>("");
+  const [billDiscountReasonCode, setBillDiscountReasonCode] =
+    useState<string>("");
   const [showMemberManagementModal, setShowMemberManagementModal] =
     useState<boolean>(false);
   const [isExchangeMode, setIsExchangeMode] = useState<boolean>(false);
@@ -719,9 +734,11 @@ export default function PosBillingScreen({
       }
       if (data?.paymode3?.payMode) {
         setPayMode3Name(data.paymode3.payMode);
+        setPayMode3Active(data.paymode3.active !== false);
       }
       if (data?.paymode4?.payMode) {
         setPayMode4Name(data.paymode4.payMode);
+        setPayMode4Active(data.paymode4.active !== false);
       }
     } catch {
       setPayModes([]);
@@ -877,7 +894,9 @@ export default function PosBillingScreen({
   // ---------------------------------------------------------------------------
   const totalQty = cart.reduce((acc, curr) => acc + curr.qty, 0);
   const detailDiscount = cart.reduce((acc, curr) => acc + curr.disc, 0);
-  const totalDiscount = parseFloat((detailDiscount + (billDiscountAmount || 0)).toFixed(2));
+  const totalDiscount = parseFloat(
+    (detailDiscount + (billDiscountAmount || 0)).toFixed(2),
+  );
   const subTotal = cart.reduce((acc, curr) => acc + curr.qty * curr.price, 0);
   const netBeforeTax = Math.max(0, subTotal - totalDiscount);
   const taxRate = 0.0; // matching image (Tax 0.0000)
@@ -1683,11 +1702,25 @@ export default function PosBillingScreen({
   // Repeat Last Item / Duplicate Item (Exact VB.NET Ctrl + X / subRepeatItem workflow)
   const handleRepeatLastItem = () => {
     if (cart.length === 0) {
-      showAlert("Cart Empty", "No item available to repeat. Please scan an item first.", "info");
+      showAlert(
+        "Cart Empty",
+        "No item available to repeat. Please scan an item first.",
+        "info",
+      );
       return;
     }
-    // Increment the last scanned / selected line item by 1
-    handleQtyChange(1);
+    const targetIdx =
+      selectedCartIndex >= 0 && selectedCartIndex < cart.length
+        ? selectedCartIndex
+        : cart.length - 1;
+    const targetItem = cart[targetIdx];
+    if (!targetItem) return;
+
+    // In VB.NET subRepeatItem():
+    // txtQty.Text = Trim(fnGetText(dgvSales, dgvSales.CurrentRow.Index, CQty.Index))
+    // txtInventoryCode_Leave(...) -> adds targetItem.qty to existing line (doubling it)
+    const repeatQty = Number(targetItem.qty) || 1;
+    handleQtyChange(repeatQty);
   };
 
   // Delete selected item from cart - Exact VB.NET subVoidItem() workflow
@@ -2384,7 +2417,8 @@ export default function PosBillingScreen({
           setPriceCheckResult({
             InventoryCode: lookupData.item.InventoryCode,
             Description: lookupData.item.Description,
-            SellingPrice: lookupData.item.SellingPrice ?? lookupData.item.Price ?? 0,
+            SellingPrice:
+              lookupData.item.SellingPrice ?? lookupData.item.Price ?? 0,
             RetailPrice: lookupData.item.RetailPrice,
             UOM: lookupData.item.UOM,
             GroupCode: lookupData.item.DepartmentCode,
@@ -2398,7 +2432,12 @@ export default function PosBillingScreen({
           `${API_URL}/api/inventory/search-desc?q=${encodeURIComponent(q)}&limit=1`,
         );
         const searchData = await searchRes.json();
-        if (searchRes.ok && searchData.success && Array.isArray(searchData.items) && searchData.items.length > 0) {
+        if (
+          searchRes.ok &&
+          searchData.success &&
+          Array.isArray(searchData.items) &&
+          searchData.items.length > 0
+        ) {
           const first = searchData.items[0];
           setPriceCheckResult({
             InventoryCode: first.InventoryCode,
@@ -2423,7 +2462,13 @@ export default function PosBillingScreen({
     }, 280);
 
     return () => clearTimeout(timer);
-  }, [priceCheckQuery, showPriceCheckModal, items, effectiveLocation, terminalCode]);
+  }, [
+    priceCheckQuery,
+    showPriceCheckModal,
+    items,
+    effectiveLocation,
+    terminalCode,
+  ]);
 
   // ---------------------------------------------------------------------------
   // COMPLETE VB.NET POS ITEM LOOKUP & PROCESSING PIPELINE (txtInventoryCode_Leave)
@@ -2548,7 +2593,11 @@ export default function PosBillingScreen({
         try {
           const scaleRes = await fetch(`${API_URL}/api/scale/read`);
           const scaleData = await scaleRes.json();
-          if (scaleRes.ok && scaleData.success && Number(scaleData.weight) > 0) {
+          if (
+            scaleRes.ok &&
+            scaleData.success &&
+            Number(scaleData.weight) > 0
+          ) {
             scaleResolvedQty = Number(scaleData.weight);
             data.quantity = scaleResolvedQty;
             data.isWeighingScale = true; // Lock weight from hardware scale
@@ -2630,7 +2679,9 @@ export default function PosBillingScreen({
   // Strict matching against tblInventory.InventoryCode only.
   // ---------------------------------------------------------------------------
   const processDirectSkuCode = async (overrideSku?: string) => {
-    const enteredSku = (overrideSku !== undefined ? overrideSku : skuCode).trim();
+    const enteredSku = (
+      overrideSku !== undefined ? overrideSku : skuCode
+    ).trim();
     if (!enteredSku) return;
 
     if (isProcessingSkuRef.current) return;
@@ -2668,7 +2719,8 @@ export default function PosBillingScreen({
         if (!lookupRes.ok || !lookupData.success || !lookupData.item) {
           showAlert(
             "Invalid SKU Code",
-            lookupData.message || "Invalid SKU Code. Item not found in Inventory.",
+            lookupData.message ||
+              "Invalid SKU Code. Item not found in Inventory.",
             "error",
           );
           setSkuCode("");
@@ -2690,7 +2742,10 @@ export default function PosBillingScreen({
           name: itemData.Description,
           qty: Number(lookupData.quantity || fastQty) || 1,
           price: finalPrice,
-          stock: lookupData.stock !== null && lookupData.stock !== undefined ? Number(lookupData.stock) : 0,
+          stock:
+            lookupData.stock !== null && lookupData.stock !== undefined
+              ? Number(lookupData.stock)
+              : 0,
         });
 
         setPendingItemAdd({
@@ -2858,13 +2913,37 @@ export default function PosBillingScreen({
   };
 
   // ---------------------------------------------------------------------------
+  // DIRECT ONE-TOUCH TENDER (Exact VB.NET Button 1-4 / btn_cash / btnnets / subSave workflow)
+  // When cashier presses CASH, NETS, or Button 3/4:
+  // - If tender was entered on numpad (e.g. $150), tenders $150 with change returned ($25.50).
+  // - If no tender was entered, tenders exact Net Total ($124.50).
+  // - Automatically saves, kicks cash drawer, prints receipt, and resets screen.
+  // ---------------------------------------------------------------------------
+  const handleDirectTender = async (modeName: string) => {
+    if (cart.length === 0) {
+      showAlert("Cart Empty", "Please add items to cart before tendering.", "info");
+      return;
+    }
+    const tenderVal = currentTender > 0 ? currentTender : grandTotal;
+    const changeVal = tenderVal > grandTotal ? parseFloat((tenderVal - grandTotal).toFixed(2)) : 0;
+
+    await handleCompleteSaleWithSplit(
+      [{ payMode: modeName, amount: grandTotal }],
+      tenderVal,
+      changeVal,
+      isPrintOn
+    );
+  };
+
+  // ---------------------------------------------------------------------------
   // NUMPAD LOGIC (1-9, 0, 00, *, ., -, +, ↵ Enter)
   // ---------------------------------------------------------------------------
   const handleNumpadKey = (key: string) => {
     if (key === "ENTER") {
-      if (numpadValue) {
-        setTenderAmount(parseFloat(numpadValue).toFixed(2));
-        setNumpadValue("");
+      if (cart.length === 0) return;
+      if (currentTender > 0) {
+        // Direct Cash Settlement with change calculation
+        handleDirectTender(selectedPayMode || "CASH");
       } else {
         handleCheckout();
       }
@@ -2872,6 +2951,7 @@ export default function PosBillingScreen({
     }
     if (key === "CLEAR" || key === "C") {
       setNumpadValue("");
+      setTenderAmount("0.00");
       return;
     }
     if (key === "+" || key === "-") {
@@ -2893,7 +2973,9 @@ export default function PosBillingScreen({
 
       // If no invoice in state, query the most recent transaction on this terminal
       if (!invToPrint) {
-        const lastRes = await fetch(`${API_URL}/api/bills/last-transaction?terminalCode=${encodeURIComponent(activeTerm)}`);
+        const lastRes = await fetch(
+          `${API_URL}/api/bills/last-transaction?terminalCode=${encodeURIComponent(activeTerm)}`,
+        );
         const lastData = await lastRes.json();
         if (lastData.success && lastData.transaction) {
           invToPrint = lastData.transaction.invoiceNo;
@@ -2901,11 +2983,17 @@ export default function PosBillingScreen({
       }
 
       if (!invToPrint) {
-        showAlert("RePrint", "No previous transaction found on this terminal to re-print.", "warning");
+        showAlert(
+          "RePrint",
+          "No previous transaction found on this terminal to re-print.",
+          "warning",
+        );
         return;
       }
 
-      const billRes = await fetch(`${API_URL}/api/bills/${encodeURIComponent(invToPrint)}`);
+      const billRes = await fetch(
+        `${API_URL}/api/bills/${encodeURIComponent(invToPrint)}`,
+      );
       const billData = await billRes.json();
       if (billData.success && (billData.header || billData.bill)) {
         const h = billData.header || billData.bill;
@@ -2916,33 +3004,67 @@ export default function PosBillingScreen({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             billNo: h.invoiceNo || h.InvoiceNo,
-            date: h.createDate || h.CreateDate || h.invoiceDate || h.InvoiceDate,
+            date:
+              h.createDate || h.CreateDate || h.invoiceDate || h.InvoiceDate,
             createDate: h.createDate || h.CreateDate,
             cashier: h.cashierId || h.CashierID || activeCashier,
             counter: h.terminalCode || h.TerminalCode || activeTerm,
-            salesman: h.locationCode || h.LocationCode || (effectiveLocation || "").trim(),
+            salesman:
+              h.locationCode ||
+              h.LocationCode ||
+              (effectiveLocation || "").trim(),
             items: billData.items || [],
-            subTotal: h.totalValue !== undefined ? h.totalValue : (h.TotalValue || h.netTotal),
-            discount: h.totalDiscount !== undefined ? h.totalDiscount : (h.TotalDiscount || 0),
-            tax: h.gst !== undefined ? h.gst : (h.Gst || 0),
+            subTotal:
+              h.totalValue !== undefined
+                ? h.totalValue
+                : h.TotalValue || h.netTotal,
+            discount:
+              h.totalDiscount !== undefined
+                ? h.totalDiscount
+                : h.TotalDiscount || 0,
+            tax: h.gst !== undefined ? h.gst : h.Gst || 0,
             grandTotal: h.netTotal !== undefined ? h.netTotal : h.NetTotal,
-            payments: billData.payments && billData.payments.length > 0
-              ? billData.payments.map((p: any) => ({ mode: p.payMode || p.PayMode, amount: p.amount || p.Amount }))
-              : [{ mode: h.salesType || h.SalesType || "CASH", amount: h.netTotal || h.NetTotal }],
-            tendered: h.tenderAmount !== undefined ? h.tenderAmount : (h.TenderAmount || h.netTotal),
-            change: h.balance !== undefined ? h.balance : (h.Balance || 0),
+            payments:
+              billData.payments && billData.payments.length > 0
+                ? billData.payments.map((p: any) => ({
+                    mode: p.payMode || p.PayMode,
+                    amount: p.amount || p.Amount,
+                  }))
+                : [
+                    {
+                      mode: h.salesType || h.SalesType || "CASH",
+                      amount: h.netTotal || h.NetTotal,
+                    },
+                  ],
+            tendered:
+              h.tenderAmount !== undefined
+                ? h.tenderAmount
+                : h.TenderAmount || h.netTotal,
+            change: h.balance !== undefined ? h.balance : h.Balance || 0,
             isReprint: true,
             printerName: printer,
             terminalCode: activeTerm,
           }),
         });
 
-        showAlert("RePrint", `Receipt for ${invToPrint} re-printed successfully (Duplicate Copy).`, "info");
+        showAlert(
+          "RePrint",
+          `Receipt for ${invToPrint} re-printed successfully (Duplicate Copy).`,
+          "info",
+        );
       } else {
-        showAlert("RePrint", "Unable to load invoice details for re-print.", "warning");
+        showAlert(
+          "RePrint",
+          "Unable to load invoice details for re-print.",
+          "warning",
+        );
       }
     } catch (e: any) {
-      showAlert("RePrint Error", e.message || "Failed to re-print receipt.", "warning");
+      showAlert(
+        "RePrint Error",
+        e.message || "Failed to re-print receipt.",
+        "warning",
+      );
     }
   };
 
@@ -2956,7 +3078,7 @@ export default function PosBillingScreen({
     payments: SplitPaymentLine[],
     totalTendered: number,
     changeDue: number,
-    shouldPrintReceipt: boolean
+    shouldPrintReceipt: boolean,
   ) => {
     try {
       const activeTerm = (terminalCode || "").trim();
@@ -2964,7 +3086,10 @@ export default function PosBillingScreen({
       const activeLoc = (locationCode || "").trim();
       const finalNet = grandTotal;
       const finalTender = totalTendered > 0 ? totalTendered : finalNet;
-      const primaryPayMode = (payments && payments.length > 0 && payments[0].payMode) ? payments[0].payMode : selectedPayMode || "CASH";
+      const primaryPayMode =
+        payments && payments.length > 0 && payments[0].payMode
+          ? payments[0].payMode
+          : selectedPayMode || "CASH";
       const cartSnapshot = [...cart];
 
       // 1. Transactional persist to SQL Server with split paymodes
@@ -2981,7 +3106,10 @@ export default function PosBillingScreen({
           tenderAmount: finalTender,
           totalValue: subTotal,
           netTotal: finalNet,
-          detailDiscount: cartSnapshot.reduce((acc, c) => acc + (Number(c.disc) || 0), 0),
+          detailDiscount: cartSnapshot.reduce(
+            (acc, c) => acc + (Number(c.disc) || 0),
+            0,
+          ),
           billDiscount: billDiscountAmount || 0,
           billDiscPerc: billDiscountPerc || 0,
           tax: taxAmount || 0,
@@ -3024,7 +3152,7 @@ export default function PosBillingScreen({
             discount: billDiscountAmount,
             tax: taxAmount,
             grandTotal: finalNet,
-            payments: payments.map(p => ({
+            payments: payments.map((p) => ({
               mode: p.payMode,
               amount: p.amount,
             })),
@@ -3039,7 +3167,11 @@ export default function PosBillingScreen({
       }
     } catch (e: any) {
       console.warn("Checkout sync warning:", e);
-      showAlert("Checkout Error", e.message || "Failed to complete checkout.", "warning");
+      showAlert(
+        "Checkout Error",
+        e.message || "Failed to complete checkout.",
+        "warning",
+      );
     }
   };
 
@@ -3048,11 +3180,19 @@ export default function PosBillingScreen({
       const activeTerm = (terminalCode || "").trim();
       const activeUser = (cashierName || "").trim();
       const activeLoc = (locationCode || "").trim();
-      const finalTender = receiptSummary?.tender || (currentTender > 0 ? currentTender : grandTotal);
+      const finalTender =
+        receiptSummary?.tender ||
+        (currentTender > 0 ? currentTender : grandTotal);
       const finalNet = receiptSummary?.total || grandTotal;
-      const finalBal = receiptSummary?.balance !== undefined ? receiptSummary.balance : Math.max(0, parseFloat((finalTender - finalNet).toFixed(2)));
+      const finalBal =
+        receiptSummary?.balance !== undefined
+          ? receiptSummary.balance
+          : Math.max(0, parseFloat((finalTender - finalNet).toFixed(2)));
       const finalPayMode = receiptSummary?.payMode || selectedPayMode || "CASH";
-      const cartSnapshot = (receiptSummary?.items && receiptSummary.items.length > 0) ? receiptSummary.items : [...cart];
+      const cartSnapshot =
+        receiptSummary?.items && receiptSummary.items.length > 0
+          ? receiptSummary.items
+          : [...cart];
 
       // 1. Transactional persist to SQL Server (sp_POS_GetNextPosInvoiceNo -> sp_POS_SalesHeader -> sp_SalesDetail -> sp_POS_PayModeDetail)
       const res = await fetch(`${API_URL}/api/cart/checkout`, {
@@ -3067,7 +3207,10 @@ export default function PosBillingScreen({
           tenderAmount: finalTender,
           totalValue: subTotal,
           netTotal: finalNet,
-          detailDiscount: cartSnapshot.reduce((acc, c) => acc + (Number(c.disc) || 0), 0),
+          detailDiscount: cartSnapshot.reduce(
+            (acc, c) => acc + (Number(c.disc) || 0),
+            0,
+          ),
           billDiscount: billDiscountAmount || 0,
           billDiscPerc: billDiscountPerc || 0,
           tax: taxAmount || 0,
@@ -3081,7 +3224,8 @@ export default function PosBillingScreen({
       });
 
       const data = await res.json();
-      const generatedInvoiceNo = (data.success && data.invoiceNo) ? data.invoiceNo : "";
+      const generatedInvoiceNo =
+        data.success && data.invoiceNo ? data.invoiceNo : "";
       if (generatedInvoiceNo) {
         setLastFinishedInvoice(generatedInvoiceNo);
       }
@@ -3208,11 +3352,7 @@ export default function PosBillingScreen({
         );
       }
     } catch (err: any) {
-      showAlert(
-        "Cash Drawer",
-        "Cash Drawer pulse triggered.",
-        "info",
-      );
+      showAlert("Cash Drawer", "Cash Drawer pulse triggered.", "info");
     }
   };
 
@@ -3449,7 +3589,12 @@ export default function PosBillingScreen({
       // HARDWARE SCANNER GLOBAL LISTENER (USB / Bluetooth / Wedge)
       // When scanner triggers Enter or Tab, check if buffered chars arrived at high speed (< 45ms)
       // -----------------------------------------------------------------------
-      if (key === "ENTER" || code === "ENTER" || key === "TAB" || code === "TAB") {
+      if (
+        key === "ENTER" ||
+        code === "ENTER" ||
+        key === "TAB" ||
+        code === "TAB"
+      ) {
         if (scannerBuffer.length >= 3) {
           const scannedCode = scannerBuffer.trim();
           scannerBuffer = "";
@@ -3692,7 +3837,11 @@ export default function PosBillingScreen({
                 borderRadius: 4,
               }}
             >
-              <Text style={{ fontSize: 9.5, fontWeight: "800", color: "#b45309" }}>MANUAL QTY</Text>
+              <Text
+                style={{ fontSize: 9.5, fontWeight: "800", color: "#b45309" }}
+              >
+                MANUAL QTY
+              </Text>
             </View>
           )}
         </View>
@@ -3832,7 +3981,10 @@ export default function PosBillingScreen({
             ref={fastQtyInputRef}
             style={[
               styles.pillInput,
-              (isExchangeMode || isRefundMode) && { color: "#b91c1c", fontWeight: "900" },
+              (isExchangeMode || isRefundMode) && {
+                color: "#b91c1c",
+                fontWeight: "900",
+              },
             ]}
             value={fastQty}
             editable={!isScaleLockedQty}
@@ -4459,7 +4611,12 @@ export default function PosBillingScreen({
                   styles.btnPayMode,
                   selectedPayMode === "CASH" && styles.btnPayModeActive,
                 ]}
-                onPress={() => setSelectedPayMode("CASH")}
+                onPress={() => {
+                  setSelectedPayMode("CASH");
+                  if (cart.length > 0) {
+                    handleDirectTender("CASH");
+                  }
+                }}
                 activeOpacity={0.8}
               >
                 <MaterialCommunityIcons
@@ -4519,7 +4676,12 @@ export default function PosBillingScreen({
                   styles.btnPayMode,
                   selectedPayMode === "NETS" && styles.btnPayModeActive,
                 ]}
-                onPress={() => setSelectedPayMode("NETS")}
+                onPress={() => {
+                  setSelectedPayMode("NETS");
+                  if (cart.length > 0) {
+                    handleDirectTender("NETS");
+                  }
+                }}
                 activeOpacity={0.8}
               >
                 <MaterialCommunityIcons
@@ -4572,10 +4734,23 @@ export default function PosBillingScreen({
                   styles.posBtn,
                   styles.btnPayMode,
                   selectedPayMode === payMode3Name && styles.btnPayModeActive,
+                  !payMode3Active && { opacity: 0.65 },
                 ]}
                 onPress={() => {
+                  if (!payMode3Active) {
+                    showAlert(
+                      "Payment Mode Inactive",
+                      `${payMode3Name} is currently disabled in system settings. Enable it to accept ${payMode3Name} transactions.`,
+                      "warning",
+                    );
+                    return;
+                  }
                   setSelectedPayMode(payMode3Name);
-                  if (payMode3Name === "CREDIT" && (!currentCustomer || currentCustomer.CustomerCode === "CASH")) {
+                  if (
+                    payMode3Name === "CREDIT" &&
+                    (!currentCustomer ||
+                      currentCustomer.CustomerCode === "CASH")
+                  ) {
                     setShowCustomerSelectModal(true);
                   }
                 }}
@@ -4584,13 +4759,16 @@ export default function PosBillingScreen({
                 <MaterialCommunityIcons
                   name="credit-card-plus-outline"
                   size={16}
-                  color={selectedPayMode === payMode3Name ? "#ffffff" : "#38bdf8"}
+                  color={
+                    selectedPayMode === payMode3Name ? "#ffffff" : "#38bdf8"
+                  }
                   style={styles.posBtnIcon}
                 />
                 <Text
                   style={[
                     styles.posBtnTitle,
-                    selectedPayMode === payMode3Name && styles.posBtnTitleActive,
+                    selectedPayMode === payMode3Name &&
+                      styles.posBtnTitleActive,
                   ]}
                   numberOfLines={1}
                 >
@@ -4648,8 +4826,22 @@ export default function PosBillingScreen({
                   styles.posBtn,
                   styles.btnPayMode,
                   selectedPayMode === payMode4Name && styles.btnPayModeActive,
+                  !payMode4Active && { opacity: 0.65 },
                 ]}
-                onPress={() => setSelectedPayMode(payMode4Name)}
+                onPress={() => {
+                  if (!payMode4Active) {
+                    showAlert(
+                      "Payment Mode Inactive",
+                      `${payMode4Name} is currently disabled in system settings. Enable it to accept ${payMode4Name} transactions.`,
+                      "warning",
+                    );
+                    return;
+                  }
+                  setSelectedPayMode(payMode4Name);
+                  if (cart.length > 0) {
+                    handleDirectTender(payMode4Name);
+                  }
+                }}
                 activeOpacity={0.8}
               >
                 <MaterialCommunityIcons
@@ -4663,7 +4855,8 @@ export default function PosBillingScreen({
                 <Text
                   style={[
                     styles.posBtnTitle,
-                    selectedPayMode === payMode4Name && styles.posBtnTitleActive,
+                    selectedPayMode === payMode4Name &&
+                      styles.posBtnTitleActive,
                   ]}
                   numberOfLines={1}
                 >
@@ -5212,7 +5405,9 @@ export default function PosBillingScreen({
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalCard, { maxWidth: 440 }]}>
             <View style={styles.modalHeaderRow}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
                 <MaterialCommunityIcons
                   name="tag-search-outline"
                   size={22}
@@ -5263,8 +5458,12 @@ export default function PosBillingScreen({
                 </Text>
                 <Text style={styles.priceResultCode}>
                   Code: {priceCheckResult.InventoryCode}
-                  {priceCheckResult.UOM ? ` • UOM: ${priceCheckResult.UOM}` : ""}
-                  {priceCheckResult.QOH !== undefined ? ` • QOH: ${priceCheckResult.QOH}` : ""}
+                  {priceCheckResult.UOM
+                    ? ` • UOM: ${priceCheckResult.UOM}`
+                    : ""}
+                  {priceCheckResult.QOH !== undefined
+                    ? ` • QOH: ${priceCheckResult.QOH}`
+                    : ""}
                 </Text>
                 <View
                   style={{
@@ -5278,7 +5477,8 @@ export default function PosBillingScreen({
                     ${priceCheckResult.SellingPrice.toFixed(2)}
                   </Text>
                   {priceCheckResult.RetailPrice &&
-                    priceCheckResult.RetailPrice > priceCheckResult.SellingPrice && (
+                    priceCheckResult.RetailPrice >
+                      priceCheckResult.SellingPrice && (
                       <Text
                         style={{
                           fontSize: 12,
@@ -5291,13 +5491,18 @@ export default function PosBillingScreen({
                     )}
                 </View>
                 <TouchableOpacity
-                  style={[styles.modalAddBtn, { backgroundColor: currentTheme.primary }]}
+                  style={[
+                    styles.modalAddBtn,
+                    { backgroundColor: currentTheme.primary },
+                  ]}
                   onPress={() => {
                     handleAddItem({
                       InventoryCode: priceCheckResult.InventoryCode,
                       Description: priceCheckResult.Description,
                       SellingPrice: priceCheckResult.SellingPrice,
-                      RetailPrice: priceCheckResult.RetailPrice || priceCheckResult.SellingPrice,
+                      RetailPrice:
+                        priceCheckResult.RetailPrice ||
+                        priceCheckResult.SellingPrice,
                       UOM: priceCheckResult.UOM || "PCS",
                       GroupCode: priceCheckResult.GroupCode || "GENERAL",
                       SortOrder: 0,
@@ -5396,11 +5601,8 @@ export default function PosBillingScreen({
         requiredAmount={grandTotal}
         onSelectCustomer={(cust) => {
           setCurrentCustomer(cust);
-          showAlert(
-            "Customer Attached",
-            `Attached ${cust.CustomerName} (${cust.CustomerCode}) | Available Credit: $${Number(cust.availableCredit ?? cust.CreditLimit ?? 0).toFixed(2)}`,
-            "success"
-          );
+          setSelectedPayMode(payMode3Name);
+          setShowPosPaymentModal(true);
         }}
         onClose={() => setShowCustomerSelectModal(false)}
       />
@@ -5892,7 +6094,11 @@ export default function PosBillingScreen({
         locationCode={locationCode || "HQ"}
         currentUserId={cashierName || "AMITH"}
         onSettlementSaved={() => {
-          showAlert("Settlement Completed", "Settlement has been recorded successfully.", "success");
+          showAlert(
+            "Settlement Completed",
+            "Settlement has been recorded successfully.",
+            "success",
+          );
         }}
       />
 
@@ -5947,11 +6153,18 @@ export default function PosBillingScreen({
               discount: parseFloat((detailDiscount + discAmt).toFixed(2)),
               tax: taxAmount,
               roundOff,
-              netTotal: Math.max(0, subTotal - (detailDiscount + discAmt) + taxAmount),
+              netTotal: Math.max(
+                0,
+                subTotal - (detailDiscount + discAmt) + taxAmount,
+              ),
             }),
           }).catch(() => {});
 
-          showAlert("Discount Applied", `Applied $${discAmt.toFixed(2)} (${discPerc.toFixed(1)}%) discount.`, "success");
+          showAlert(
+            "Discount Applied",
+            `Applied $${discAmt.toFixed(2)} (${discPerc.toFixed(1)}%) discount.`,
+            "success",
+          );
         }}
         onCancelDiscount={() => {
           setBillDiscountAmount(0);
@@ -6255,7 +6468,11 @@ export default function PosBillingScreen({
                   onPress={() => {
                     setShowMoreMenuModal(false);
                     if (cart.length === 0) {
-                      showAlert("Notice", "Cannot apply discount on empty cart.", "warning");
+                      showAlert(
+                        "Notice",
+                        "Cannot apply discount on empty cart.",
+                        "warning",
+                      );
                       return;
                     }
                     setShowDiscountModal(true);
@@ -6285,7 +6502,11 @@ export default function PosBillingScreen({
                     styles.menuGridTile,
                     isAutoMode
                       ? styles.menuGridTileActiveBorder
-                      : { borderColor: "#f59e0b", borderWidth: 2, backgroundColor: "#fffbeb" },
+                      : {
+                          borderColor: "#f59e0b",
+                          borderWidth: 2,
+                          backgroundColor: "#fffbeb",
+                        },
                   ]}
                   onPress={() => {
                     setShowMoreMenuModal(false);
@@ -6293,8 +6514,20 @@ export default function PosBillingScreen({
                   }}
                   activeOpacity={0.8}
                 >
-                  <Text style={[styles.menuGridTileKey, !isAutoMode && { color: "#d97706" }]}>F12</Text>
-                  <Text style={[styles.menuGridTileLabel, !isAutoMode && { color: "#b45309", fontWeight: "900" }]}>
+                  <Text
+                    style={[
+                      styles.menuGridTileKey,
+                      !isAutoMode && { color: "#d97706" },
+                    ]}
+                  >
+                    F12
+                  </Text>
+                  <Text
+                    style={[
+                      styles.menuGridTileLabel,
+                      !isAutoMode && { color: "#b45309", fontWeight: "900" },
+                    ]}
+                  >
                     {isAutoMode ? "Auto" : "Manual"}
                   </Text>
                 </TouchableOpacity>
@@ -6320,7 +6553,11 @@ export default function PosBillingScreen({
 
                     // Check if current cart has items
                     if (cart.length > 0) {
-                      showAlert("Day End", "Please Clear or Complete current cart before running Day End.", "warning");
+                      showAlert(
+                        "Day End",
+                        "Please Clear or Complete current cart before running Day End.",
+                        "warning",
+                      );
                       return;
                     }
 
@@ -6328,27 +6565,42 @@ export default function PosBillingScreen({
                       try {
                         const activeCashier = (cashierName || "").trim();
                         const term = (terminalCode || "").trim();
-                        const res = await fetch(`${API_URL}/api/settlement/day-end`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            cashierId: activeCashier,
-                            terminalCode: term,
-                          }),
-                        });
+                        const res = await fetch(
+                          `${API_URL}/api/settlement/day-end`,
+                          {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              cashierId: activeCashier,
+                              terminalCode: term,
+                            }),
+                          },
+                        );
                         const data = await res.json();
                         if (res.ok && data.success) {
                           if (data.report) {
                             setDayEndReportData(data.report);
                             setShowDayEndModal(true);
                           } else {
-                            showAlert("Day End Completed", `Day End successfully closed for date: ${data.date}. Register archived.`, "success");
+                            showAlert(
+                              "Day End Completed",
+                              `Day End successfully closed for date: ${data.date}. Register archived.`,
+                              "success",
+                            );
                           }
                         } else {
-                          showAlert("Day End Notice", data.message || "Failed to complete Day End", "error");
+                          showAlert(
+                            "Day End Notice",
+                            data.message || "Failed to complete Day End",
+                            "error",
+                          );
                         }
                       } catch (e: any) {
-                        showAlert("Day End Error", e.message || "Network error while running Day End", "error");
+                        showAlert(
+                          "Day End Error",
+                          e.message || "Network error while running Day End",
+                          "error",
+                        );
                       }
                     };
 
@@ -6358,7 +6610,7 @@ export default function PosBillingScreen({
                       executeDayEnd,
                       undefined,
                       "Run Day End",
-                      "Cancel"
+                      "Cancel",
                     );
                   }}
                   activeOpacity={0.8}

@@ -18,3 +18,4 @@ const { getPool } = require('./config/db');
     process.exit(0);
   }
 })();
+

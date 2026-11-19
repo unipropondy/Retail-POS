@@ -9,7 +9,7 @@
   "WebUpdateAllowed": 1,
   "WebURL": "http://tog.com.sg/test",
   "ManualHold": 0,
-  "creditsales": 0,
+  "creditsales": 1,
   "AgentEnable": 0,
   "AbovePrice": 2000,
   "Aboveqty": 10,

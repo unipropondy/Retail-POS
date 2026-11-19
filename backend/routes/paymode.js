@@ -46,24 +46,26 @@ router.get("/", async (req, res) => {
       FROM [dbo].[tblInvPaymode]
     `;
 
-    if (activeOnly) {
-      query += ` WHERE Active = 1`;
-    }
+    // Always fetch all paymodes from tblInvPaymode to properly resolve dynamic paymode3 and paymode4 positions
+    const result = await pool.request().query(query + ` ORDER BY Position ASC, PayMode ASC`);
+    const allPaymodes = result.recordset || [];
 
-    query += ` ORDER BY Position ASC, PayMode ASC`;
-
-    const result = await pool.request().query(query);
-    const paymodes = result.recordset || [];
+    // Filter active modes for the payment modal grid strictly (Active = 1)
+    const paymodes = activeOnly 
+      ? allPaymodes.filter(p => p.Active === true)
+      : allPaymodes;
 
     // Resolve dynamic paymode3 & paymode4 from configService (defaults: 14 and 15)
     const paymode3Pos = Number(configService.get("paymode3")) || 14;
     const paymode4Pos = Number(configService.get("paymode4")) || 15;
 
-    const pm3 = paymodes.find((p) => Number(p.Position) === paymode3Pos);
-    const pm4 = paymodes.find((p) => Number(p.Position) === paymode4Pos);
+    const pm3 = allPaymodes.find((p) => Number(p.Position) === paymode3Pos);
+    const pm4 = allPaymodes.find((p) => Number(p.Position) === paymode4Pos);
 
     const paymode3Name = pm3 ? pm3.PayMode : "CREDIT";
     const paymode4Name = pm4 ? pm4.PayMode : "PAYWAY";
+    const paymode3Active = pm3 ? Boolean(pm3.Active) : false;
+    const paymode4Active = pm4 ? Boolean(pm4.Active) : false;
 
     return res.status(200).json({
       success: true,
@@ -72,10 +74,12 @@ router.get("/", async (req, res) => {
       paymode3: {
         position: paymode3Pos,
         payMode: paymode3Name,
+        active: paymode3Active,
       },
       paymode4: {
         position: paymode4Pos,
         payMode: paymode4Name,
+        active: paymode4Active,
       },
     });
   } catch (error) {
